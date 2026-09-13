@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>后厨面板 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+<!-- 纯浏览器端 OCR，所有图片处理在本地完成，不上传服务器 -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+<style>
+  .paste-box textarea{font-size:13px;min-height:120px;line-height:1.6}
+  .parse-preview{margin-top:12px;display:none}
+  .parse-preview.show{display:block}
+  .upcoming-date-group{margin-bottom:14px}
+  .upcoming-date-hd{
+    display:flex;align-items:center;gap:6px;margin-bottom:6px;
+    font-size:14px;font-weight:700;color:var(--primary);
+    padding-bottom:4px;border-bottom:1px solid var(--border);
+  }
+  .upcoming-order{
+    background:#faf5ed;border-radius:10px;padding:10px 12px;margin-bottom:6px;
+    border-left:3px solid var(--accent);display:flex;justify-content:space-between;
+    align-items:flex-start;gap:8px;flex-wrap:wrap;
+  }
+  .upcoming-order.done{border-left-color:var(--green)}
+  .upcoming-order.preparing{border-left-color:var(--blue)}
+  .upcoming-order .uo-main{flex:1;min-width:120px}
+  .upcoming-order .uo-time{font-size:15px;font-weight:700}
+  .upcoming-order .uo-addr{font-size:12px;color:var(--muted);margin-top:2px}
+  .upcoming-order .uo-pkgs{font-size:12px;margin-top:2px}
+  .upcoming-order .uo-amt{font-size:13px;font-weight:700;color:var(--primary)}
+  .sample-btn{font-size:11px;color:var(--blue);cursor:pointer;text-decoration:underline;border:none;background:none}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item active">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
+    <div>
+      <div class="title"><span class="fire">🔥</span>后厨数据面板</div>
+      <div class="sub">粘贴微信订单 → 自动解析 → 一键入库 · 库存预警 · 备餐能力</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印</button>
+      <button class="btn btn-primary btn-sm" onclick="loadDash()">🔄 刷新</button>
+    </div>
+  </div>
+
+  <!-- ======== 统一输入：订单 / 进货 ======== -->
+  <div class="card paste-box" id="pasteCard">
+    <!-- 模式切换 tab -->
+    <div style="display:flex;gap:4px;background:#f3efe8;padding:4px;border-radius:10px;margin-bottom:12px">
+      <button id="tabOrder" onclick="switchMode('order')" style="flex:1;padding:10px;border:none;background:var(--primary);color:#fff;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">📋 订单文字 / 截图</button>
+      <button id="tabStock" onclick="switchMode('stock')" style="flex:1;padding:10px;border:none;background:transparent;color:#8a7f75;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer">📦 进货单 / 照片</button>
+    </div>
+
+    <input type="file" id="imgInput" accept="image/*" style="display:none" onchange="ocrFromFile(this)">
+    <textarea id="rawText" placeholder="📋 模式：粘贴微信客户确认订单文字，或者选照片&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-accent" onclick="pasteFromClipboard()">📋 粘贴</button>
+      <button class="btn btn-accent" onclick="document.getElementById('imgInput').click()">📷 选照片</button>
+      <button class="btn btn-primary" id="btnParse" onclick="parseCurrent()">🔍 解析预览</button>
+      <button class="btn" id="btnSample" onclick="loadSample()">📝 示例</button>
+      <button class="btn" onclick="clearText()">🗑️ 清空</button>
+    </div>
+    <div id="ocrStatus" style="display:none;margin:8px 0;padding:10px;background:#fff7e6;border-radius:8px;border:1px dashed var(--accent);font-size:13px">
+      <span id="ocrProgress">🔄 正在识别图片文字...</span>
+    </div>
+    <div id="parsePreview" class="parse-preview"></div>
+  </div>
+
+  <!-- ======== KPI 大卡 ======== -->
+  <div class="kpi-row" id="kpiRow"></div>
+
+  <!-- ======== 告警条 ======== -->
+  <div id="alertBox"></div>
+
+  <!-- ======== 近期预约订单 ======== -->
+  <div class="card" id="upcomingCard" style="display:none">
+    <h3><span class="dot" style="background:var(--accent)"></span>📅 近期预约订单</h3>
+    <div id="upcomingList"></div>
+  </div>
+
+  <!-- ======== 套餐备餐容量 ======== -->
+  <div class="card">
+    <h3><span class="dot" style="background:var(--accent)"></span>🍱 还能备几份套餐</h3>
+    <div class="cap-row" id="capRow"></div>
+  </div>
+
+  <!-- ======== 食材库存 ======== -->
+  <div class="card">
+    <h3><span class="dot"></span>🥩 食材库存</h3>
+    <table class="tbl" id="ingTable">
+      <thead><tr><th style="width:34%">食材</th><th style="width:12%">需求</th><th style="width:12%">库存</th><th style="width:12%">缺口</th><th style="width:10%">阈值</th><th style="width:12%">状态</th><th>使用率</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- ======== 工具库存 ======== -->
+  <div class="card">
+    <h3><span class="dot" style="background:#666"></span>🔧 工具库存</h3>
+    <table class="tbl" id="toolTable">
+      <thead><tr><th style="width:34%">工具</th><th style="width:12%">需求</th><th style="width:12%">库存</th><th style="width:12%">缺口</th><th style="width:10%">阈值</th><th style="width:12%">状态</th><th>使用率</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ====== 统一模式切换 ======
+window.currentMode = 'order';  // 'order' 或 'stock'
+window._pendingStockItems = null;
+
+function switchMode(mode){
+  window.currentMode = mode;
+  const tabOrder = document.getElementById('tabOrder');
+  const tabStock = document.getElementById('tabStock');
+  const btnSample = document.getElementById('btnSample');
+  const ta = document.getElementById('rawText');
+
+  if(mode === 'order'){
+    tabOrder.style.background = 'var(--primary)';
+    tabOrder.style.color = '#fff';
+    tabStock.style.background = 'transparent';
+    tabStock.style.color = '#8a7f75';
+    ta.placeholder = '📋 粘贴微信客户确认订单文字，或者选照片\n\n预约时间:9.15 12.00\n预约项目:\n3-4人餐 （搭建）\n预约地址:青龙湖\n联系人:刘和牛\n金额:458元';
+    btnSample.textContent = '📝 订单示例';
+  } else {
+    tabStock.style.background = 'var(--accent)';
+    tabStock.style.color = '#fff';
+    tabOrder.style.background = 'transparent';
+    tabOrder.style.color = '#8a7f75';
+    ta.placeholder = '📦 粘贴供应商销售单文字，或者选照片\n\n淏甄食食品销售单\n客户: 四川成都外卖烤肉 单据日期: 2026-09-11\n\n| 商品名称 | 规格型号 | 单位 | 数量 | 单价 | 金额 |\n| 川香经典蘸料（常温） | 1kg*10袋 | 件 | 1 | 280.00 | 280.00 |';
+    btnSample.textContent = '📝 进货示例';
+  }
+  // 切 tab 后自动清预览 + 隐藏 OCR 状态
+  document.getElementById('parsePreview').classList.remove('show');
+  document.getElementById('ocrStatus').style.display = 'none';
+}
+
+function loadSample(){
+  const ta = document.getElementById('rawText');
+  if(window.currentMode === 'order'){
+    ta.value =
+`预约时间:9.15 12.00
+预约项目:
+3-4人餐 （搭建）
+预约地址:青龙湖
+联系人:刘和牛
+联系电话:15108302848
+金额:458元（餐到后付全款）
+押金:200元
+用餐时间:12.00
+收餐时间:22点后
+备注:多拿1张桌子，餐食12点左右送到。`;
+  } else {
+    ta.value =
+`淏甄食食品销售单
+客户: 四川成都外卖烤肉 单据日期: 2026-09-11 单据编号: XSD20260911811239
+联系人: 孙梦 客户电话: 18140190520
+
+| 序号 | 商品名称 | 规格型号 | 单位 | 数量 | 单价 | 金额 |
+| 1 | 七彩山野蘸料（常温） | 1kg*10袋 | 件 | 1 | 280.00 | 280.00 |
+| 2 | 川香经典蘸料（常温） | 1kg*10袋 | 件 | 1 | 280.00 | 280.00 |
+
+合计 大写金额：伍佰陆拾元整 2 ¥560.00
+制单人: 莫雨 应收金额: 560.00`;
+  }
+}
+
+function clearText(){
+  document.getElementById('rawText').value = '';
+  document.getElementById('parsePreview').classList.remove('show');
+  document.getElementById('parsePreview').innerHTML = '';
+  document.getElementById('ocrStatus').style.display = 'none';
+}
+
+// 点按钮后聚焦 textarea，闪烁边框提示，用户长按会弹系统粘贴菜单
+async function pasteFromClipboard(){
+  const ta = document.getElementById('rawText');
+  // 先尝试现代 Clipboard API（安全且自动）
+  try{
+    if(navigator.clipboard && window.isSecureContext){
+      const text = await navigator.clipboard.readText();
+      if(text){
+        ta.value = text;
+        ta.scrollTop = 0;
+        parseCurrent();
+        return;
+      }
+    }
+  }catch(e){}
+
+  // 退化成：聚焦 + 闪烁 + 提示用户长按粘贴
+  ta.focus();
+  ta.select();
+  // 闪烁边框 3 次
+  let n = 0;
+  const orig = ta.style.border;
+  const flash = setInterval(()=>{
+    ta.style.border = (ta.style.border === '3px solid var(--accent)') ? orig : '3px solid var(--accent)';
+    n++;
+    if(n >= 6){ clearInterval(flash); ta.style.border = orig; }
+  }, 150);
+  // 短暂提示（3 秒后自动消失）
+  let tip = document.getElementById('pasteTip');
+  if(!tip){
+    tip = document.createElement('div');
+    tip.id = 'pasteTip';
+    tip.style.cssText = 'margin-top:6px;padding:8px 12px;background:#fff7e6;border:1px solid #ffd591;border-radius:8px;font-size:13px;color:#d46b08;display:flex;align-items:center;gap:6px';
+    ta.parentNode.insertBefore(tip, ta.nextSibling);
+  }
+  tip.innerHTML = '👆 已聚焦到文本框，<b>长按上面的输入框</b> → 弹出粘贴选项';
+  clearTimeout(window._pasteTipTimer);
+  window._pasteTipTimer = setTimeout(()=>{ tip.style.display='none'; }, 3000);
+  tip.style.display = '';
+}
+
+// ====== OCR：从图片文件识别文字（统一） ======
+async function ocrFromFile(inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  const statusBox = document.getElementById('ocrStatus');
+  const progress = document.getElementById('ocrProgress');
+  statusBox.style.display = '';
+  progress.textContent = '🔄 加载 OCR 引擎中（首次需要下载中文语言包，几 MB）...';
+
+  try{
+    const result = await Tesseract.recognize(file, 'chi_sim+eng', {
+      logger: m => {
+        if(m.status === 'loading tesseract core') progress.textContent = '🔄 加载引擎核心...';
+        else if(m.status === 'initializing tesseract') progress.textContent = '🔄 初始化中...';
+        else if(m.status === 'loading language traineddata') progress.textContent = '🔄 下载中文语言包 ' + Math.round(m.progress*100) + '%';
+        else if(m.status === 'initializing api') progress.textContent = '🔄 准备识别...';
+        else if(m.status === 'recognizing text') progress.textContent = '🔍 识别中 ' + Math.round(m.progress*100) + '%';
+      }
+    });
+    const text = (result.data.text || '').trim();
+    if(!text){
+      progress.innerHTML = '<span style="color:var(--red)">❌ 没识别到文字，请换张清晰的照片</span>';
+      return;
+    }
+    document.getElementById('rawText').value = text;
+    progress.innerHTML = `<span style="color:var(--green)">✅ 识别成功，${text.length} 个字符</span> （可手动修改后继续）`;
+    setTimeout(parseCurrent, 600);
+  } catch(e){
+    progress.innerHTML = '<span style="color:var(--red)">❌ 识别失败：' + (e.message||'未知错误') + '</span><div class="muted" style="font-size:11px;margin-top:4px">可能原因：图片太模糊、光线太暗、或者网络问题（首次需下载语言包）</div>';
+  } finally {
+    inputEl.value = '';
+  }
+}
+
+// ====== 统一解析：根据当前模式走不同后端 ======
+function parseCurrent(){
+  if(window.currentMode === 'order') parseOrder();
+  else parseStock();
+}
+
+// --- 订单解析 ---
+function parseOrder(){
+  const raw = document.getElementById('rawText').value.trim();
+  if(!raw) return;
+  fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok){ alert(d.msg||'解析失败'); return; }
+      const data = d.data;
+      const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
+      const extraT = Object.entries(data.extra_tools||{});
+      const extraChips = extraT.map(([k,v])=>`<span class="chip warn">${k} +${v}</span>`).join('');
+      const ings = (data.preview_ingredients||[]).slice(0,8).map(i=>{
+        const sc = i.shortage>0?'txt-red':'';
+        return `<tr><td>${i.name}</td><td>${i.need}${i.unit||''}</td><td>${i.stock}${i.unit||''}</td><td class="${sc}">${i.shortage>0?i.shortage:'-'}</td></tr>`;
+      }).join('');
+      const tools = (data.preview_tools||[]).slice(0,8).map(t=>{
+        const sc = t.shortage>0?'txt-red':'';
+        return `<tr><td>${t.name}</td><td>${t.need}</td><td>${t.stock}</td><td class="${sc}">${t.shortage>0?t.shortage:'-'}</td></tr>`;
+      }).join('');
+
+      document.getElementById('parsePreview').classList.add('show');
+      document.getElementById('parsePreview').innerHTML = `
+        <div class="order-preview">
+          <h4>✅ 订单解析结果</h4>
+          <div class="preview-grid">
+            <div class="cell"><div class="k">📅 预约日期</div><div class="v">${data.booking_date||'未识别'}</div></div>
+            <div class="cell"><div class="k">⏰ 预约时间</div><div class="v">${data.booking_time||'未识别'}</div></div>
+            <div class="cell"><div class="k">📍 地址</div><div class="v">${data.address||'未识别'}</div></div>
+            <div class="cell"><div class="k">👤 联系人</div><div class="v">${data.contact_name||'未识别'}</div></div>
+            <div class="cell"><div class="k">📞 电话</div><div class="v">${data.contact_phone||'未识别'}</div></div>
+            <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${data.amount||0} / ¥${data.deposit||0}</div></div>
+          </div>
+          <div class="chips">${pkgs}${extraChips||'<span class="muted" style="font-size:12px">无额外工具</span>'}</div>
+          ${data.note?`<div class="note-box"><b>📝 备注：</b>${data.note}</div>`:''}
+          ${ings?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🥩 食材需求预览</h4>
+          <table class="tbl"><thead><tr><th>食材</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${ings}</tbody></table>`:''}
+          ${tools?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具需求预览</h4>
+          <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${tools}</tbody></table>`:''}
+          <div class="btn-row">
+            <button class="btn btn-success" onclick="confirmOrder()">✅ 确认入库</button>
+            <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
+          </div>
+        </div>`;
+    });
+}
+function confirmOrder(){
+  const raw = document.getElementById('rawText').value.trim();
+  if(!raw) return;
+  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){
+        clearText();
+        loadDash();
+        alert('✅ 订单 #'+d.order_id+' 已入库');
+      } else {
+        alert('入库失败：'+(d.msg||'未知错误'));
+      }
+    });
+}
+
+// --- 进货单解析 ---
+function parseStock(){
+  const raw = document.getElementById('rawText').value.trim();
+  if(!raw) return;
+  fetch('/api/stock/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok){ alert(d.msg||'解析失败'); return; }
+      const items = d.items;
+      const ok_items = items.filter(x=>x.ok);
+      const bad_items = items.filter(x=>!x.ok);
+      let html = `<div class="order-preview"><h4>📦 进货单解析 · 匹配 ${d.matched}/${d.count} 项</h4>`;
+      if(ok_items.length){
+        html += `<table class="tbl" style="margin:8px 0"><thead><tr>
+          <th>商品</th><th>规格</th><th>数</th><th>→ 数据库</th><th>入库量</th><th>入后库存</th></tr></thead><tbody>`;
+        for(const it of ok_items){
+          const mult = it.unit_mult !== 1 ? ` ×${it.unit_mult}` : '';
+          html += `<tr>
+            <td><b>${it.raw_name}</b></td>
+            <td class="muted" style="font-size:11px">${it.spec||'-'}</td>
+            <td>${it.qty_input}</td>
+            <td>${it.matched_name}</td>
+            <td><b class="txt-red">+${it.final_qty}${it.matched_unit}</b>${mult}</td>
+            <td>${it.current_stock} → <b>${it.after_stock}</b></td>
+          </tr>`;
+        }
+        html += `</tbody></table>`;
+      }
+      if(bad_items.length){
+        html += `<div style="margin-top:10px;padding:10px;background:var(--red-bg);border-radius:8px">
+          <b style="color:var(--red)">⚠️ ${bad_items.length} 项未匹配到数据库</b>
+          <div style="font-size:12px;margin-top:4px">去 <a href="/config">配置页</a> 把食材加上：
+          ${bad_items.map(x=>`<div style="margin-top:4px"><b>${x.raw_name}</b> × ${x.qty_input}</div>`).join('')}</div></div>`;
+      }
+      if(ok_items.length){
+        html += `<div class="btn-row">
+          <button class="btn btn-success" onclick="confirmStock()">✅ 确认入库 ${ok_items.length} 项</button>
+          <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
+        </div>`;
+      } else {
+        html += `<div class="muted" style="margin-top:10px">没有可入库项。</div>`;
+      }
+      html += `</div>`;
+      document.getElementById('parsePreview').innerHTML = html;
+      document.getElementById('parsePreview').classList.add('show');
+      window._pendingStockItems = ok_items.map(x=>({item_type:'ingredient', item_id:x.matched_id, qty:x.final_qty}));
+    });
+}
+function confirmStock(){
+  const items = window._pendingStockItems;
+  if(!items || !items.length) return;
+  fetch('/api/stock/inbound',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items, reason:'进货入库'})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){
+        clearText();
+        loadDash();
+        alert('✅ 成功入库 '+d.done+' 项');
+      } else {
+        alert('入库失败：'+(d.msg||'未知错误'));
+      }
+    });
+}
+
+
+function statusTag(x){
+  if(x.shortage>0) return `<span class="tag tag-red">⛔ 缺货</span>`;
+  if(x.warning) return `<span class="tag tag-orange">⚠️ 低库存</span>`;
+  return `<span class="tag tag-green">✅ 充足</span>`;
+}
+function progressBar(pct){
+  let cls = 'ok';
+  if(pct>=90) cls='warn'; else if(pct>=60) cls='low';
+  return `<div class="progress"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div>`;
+}
+function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
+
+function loadDash(){
+  fetch('/api/dashboard').then(r=>r.json()).then(d=>{
+    if(!d.ok) return;
+    const data = d.data;
+
+    // ---- KPI ----
+    const t = data.today;
+    const a = data.alerts;
+    const has_shortage = a.shortage_ing + a.shortage_tool;
+    const has_low = a.low_ing + a.low_tool;
+    const upcoming_n = (data.upcoming_orders||[]).length;
+    document.getElementById('kpiRow').innerHTML = [
+      {cls:'kpi-dark',    icon:'📅', num:t.count,     lbl:'今日订单'},
+      {cls:'kpi-primary', icon:'💰', num:'¥'+t.revenue, lbl:'今日营收'},
+      {cls:'kpi-orange',  icon:'📋', num:upcoming_n,  lbl:'待备预约'},
+      {cls:has_shortage?'kpi-red':(has_low?'kpi-orange':'kpi-green'),
+       icon:has_shortage?'🚨':(has_low?'⚠️':'✅'),
+       num:has_shortage?has_shortage:(has_low?has_low:'✓'),
+       lbl:has_shortage?'缺货项':(has_low?'低库存':'库存健康')},
+    ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div>
+      <div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
+
+    // ---- 告警条 ----
+    let alerts = [];
+    if(a.shortage_ing || a.shortage_tool){
+      const names = [...(a.shortage_ing_names||[]), ...(a.shortage_tool_names||[])].slice(0,5).join('、');
+      alerts.push({cls:'red', body:`🚨 <b>库存告急</b>：${a.shortage_ing} 种食材 + ${a.shortage_tool} 种工具缺货（${names||'详见表格'}），请立即补货！`});
+    } else if(a.low_ing || a.low_tool){
+      alerts.push({cls:'orange', body:`⚠️ <b>低库存预警</b>：${a.low_ing} 种食材 + ${a.low_tool} 种工具已到阈值，建议补货。`});
+    }
+    if(!alerts.length){
+      alerts.push({cls:'green', body:`✅ 当前 <b>${t.pending}</b> 单待备、<b>${t.preparing}</b> 单备餐中，所有食材工具充足。`});
+    }
+    document.getElementById('alertBox').innerHTML = alerts.map(a=>
+      `<div class="alert-bar ${a.cls}"><div class="alert-body">${a.body}</div></div>`
+    ).join('');
+
+    // ---- 近期预约 ----
+    const upcoming = data.upcoming_orders||[];
+    if(upcoming.length){
+      document.getElementById('upcomingCard').style.display='';
+      // 按日期分组
+      const groups = {};
+      upcoming.forEach(o=>{
+        const d = o.booking_date||'未定';
+        (groups[d]=groups[d]||[]).push(o);
+      });
+      let html='';
+      for(const [date, orders] of Object.entries(groups)){
+        html += `<div class="upcoming-date-group">
+          <div class="upcoming-date-hd">📌 ${date} · ${orders.length} 单</div>`;
+        for(const o of orders){
+          const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+          const stTag = o.status==='preparing'?'<span class="tag tag-blue tag-sm">备餐中</span>':'<span class="tag tag-orange tag-sm">待备</span>';
+          html += `<div class="upcoming-order ${o.status}">
+            <div class="uo-main">
+              <div class="uo-time">⏰ ${o.booking_time||'时间待定'} ${stTag}</div>
+              <div class="uo-addr">📍 ${o.address||'地址待定'} · 👤 ${o.contact_name||''} ${o.contact_phone||''}</div>
+              ${pkgs?`<div class="uo-pkgs">🍱 ${pkgs}</div>`:''}
+              ${o.note?`<div class="uo-pkgs muted">📝 ${o.note}</div>`:''}
+            </div>
+            <div class="uo-amt">¥${o.amount||0}</div>
+          </div>`;
+        }
+        html += `</div>`;
+      }
+      document.getElementById('upcomingList').innerHTML = html;
+    } else {
+      document.getElementById('upcomingCard').style.display='none';
+    }
+
+    // ---- 套餐容量 ----
+    const cap = data.package_capacity;
+    document.getElementById('capRow').innerHTML = cap.map(p=>{
+      const c = p.available_packages;
+      const cls = c===0?'zero':(c<=2?'low':'ok');
+      return `<div class="cap-chip ${cls}">
+        <div class="cap-name">${p.name}</div>
+        <div class="cap-num">${c}</div>
+        <div class="cap-unit">份可备</div>
+      </div>`;
+    }).join('');
+
+    // ---- 食材表 ----
+    const ings = data.ingredients.filter(x=>x.need>0||x.warning||x.shortage>0);
+    document.querySelector('#ingTable tbody').innerHTML = ings.map(x=>{
+      const cls = x.shortage>0?'row-warn':(x.warning?'row-low':'');
+      return `<tr class="${cls}">
+        <td><b>${x.name}</b><span class="muted"> · ${x.unit}</span></td>
+        <td>${round(x.need)}${x.unit}</td>
+        <td>${round(x.stock)}${x.unit}</td>
+        <td class="${x.shortage>0?'txt-red':''}">${x.shortage>0?round(x.shortage)+x.unit:'-'}</td>
+        <td>${x.threshold}${x.unit}</td>
+        <td>${statusTag(x)}</td>
+        <td style="width:140px">${progressBar(x.pct)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="7" style="text-align:center;padding:24px;color:#aaa">✨ 当前无待备订单，食材全部充足</td></tr>`;
+
+    // ---- 工具表 ----
+    const tools = data.tools.filter(x=>x.need>0||x.warning||x.shortage>0);
+    document.querySelector('#toolTable tbody').innerHTML = tools.map(x=>{
+      const cls = x.shortage>0?'row-warn':(x.warning?'row-low':'');
+      return `<tr class="${cls}">
+        <td><b>${x.name}</b></td>
+        <td>${x.need}</td>
+        <td>${x.stock}</td>
+        <td class="${x.shortage>0?'txt-red':''}">${x.shortage>0?x.shortage:'-'}</td>
+        <td>${x.threshold}</td>
+        <td>${statusTag(x)}</td>
+        <td style="width:140px">${progressBar(x.pct)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="7" style="text-align:center;padding:24px;color:#aaa">🔧 当前无待备订单，工具全部充足</td></tr>`;
+  });
+}
+loadDash();
+setInterval(loadDash, 30000);
+</script>
+</body>
+</html>

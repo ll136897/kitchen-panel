@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+kitchen.db
+node_modules/
+.env
+.env.*
+*.log
+.venv/
+venv/
+.gitignore.bak
+.trae-html-share-packages/
+tunnel.py
+tunnel.js
+package-lock.json
+package.json

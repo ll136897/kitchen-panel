@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>配置 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+<div class="container">
+  <h1 class="title">⚙️ 配置</h1>
+
+  <div class="card">
+    <h3>💰 65%毛利定价计算</h3>
+    <div class="inline-form">
+      <input id="cost" type="number" placeholder="食材成本" step="0.01">
+      <button class="btn btn-primary" onclick="calcPrice()">算售价</button>
+    </div>
+    <div id="priceResult" class="price-result"></div>
+  </div>
+
+  <div class="card">
+    <h3>🚚 全局设置</h3>
+    <div class="inline-form">
+      <label>配送费 ¥</label>
+      <input id="deliveryFee" type="number" step="1" style="width:90px">
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+      <span class="muted" id="deliveryHint"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🥩 食材库存调整</h3>
+    <table class="tbl" id="ingTable">
+      <thead><tr><th>食材</th><th>单位</th><th>库存</th><th>阈值</th><th>调整</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="btn-row"><button class="btn btn-sm" onclick="toggleAdd('ing')">+ 添加食材</button></div>
+    <div id="addIng" style="display:none" class="inline-form">
+      <input id="ingName" placeholder="名称">
+      <input id="ingUnit" placeholder="单位" size="6">
+      <input id="ingStock" type="number" placeholder="库存" size="6">
+      <input id="ingThr" type="number" placeholder="阈值" size="6">
+      <input id="ingCost" type="number" placeholder="成本" size="6" step="0.01">
+      <button class="btn btn-sm btn-success" onclick="addIng()">添加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🔧 工具库存调整</h3>
+    <table class="tbl" id="toolTable">
+      <thead><tr><th>工具</th><th>库存</th><th>阈值</th><th>调整</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="btn-row"><button class="btn btn-sm" onclick="toggleAdd('tool')">+ 添加工具</button></div>
+    <div id="addTool" style="display:none" class="inline-form">
+      <input id="toolName" placeholder="名称">
+      <input id="toolStock" type="number" placeholder="库存" size="6">
+      <input id="toolThr" type="number" placeholder="阈值" size="6">
+      <button class="btn btn-sm btn-success" onclick="addTool()">添加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🍱 套餐配置</h3>
+    <div id="pkgList"></div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+<script>
+function calcPrice(){
+  const cost = parseFloat(document.getElementById('cost').value||0);
+  fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cost:cost,margin:0.65})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) document.getElementById('priceResult').innerHTML = `成本 ¥${d.cost} → 售价 <b class="price-big">¥${d.price}</b> <span class="muted">(精确 ${d.raw_price})</span>`;
+    });
+}
+
+function loadIngs(){
+  fetch('/api/ingredients').then(r=>r.json()).then(d=>{
+    const html=(d.data||[]).map(x=>`<tr><td>${x.name}</td><td>${x.unit}</td><td>${x.stock}</td><td>${x.threshold}</td>
+      <td><input type="number" id="adj-ing-${x.id}" size="4" placeholder="±">
+      <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id})">补/损</button></td></tr>`).join('');
+    document.querySelector('#ingTable tbody').innerHTML=html;
+  });
+}
+function loadTools(){
+  fetch('/api/tools').then(r=>r.json()).then(d=>{
+    const html=(d.data||[]).map(x=>`<tr><td>${x.name}</td><td>${x.stock}</td><td>${x.threshold}</td>
+      <td><input type="number" id="adj-tool-${x.id}" size="4" placeholder="±">
+      <button class="btn btn-sm" onclick="adjustStock('tool',${x.id})">补/损</button></td></tr>`).join('');
+    document.querySelector('#toolTable tbody').innerHTML=html;
+  });
+}
+function loadPkgs(){
+  fetch('/api/packages').then(r=>r.json()).then(d=>{
+    const html=(d.data||[]).map(p=>{
+      const ings=(p.ingredients||[]).map(i=>`${i.ing_name}×${i.per_package}`).join(', ')||'<span class="muted">无</span>';
+      const tools=(p.tools||[]).map(t=>`${t.tool_name}×${t.per_package}`).join(', ')||'<span class="muted">无</span>';
+      // 优先用 base_price 展示，兼容老数据
+      const base = p.base_price != null ? p.base_price : p.price;
+      const delivery = p.price - base;
+      return `<div class="pkg-item"><div class="pkg-head"><b>${p.name}</b> ${p.min_people}-${p.max_people}人
+        <span class="price-big">¥${p.price}</span>
+        <span class="muted">(菜品¥${base}${delivery?` + 配送¥${delivery}`:''})</span>
+        <span class="tag tag-blue">${p.service_type}</span> ${p.is_team?'<span class="tag tag-orange">团队</span>':''}</div>
+      <div class="pkg-body"><div>🥩 ${ings}</div><div>🔧 ${tools}</div></div></div>`;
+    }).join('')||'<span class="muted">无套餐</span>';
+    document.getElementById('pkgList').innerHTML=html;
+  });
+}
+function loadSettings(){
+  fetch('/api/settings').then(r=>r.json()).then(d=>{
+    const v = d.settings && d.settings.delivery_fee ? d.settings.delivery_fee.value : '100';
+    document.getElementById('deliveryFee').value = v;
+    // 顺便在 hint 里展示所有套餐拆分
+    const rows = (d.packages||[]).map(p=>`${p.name} ¥${p.price}=${p.base_price}+配送¥${p.delivery}`).join('， ');
+    document.getElementById('deliveryHint').textContent = rows;
+  });
+}
+function saveSettings(){
+  const v = document.getElementById('deliveryFee').value;
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delivery_fee:v})})
+    .then(r=>r.json()).then(()=>{loadSettings();loadPkgs();});
+}
+function adjustStock(type,id){
+  const v=parseFloat(document.getElementById(`adj-${type}-${id}`).value||0);
+  if(!v){alert('输入数字');return;}
+  const reason=type=='ingredient'?'食材调整':'工具调整';
+  fetch('/api/stock/adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_type:type,item_id:id,delta:v,reason})})
+    .then(r=>r.json()).then(()=>{type=='ingredient'?loadIngs():loadTools();});
+}
+function toggleAdd(t){ document.getElementById(t=='ing'?'addIng':'addTool').style.display='block'; }
+function addIng(){
+  fetch('/api/ingredients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    name:ingName.value,unit:ingUnit.value,stock:parseFloat(ingStock.value||0),threshold:parseFloat(ingThr.value||0),cost:parseFloat(ingCost.value||0)
+  })}).then(r=>r.json()).then(()=>{loadIngs();['ingName','ingUnit','ingStock','ingThr','ingCost'].forEach(x=>document.getElementById(x).value='');});
+}
+function addTool(){
+  fetch('/api/tools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    name:toolName.value,stock:parseFloat(toolStock.value||0),threshold:parseFloat(toolThr.value||0)
+  })}).then(r=>r.json()).then(()=>{loadTools();['toolName','toolStock','toolThr'].forEach(x=>document.getElementById(x).value='');});
+}
+loadIngs();loadTools();loadPkgs();loadSettings();
+</script>
+</body>
+</html>

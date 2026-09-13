@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>录单 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+<div class="container">
+  <h1 class="title">📋 新建订单</h1>
+  <p class="sub">粘贴微信确认文本，系统自动解析套餐、地址、备注，并算出备餐需求</p>
+
+  <div class="card">
+    <label class="label">订单文本</label>
+    <textarea id="raw" rows="12" placeholder="预约时间:9.11 12.00
+预约项目:
+3-4人餐 （搭建）
+预约地址:青龙湖
+联系人:刘和牛
+联系电话:15108302848
+金额:458元（餐到后付全款）
+押金:200元（餐具回收后退还）
+用餐时间:12.00
+收餐时间:22点后加收每小时50元夜间服务费
+备注:多拿1张桌子，1个椅子，10点钟搭好天幕桌椅，餐食12点左右送到。"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="parseOrder()">🔍 解析预览</button>
+      <button class="btn btn-success" id="confirmBtn" style="display:none" onclick="confirmOrder()">✓ 确认入库</button>
+      <button class="btn" onclick="loadSample()">载入示例</button>
+    </div>
+  </div>
+
+  <div id="preview" class="preview-area"></div>
+</div>
+<script src="/static/app.js"></script>
+<script>
+function parseOrder(){
+  const raw = document.getElementById('raw').value;
+  if(!raw.trim()){ alert('请粘贴订单文本'); return; }
+  fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok){alert(d.msg);return;}
+      renderPreview(d.data);
+      document.getElementById('confirmBtn').style.display='inline-block';
+    });
+}
+
+function renderPreview(p){
+  const pkgs = (p.matched_packages||[]).map(x=>`<div class="chip">${x.name} · ${x.people}人 · ${x.quantity}份 · ${x.service_type}</div>`).join('') || '<span class="muted">无匹配套餐</span>';
+  const ings = (p.preview_ingredients||[]).map(x=>{
+    const cls = x.shortage>0 ? 'row-warn' : (x.warning ? 'row-low' : '');
+    const short = x.shortage>0 ? `<span class="tag tag-red">缺 ${x.shortage}${x.unit}</span>` : '';
+    return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}${x.unit}</td><td>${x.stock}${x.unit}</td><td>${short||'充足'}</td></tr>`;
+  }).join('') || '<tr><td colspan=4 class="muted">套餐未配置食材</td></tr>';
+  const tools = (p.preview_tools||[]).map(x=>{
+    const cls = x.shortage>0 ? 'row-warn' : (x.warning ? 'row-low' : '');
+    const short = x.shortage>0 ? `<span class="tag tag-red">缺 ${x.shortage}</span>` : '';
+    return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}</td><td>${x.stock}</td><td>${short||'充足'}</td></tr>`;
+  }).join('') || '<tr><td colspan=4 class="muted">无工具需求</td></tr>';
+  const extra = Object.keys(p.extra_tools||{});
+  const extraStr = extra.length ? extra.map(k=>`${k}+${p.extra_tools[k]}`).join('，') : '<span class="muted">无</span>';
+
+  document.getElementById('preview').innerHTML = `
+    <div class="card">
+      <h3>订单信息</h3>
+      <div class="info-grid">
+        <div><span class="muted">日期</span><b>${p.booking_date||'-'}</b></div>
+        <div><span class="muted">时间</span><b>${p.booking_time||'-'}</b></div>
+        <div><span class="muted">地址</span><b>${p.address||'-'}</b></div>
+        <div><span class="muted">联系人</span><b>${p.contact_name||'-'}</b></div>
+        <div><span class="muted">电话</span><b>${p.contact_phone||'-'}</b></div>
+        <div><span class="muted">金额</span><b>¥${p.amount}</b></div>
+        <div><span class="muted">押金</span><b>¥${p.deposit}</b></div>
+        <div><span class="muted">用餐</span><b>${p.meal_time||'-'}</b></div>
+        <div><span class="muted">收餐</span><b>${p.pickup_time||'-'}</b></div>
+      </div>
+      <div class="note-box"><b>备注:</b> ${p.note||'-'}</div>
+      <div class="note-box"><b>备注解析出的额外工具:</b> ${extraStr}</div>
+    </div>
+    <div class="card">
+      <h3>套餐明细</h3>
+      <div class="chips">${pkgs}</div>
+    </div>
+    <div class="card">
+      <h3>🥩 食材备餐需求</h3>
+      <table class="tbl">
+        <thead><tr><th>食材</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead>
+        <tbody>${ings}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>🔧 工具备餐需求</h3>
+      <table class="tbl">
+        <thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead>
+        <tbody>${tools}</tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('preview').scrollIntoView({behavior:'smooth'});
+}
+
+function confirmOrder(){
+  const raw = document.getElementById('raw').value;
+  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ alert('✓ 订单已入库，编号:'+d.order_id); location.href='/orders'; }
+      else alert('失败：'+d.msg);
+    });
+}
+
+function loadSample(){
+  document.getElementById('raw').value = `预约时间:9.11 12.00
+预约项目:
+3-4人餐 （搭建）
+预约地址:青龙湖
+联系人:刘和牛
+联系电话:15108302848
+金额:458元（餐到后付全款）
+押金:200元（餐具回收后退还）
+用餐时间:12.00
+收餐时间:22点后加收每小时50元夜间服务费
+备注:多拿1张桌子，1个椅子，10点钟搭好天幕桌椅，餐食12点左右送到。`;
+}
+</script>
+</body>
+</html>

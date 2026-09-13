@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>订单列表 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
+    <div>
+      <div class="title"><span class="fire">🔥</span>订单列表</div>
+      <div class="sub">查看、跟踪和管理所有订单</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="loadOrders()">🔄 刷新</button>
+  </div>
+
+  <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
+  <div class="kpi-row" id="orderKPIs" style="margin-bottom:16px"></div>
+
+  <div class="order-list" id="orderList"></div>
+</div>
+
+<script>
+function statusLabel(s){
+  const map = {
+    pending:   ['⏳ 待备',    'tag-orange'],
+    preparing: ['🔥 备餐中',  'tag-blue'],
+    done:      ['✅ 已完成',  'tag-green'],
+    cancelled: ['❌ 已取消',  'tag-gray'],
+  };
+  return map[s] || ['未知','tag-gray'];
+}
+function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
+
+function loadOrders(){
+  fetch('/api/orders').then(r=>r.json()).then(d=>{
+    if(!d.ok) return;
+    const orders = d.data || [];
+
+    // ---- 顶部 KPI ----
+    const count = {pending:0,preparing:0,done:0,cancelled:0};
+    let totalAmt = 0;
+    orders.forEach(o=>{
+      count[o.status] = (count[o.status]||0) + 1;
+      if(o.status!=='cancelled') totalAmt += (o.amount||0);
+    });
+    document.getElementById('orderKPIs').innerHTML = [
+      {cls:'kpi-dark',    icon:'📋', num:orders.length, lbl:'全部订单'},
+      {cls:'kpi-red',     icon:'⏳', num:count.pending,  lbl:'待备'},
+      {cls:'kpi-orange',  icon:'🔥', num:count.preparing,lbl:'备餐中'},
+      {cls:'kpi-green',   icon:'✅', num:count.done,     lbl:'已完成'},
+    ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div>
+      <div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
+
+    // ---- 订单卡片 ----
+    const html = orders.map(o=>{
+      const pkgs = (o.packages||[]).map(p=>`<span class="chip pkg">${p.name}·${p.people}人 × ${p.quantity}</span>`).join('') || '';
+      const [stText, stCls] = statusLabel(o.status);
+      return `<div class="order-card ${cardClass(o.status)}">
+        <div class="order-head">
+          <div>
+            <b style="font-size:16px">#${o.id}</b>
+            <span class="muted" style="margin-left:6px">${o.booking_date||''} ${o.booking_time||''}</span>
+          </div>
+          <span class="tag ${stCls} tag-lg">${stText}</span>
+        </div>
+
+        <div class="preview-grid" style="margin:8px 0">
+          <div class="cell"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
+          <div class="cell"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
+          <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone?`<a href="tel:${o.contact_phone}">${o.contact_phone}</a>`:'-'}</div></div>
+          <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
+        </div>
+
+        <div class="chips">${pkgs}</div>
+        ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
+
+        <div class="btn-row">
+          <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
+          ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
+          ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
+          ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
+        </div>
+        <div id="req-${o.id}" class="req-box" style="display:none"></div>
+      </div>`;
+    }).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa">
+      <div style="font-size:40px;margin-bottom:12px">🍖</div>
+      还没有订单，去 <a href="/">录单页</a> 创建第一笔吧
+    </div>`;
+    document.getElementById('orderList').innerHTML = html;
+  });
+}
+
+function viewReq(oid){
+  const box = document.getElementById('req-'+oid);
+  if(box.style.display!='none'){ box.style.display='none'; return; }
+  box.style.display='block';
+  box.innerHTML = '<div class="muted">加载中...</div>';
+  fetch('/api/orders/'+oid+'/requirements').then(r=>r.json()).then(d=>{
+    if(!d.ok) return;
+    const data = d.data;
+    const ings = (data.ingredients||[]).map(x=>{
+      const cls = x.shortage>0 ? 'row-warn' : '';
+      return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}${x.unit||''}</td><td>${x.stock}${x.unit||''}</td><td class="${x.shortage>0?'txt-red':''}">${x.shortage>0?x.shortage+x.unit:'-'}</td></tr>`;
+    }).join('') || '<tr><td colspan=4 class="muted">无</td></tr>';
+    const tools = (data.tools||[]).map(x=>{
+      const cls = x.shortage>0 ? 'row-warn' : '';
+      return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}</td><td>${x.stock}</td><td class="${x.shortage>0?'txt-red':''}">${x.shortage>0?x.shortage:'-'}</td></tr>`;
+    }).join('') || '<tr><td colspan=4 class="muted">无</td></tr>';
+    box.innerHTML = `
+      <h4 style="color:var(--primary);font-size:14px;margin:8px 0 4px">🥩 食材需求</h4>
+      <table class="tbl"><thead><tr><th>食材</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${ings}</tbody></table>
+      <h4 style="color:var(--primary);font-size:14px;margin:12px 0 4px">🔧 工具需求</h4>
+      <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${tools}</tbody></table>
+    `;
+  });
+}
+
+function setStatus(oid,st){
+  fetch('/api/orders/'+oid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})})
+    .then(r=>r.json()).then(()=>loadOrders());
+}
+
+loadOrders();
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>历史分析 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .bar-chart{display:flex;align-items:flex-end;gap:6px;height:140px;padding:8px 0}
+  .bar{flex:1;background:linear-gradient(180deg,var(--accent),var(--primary));
+       border-radius:6px 6px 0 0;min-height:4px;position:relative;transition:height .4s}
+  .bar .bar-val{position:absolute;top:-18px;left:50%;transform:translateX(-50%);
+                font-size:10px;color:var(--primary);font-weight:700;white-space:nowrap}
+  .bar .bar-lbl{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);
+                font-size:10px;color:var(--muted);white-space:nowrap}
+  .bar-legend{display:flex;justify-content:space-between;margin-top:28px;font-size:11px;color:var(--muted)}
+  .mini-bar{display:flex;height:20px;background:#f3efe8;border-radius:10px;overflow:hidden;margin-top:4px}
+  .mini-bar>div{height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:10px}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/history" class="nav-item active">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
+    <div>
+      <div class="title"><span class="fire">📈</span>历史分析</div>
+      <div class="sub">营收趋势、热门套餐、订单分布</div>
+    </div>
+    <button class="btn btn-accent btn-sm" onclick="openPrint()">🖨️ 打印备餐单</button>
+  </div>
+
+  <div class="kpi-row" id="histKpis"></div>
+
+  <div class="card">
+    <h3><span class="dot"></span>📅 月度营收趋势</h3>
+    <div class="bar-chart" id="monthChart"></div>
+    <div class="bar-legend" id="monthLbl"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:var(--accent)"></span>🗓️ 近 8 周订单量</h3>
+    <div class="bar-chart" id="weekChart"></div>
+    <div class="bar-legend" id="weekLbl"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#27ae60"></span>🍱 热门套餐排行</h3>
+    <div id="pkgRank" style="display:flex;flex-direction:column;gap:10px"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot" style="background:#666"></span>📊 订单状态分布</h3>
+    <div id="statusDist"></div>
+  </div>
+</div>
+
+<script>
+function openPrint(){ window.open('/api/print/menu','_blank'); }
+function fmtMonth(m){ if(!m) return ''; const [y,w]=m.split('-W'); return w.replace('W','第')+'周'; }
+function fmtYMM(m){ if(!m) return ''; const [y,mo]=m.split('-'); return y.substring(2)+'/'+mo; }
+
+fetch('/api/history').then(r=>r.json()).then(d=>{
+  if(!d.ok) return;
+  const t = d.overview;
+  const hasData = t && t.total > 0;
+
+  // ---- KPI ----
+  const revenue = t.total_revenue ? Math.round(t.total_revenue) : 0;
+  const avg = t.avg_amount ? Math.round(t.avg_amount) : 0;
+  document.getElementById('histKpis').innerHTML = [
+    {cls:'kpi-dark',   icon:'📋', num: t.total||0,    lbl:'累计订单'},
+    {cls:'kpi-primary',icon:'💰', num:'¥'+revenue,  lbl:'累计营收'},
+    {cls:'kpi-orange', icon:'📊', num:'¥'+avg,      lbl:'客单价'},
+    {cls:'kpi-green',  icon:'✅', num: (d.status_dist.done||0), lbl:'已完成'},
+  ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div>
+    <div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
+
+  if(!hasData){
+    document.querySelectorAll('.card').forEach(c=>{
+      c.innerHTML = '<div class="muted" style="padding:20px;text-align:center">暂无历史数据，先在 <a href="/orders">订单</a> 页创建几单吧</div>';
+    });
+    return;
+  }
+
+  // ---- 月营收柱状图 ----
+  const monthly = d.monthly;
+  const maxRev = Math.max(...monthly.map(m=>m.revenue), 1);
+  document.getElementById('monthChart').innerHTML = monthly.map(m=>{
+    const h = Math.round(m.revenue / maxRev * 100);
+    return `<div class="bar" style="height:${Math.max(h,4)}%">
+      <span class="bar-val">¥${Math.round(m.revenue)}</span>
+      <span class="bar-lbl">${fmtYMM(m.month)}</span></div>`;
+  }).join('');
+  document.getElementById('monthLbl').innerHTML = '';
+
+  // ---- 周订单量 ----
+  const weekly = d.weekly;
+  const maxCnt = Math.max(...weekly.map(w=>w.cnt), 1);
+  document.getElementById('weekChart').innerHTML = weekly.map(w=>{
+    const h = Math.round(w.cnt / maxCnt * 100);
+    return `<div class="bar" style="height:${Math.max(h,4)}%;background:linear-gradient(180deg,#27ae60,#2ecc71)">
+      <span class="bar-val">${w.cnt}单</span>
+      <span class="bar-lbl">${fmtMonth(w.week)}</span></div>`;
+  }).join('');
+
+  // ---- 热门套餐 ----
+  const pkgs = d.packages_pop;
+  const maxQ = Math.max(...pkgs.map(p=>p.total_qty||1), 1);
+  document.getElementById('pkgRank').innerHTML = pkgs.map((p,i)=>`
+    <div>
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:14px">
+        <span>#${i+1} ${p.pkg_name}</span>
+        <span class="muted">${p.total_qty} 份 · ${p.times} 单</span>
+      </div>
+      <div class="mini-bar"><div style="width:${Math.round((p.total_qty/maxQ)*100)}%"></div></div>
+    </div>
+  `).join('') || '<div class="muted">无套餐数据</div>';
+
+  // ---- 状态分布 ----
+  const sd = d.status_dist;
+  const total = Object.values(sd).reduce((a,b)=>a+b,1);
+  const statusLabels = {pending:['⏳ 待备','tag-orange'],preparing:['🔥 备餐中','tag-blue'],done:['✅ 已完成','tag-green'],cancelled:['❌ 已取消','tag-gray']};
+  document.getElementById('statusDist').innerHTML = Object.entries(sd).map(([s,c])=>{
+    const [lbl,cls] = statusLabels[s] || [s,'tag-gray'];
+    const pct = Math.round(c/total*100);
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+        <span>${lbl}</span><span class="muted">${c} 单 · ${pct}%</span>
+      </div>
+      <div class="mini-bar"><div style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+});
+</script>
+</body>
+</html>
