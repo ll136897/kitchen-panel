@@ -574,9 +574,12 @@ def print_menu():
   table{{ width:100%; border-collapse:collapse; font-size:13px; }}
   th{{ background:#f3efe8; text-align:left; padding:6px 8px; }}
   td{{ padding:6px 8px; border-bottom:1px solid #efe8dd; }}
-  .print-btn{{ margin:12px 0; padding:8px 16px; background:#c0392b; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
-  @media print{{ .print-btn{{ display:none }} }}
+  .print-btn{{ margin:12px 6px 12px 0; padding:8px 16px; background:#c0392b; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
+  .back-btn{{ margin:12px 0; padding:8px 16px; background:#fff; color:#2b1e14; border:1.5px solid #c0392b; border-radius:6px; font-size:14px; cursor:pointer; text-decoration:none; display:inline-block; }}
+  .back-btn:hover{{ background:#fdecea; }}
+  @media print{{ .print-btn, .back-btn{{ display:none }} }}
 </style></head><body>
+<a class="back-btn" href="javascript:history.length>1?history.back():'/'">← 返回</a>
 <button class="print-btn" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
 <h1>🔥 刘和牛户外烤肉 · 备餐单</h1>
 <div class="meta">生成时间：{now} · 共 {len(orders)} 单待备 / 备餐中</div>
