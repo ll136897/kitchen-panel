@@ -100,7 +100,8 @@ def calc_order_requirements(order_id):
         raw_text = row["raw_text"] if row else ""
 
     # 食材需求 = 套餐(每套餐固定配量 × 订单份数) + 单点
-    ing_demand = {}  # ingredient_id -> total
+    # ing_demand: id -> {total, per_package(代表), order_qty(套餐份数和)}
+    ing_demand = {}
 
     with get_db() as conn:
         cur = conn.cursor()
@@ -113,7 +114,11 @@ def calc_order_requirements(order_id):
             """, (pk["package_id"],))
             for r in cur.fetchall():
                 amount = r["per_package"] * pk["quantity"]
-                ing_demand[r["id"]] = ing_demand.get(r["id"], 0) + amount
+                if r["id"] not in ing_demand:
+                    ing_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0}
+                ing_demand[r["id"]]["total"] += amount
+                ing_demand[r["id"]]["per_package"] = r["per_package"]
+                ing_demand[r["id"]]["order_qty"] += pk["quantity"]
 
         for d in dishes:
             cur.execute("""
@@ -124,7 +129,11 @@ def calc_order_requirements(order_id):
             """, (d["dish_id"],))
             for r in cur.fetchall():
                 amount = r["amount"] * d["quantity"]
-                ing_demand[r["id"]] = ing_demand.get(r["id"], 0) + amount
+                if r["id"] not in ing_demand:
+                    ing_demand[r["id"]] = {"total": 0, "per_package": r["amount"], "order_qty": 0}
+                ing_demand[r["id"]]["total"] += amount
+                ing_demand[r["id"]]["per_package"] = r["amount"]
+                ing_demand[r["id"]]["order_qty"] += d["quantity"]
 
     # 工具需求 = 套餐工具 + 备注解析的额外工具
     tool_demand = {}
@@ -139,7 +148,11 @@ def calc_order_requirements(order_id):
             """, (pk["package_id"],))
             for r in cur.fetchall():
                 amount = r["per_package"] * pk["quantity"]
-                tool_demand[r["id"]] = tool_demand.get(r["id"], 0) + amount
+                if r["id"] not in tool_demand:
+                    tool_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0}
+                tool_demand[r["id"]]["total"] += amount
+                tool_demand[r["id"]]["per_package"] = r["per_package"]
+                tool_demand[r["id"]]["order_qty"] += pk["quantity"]
 
         # 备注解析额外工具
         parsed = parse_order_text(raw_text)
@@ -148,23 +161,31 @@ def calc_order_requirements(order_id):
             cur.execute("SELECT id FROM tools WHERE name = ?", (tname,))
             tr = cur.fetchone()
             if tr:
-                tool_demand[tr["id"]] = tool_demand.get(tr["id"], 0) + qty
+                tid = tr["id"]
+                if tid not in tool_demand:
+                    tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": 0}
+                tool_demand[tid]["total"] += qty
+                tool_demand[tid]["per_package"] = qty
+                tool_demand[tid]["order_qty"] += 1
 
     # 拉取详情
     ingredients_result = []
     with get_db() as conn:
         cur = conn.cursor()
-        for ing_id, need in ing_demand.items():
+        for ing_id, info in ing_demand.items():
             cur.execute("SELECT name, unit, stock, threshold FROM ingredients WHERE id = ?", (ing_id,))
             r = cur.fetchone()
             if r:
                 stock = r["stock"] or 0
+                need = info["total"]
                 ingredients_result.append({
                     "id": ing_id, "name": r["name"], "unit": r["unit"],
                     "need": round(need, 2), "stock": stock,
                     "shortage": round(max(0, need - stock), 2),
                     "threshold": r["threshold"] or 0,
                     "warning": stock <= (r["threshold"] or 0),
+                    "per_package": info["per_package"],
+                    "order_qty": info["order_qty"],
                 })
 
         cur.execute("SELECT id, name, unit, stock, threshold FROM ingredients")
@@ -176,22 +197,26 @@ def calc_order_requirements(order_id):
                     "id": ing["id"], "name": ing["name"], "unit": ing["unit"],
                     "need": 0, "stock": ing["stock"], "shortage": 0,
                     "threshold": ing["threshold"], "warning": True,
+                    "per_package": 0, "order_qty": 0,
                 })
 
         tools_result = []
         avail_tools = get_available_tool_stock()
-        for t_id, need in tool_demand.items():
+        for t_id, info in tool_demand.items():
             cur.execute("SELECT name, stock, threshold FROM tools WHERE id = ?", (t_id,))
             r = cur.fetchone()
             if r:
                 total_stock = r["stock"] or 0
                 avail = avail_tools.get(t_id, total_stock)
+                need = info["total"]
                 tools_result.append({
                     "id": t_id, "name": r["name"],
                     "need": need, "stock": avail, "total_stock": total_stock,
                     "shortage": max(0, need - avail),
                     "threshold": r["threshold"] or 0,
                     "warning": avail <= (r["threshold"] or 0),
+                    "per_package": info["per_package"],
+                    "order_qty": info["order_qty"],
                 })
 
         cur.execute("SELECT id, name, stock, threshold FROM tools")
@@ -205,6 +230,7 @@ def calc_order_requirements(order_id):
                     "need": 0, "stock": avail, "total_stock": t["stock"],
                     "shortage": 0,
                     "threshold": t["threshold"], "warning": True,
+                    "per_package": 0, "order_qty": 0,
                 })
 
     return {"ingredients": ingredients_result, "tools": tools_result}
@@ -442,13 +468,39 @@ def preview_parse(raw_text):
     return parsed
 
 
-# 食材分类展示顺序与中文名
-CATEGORY_ORDER = ["meat", "vegetable", "staple", "side", "sauce", "drink", "tableware", "other"]
+# 食材分类展示顺序与中文名（用户要求：牛肉、猪肉、鸡肉、蔬菜、小料）
+# 注：tableware 不在主表展示，单独拎出到餐具核对区
+CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "sauce", "other"]
 CATEGORY_LABEL = {
-    "meat": "🥩 荤菜", "vegetable": "🥬 素菜", "staple": "🍞 主食",
-    "side": "🥗 小菜", "sauce": "🧂 蘸料", "drink": "🥤 饮料水果",
-    "tableware": "🍱 餐具配套", "other": "📦 其他",
+    "beef": "🥩 牛肉",
+    "pork": "🥓 猪肉",
+    "chicken": "🍗 鸡肉",
+    "vegetable": "🥬 蔬菜",
+    "sauce": "🧂 小料",
+    "other": "📦 其他",
 }
+
+# 餐具单独拎出
+TABLEWARE_CATEGORY = "tableware"
+
+# 小料类：合并 staple主食 / side小菜 / sauce蘸料 / drink饮料水果
+SAUCE_LIKE_CATS = {"staple", "side", "sauce", "drink"}
+
+
+def _subcategorize_meat(name, current_cat):
+    """把 meat 类按食材名细分成 beef / pork / chicken。
+    韩式风味肠归 pork（市售多为猪肉肠）。
+    """
+    if current_cat != "meat":
+        return current_cat
+    n = name or ""
+    if "牛" in n:
+        return "beef"
+    if "鸡" in n or "掌中宝" in n or "脚筋" in n or "郡肝" in n:
+        return "chicken"
+    if "猪" in n or "五花肉" in n or "松板肉" in n or "梅花肉" in n or "小肠" in n or "肠" in n:
+        return "pork"
+    return "other"
 
 
 def calc_merged_prep(order_ids):
@@ -488,7 +540,7 @@ def calc_merged_prep(order_ids):
             orders.append(o)
 
     # 逐单算需求并合并
-    ing_merge = {}  # ing_id -> {name, unit, category, total, stock, threshold}
+    ing_merge = {}  # ing_id -> {name, unit, category, total, stock, threshold, order_ids, per_package_samples, total_packages}
     tool_merge = {}  # tool_id -> {name, total, stock, threshold}
     # 记录每个 (order_id, item_type, item_id) 的明细，用于勾选
     detail_keys = []  # [(order_id, item_type, item_id)]
@@ -502,9 +554,13 @@ def calc_merged_prep(order_ids):
                     "id": ing["id"], "name": ing["name"], "unit": ing["unit"],
                     "category": "other", "total": 0, "stock": ing["stock"],
                     "threshold": ing["threshold"], "order_ids": [],
+                    "per_package_samples": [],  # [(per_package, order_quantity), ...]
+                    "total_packages": 0,
                 }
             ing_merge[key]["total"] += ing["need"]
             ing_merge[key]["order_ids"].append(o["id"])
+            ing_merge[key]["per_package_samples"].append((ing.get("per_package"), ing.get("order_qty", 1)))
+            ing_merge[key]["total_packages"] += ing.get("order_qty", 1)
             detail_keys.append((o["id"], "ingredient", ing["id"]))
         for tl in req["tools"]:
             key = tl["id"]
@@ -512,21 +568,37 @@ def calc_merged_prep(order_ids):
                 tool_merge[key] = {
                     "id": tl["id"], "name": tl["name"], "total": 0,
                     "stock": tl["stock"], "threshold": tl["threshold"], "order_ids": [],
+                    "per_package_samples": [], "total_packages": 0,
                 }
             tool_merge[key]["total"] += tl["need"]
             tool_merge[key]["order_ids"].append(o["id"])
+            tool_merge[key]["per_package_samples"].append((tl.get("per_package"), tl.get("order_qty", 1)))
+            tool_merge[key]["total_packages"] += tl.get("order_qty", 1)
             detail_keys.append((o["id"], "tool", tl["id"]))
 
-    # 补全食材 category
+    # 补全食材 category + 细分 meat + 合并小料类
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id, category FROM ingredients")
-        cat_map = {r["id"]: r["category"] for r in cur.fetchall()}
+        cur.execute("SELECT id, category, name FROM ingredients")
+        cat_map = {r["id"]: (r["category"], r["name"]) for r in cur.fetchall()}
     for k, v in ing_merge.items():
-        v["category"] = cat_map.get(v["id"], "other")
+        raw_cat, name = cat_map.get(k, ("other", v["name"]))
+        # 细分 meat → beef/pork/chicken
+        sub_cat = _subcategorize_meat(name, raw_cat)
+        # 合并小料类
+        if sub_cat in SAUCE_LIKE_CATS:
+            sub_cat = "sauce"
+        v["category"] = sub_cat
+        # 取代表单份量（per_package）：取所有样本里的最大值（最常见规格）
+        samples = [p for p, _ in v["per_package_samples"] if p]
+        v["per_package"] = max(samples) if samples else v["total"]
+        v["order_count"] = len(v["order_ids"])
         v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
 
     for v in tool_merge.values():
+        samples = [p for p, _ in v["per_package_samples"] if p]
+        v["per_package"] = max(samples) if samples else v["total"]
+        v["order_count"] = len(v["order_ids"])
         v["shortage"] = max(0, v["total"] - v["stock"])
 
     # 勾选状态：从 prep_checklist 查，某合并项只有当所有相关 order 的该 item 都勾了才算勾
@@ -559,15 +631,16 @@ def calc_merged_prep(order_ids):
     for iid, vals in tool_checked.items():
         checked_map[f"tool_{iid}"] = all(vals) and len(vals) > 0
 
-    # 食材按分类分组
+    # 食材按分类分组（主表顺序：牛肉、猪肉、鸡肉、蔬菜、小料、其他）
     ingredients_by_cat = {}
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_merge.values() if v["category"] == cat]
         if items:
             ingredients_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
 
-    # 餐具单独拎出
-    tableware = ingredients_by_cat.pop("tableware", [])
+    # 餐具单独拎出（不在主表显示，给打包核对区）
+    tableware = [v for v in ing_merge.values() if v["category"] == TABLEWARE_CATEGORY]
+    tableware = sorted(tableware, key=lambda x: -x["total"])
 
     tools_list = sorted(tool_merge.values(), key=lambda x: -x["total"])
 

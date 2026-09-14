@@ -6,27 +6,124 @@
 <title>备餐合并 · 刘和牛户外烤肉</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-  .urg-overdue{color:#fff;background:var(--red);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
-  .urg-soon{color:#fff;background:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
-  .urg-normal{color:#fff;background:var(--green);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
-  .prep-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border-l);transition:background .15s}
-  .prep-item:hover{background:#faf5ed}
-  .prep-item.checked{background:#eaf7ee;opacity:.75}
-  .prep-item.checked .pi-name{text-decoration:line-through;color:#999}
-  .prep-item input[type=checkbox]{width:20px;height:20px;accent-color:var(--green);cursor:pointer;flex-shrink:0}
-  .pi-name{flex:1;font-weight:700;font-size:14px}
-  .pi-qty{font-size:15px;font-weight:800;color:var(--primary);min-width:70px;text-align:right}
-  .pi-stock{font-size:12px;color:var(--muted);min-width:80px;text-align:right}
-  .pi-shortage{font-size:12px;font-weight:700;min-width:60px;text-align:right}
-  .cat-hd{font-size:14px;font-weight:700;color:var(--primary);margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--border)}
-  .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-  .check-all-btn{font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;cursor:pointer}
-  .check-all-btn:hover{background:var(--orange-bg)}
-  .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:6px 10px;border-radius:8px;margin:4px;border:1px solid var(--border-l)}
-  .date-picker{padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px}
-  .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:10px;gap:2px}
-  .mode-tab button{padding:8px 16px;border:none;background:transparent;color:#8a7f75;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px}
+  /* ===== 备餐表 · 移动端加大字体 + 5列网格 ===== */
+  .urg-overdue{color:#fff;background:var(--red);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
+  .urg-soon{color:#fff;background:var(--orange);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
+  .urg-normal{color:#fff;background:var(--green);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
+
+  /* 分类卡片：每个分类一个独立块，用不同背景色分隔 */
+  .cat-block{
+    border-radius:12px;
+    overflow:hidden;
+    margin:10px 0;
+    border:1px solid var(--border-l);
+  }
+  .cat-head{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 14px;
+    font-size:17px;font-weight:700;
+    color:#fff;
+  }
+  .cat-head .cat-count{
+    font-size:13px;font-weight:600;opacity:.9;
+    background:rgba(255,255,255,.25);padding:2px 10px;border-radius:10px;
+  }
+  .cat-head .check-all-btn{
+    font-size:13px;padding:4px 12px;border-radius:8px;
+    border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.15);
+    color:#fff;cursor:pointer;font-weight:700;
+  }
+  .cat-head .check-all-btn:hover{background:rgba(255,255,255,.3)}
+
+  /* 5列网格：勾选 | 名字 | 份数 | 克数 | 总份数 | 总克数 */
+  .prep-row{
+    display:grid;
+    grid-template-columns:28px 1fr 60px 70px 60px 78px;
+    gap:6px;
+    align-items:center;
+    padding:11px 12px;
+    border-bottom:1px solid rgba(0,0,0,.06);
+    transition:background .12s;
+  }
+  .prep-row:last-child{border-bottom:none}
+  .prep-row:hover{filter:brightness(.97)}
+  .prep-row.checked{opacity:.55}
+  .prep-row.checked .pr-name{text-decoration:line-through;color:#888}
+
+  /* 表头行 */
+  .prep-header{
+    display:grid;
+    grid-template-columns:28px 1fr 60px 70px 60px 78px;
+    gap:6px;
+    padding:8px 12px;
+    font-size:12px;font-weight:700;color:#666;
+    background:rgba(0,0,0,.05);
+    border-bottom:2px solid rgba(0,0,0,.08);
+  }
+  .prep-header > div{text-align:center}
+  .prep-header > div:nth-child(2){text-align:left}
+
+  .prep-row input[type=checkbox]{
+    width:22px;height:22px;accent-color:var(--green);cursor:pointer;
+  }
+  .pr-name{font-size:16px;font-weight:700;line-height:1.3;word-break:break-all}
+  .pr-ord{font-size:14px;color:#555;text-align:center;font-weight:600}
+  .pr-per{font-size:14px;color:#444;text-align:center;font-weight:600}
+  .pr-totpkg{font-size:14px;color:#444;text-align:center;font-weight:600}
+  .pr-total{font-size:17px;color:var(--primary);text-align:right;font-weight:800;font-family:"DIN","Helvetica Neue",sans-serif}
+  .pr-short{font-size:12px;color:var(--red);text-align:right;font-weight:700;margin-top:2px}
+  .pr-short.ok{color:var(--green)}
+
+  /* 分类配色：每类用不同色背景避免错行 */
+  .cat-beef     .cat-head{background:#8e1e1a}              /* 牛肉·深红 */
+  .cat-beef     .prep-row{background:#fbeae9}
+  .cat-beef     .prep-row:nth-child(odd){background:#f7e0de}
+
+  .cat-pork     .cat-head{background:#c75d3e}              /* 猪肉·橙红 */
+  .cat-pork     .prep-row{background:#fdedea}
+  .cat-pork     .prep-row:nth-child(odd){background:#fae3dd}
+
+  .cat-chicken  .cat-head{background:#c9962b}              /* 鸡肉·金黄 */
+  .cat-chicken  .prep-row{background:#fdf3da}
+  .cat-chicken  .prep-row:nth-child(odd){background:#fbeed0}
+
+  .cat-vegetable .cat-head{background:#3a8a3a}             /* 蔬菜·绿 */
+  .cat-vegetable .prep-row{background:#e7f5e7}
+  .cat-vegetable .prep-row:nth-child(odd){background:#def0de}
+
+  .cat-sauce    .cat-head{background:#7a5a3a}              /* 小料·棕 */
+  .cat-sauce    .prep-row{background:#f3ecdf}
+  .cat-sauce    .prep-row:nth-child(odd){background:#ede3d0}
+
+  .cat-other    .cat-head{background:#666}                 /* 其他·灰 */
+  .cat-other    .prep-row{background:#eee}
+  .cat-other    .prep-row:nth-child(odd){background:#e6e6e6}
+
+  .cat-tableware .cat-head{background:#8e44ad}             /* 餐具·紫 */
+  .cat-tableware .prep-row{background:#f1e9f4}
+  .cat-tableware .prep-row:nth-child(odd){background:#ebdff0}
+
+  .cat-tool     .cat-head{background:#4a4a4a}              /* 工具·深灰 */
+  .cat-tool     .prep-row{background:#ededed}
+  .cat-tool     .prep-row:nth-child(odd){background:#e4e4e4}
+
+  .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
+  .date-picker{padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:16px}
+  .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:12px;gap:2px}
+  .mode-tab button{padding:10px 18px;border:none;background:transparent;color:#8a7f75;border-radius:10px;font-weight:700;cursor:pointer;font-size:15px}
   .mode-tab button.active{background:var(--primary);color:#fff}
+  .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .muted{color:var(--muted)}
+
+  /* 顶部摘要条 */
+  .summary-bar{
+    display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+  }
+  .summary-chip{
+    background:#fff;border:1px solid var(--border-l);border-radius:10px;
+    padding:8px 12px;font-size:14px;
+  }
+  .summary-chip b{color:var(--primary);font-size:16px}
 </style>
 </head>
 <body>
@@ -64,12 +161,13 @@
     <div id="ordersList"></div>
   </div>
 
-  <!-- 后厨食材汇总 -->
+  <!-- 后厨食材汇总（含牛肉/猪肉/鸡肉/蔬菜/小料 各分类块） -->
   <div class="card" id="ingCard" style="display:none">
     <div class="sec-toolbar">
       <h3 style="margin:0"><span class="dot" style="background:var(--primary)"></span>🥩 后厨食材汇总</h3>
-      <button class="check-all-btn" onclick="checkAll('ing',true)">✅ 全选</button>
+      <button class="check-all-btn" onclick="checkAll('ing',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div>
+    <div class="summary-bar" id="ingSummary"></div>
     <div id="ingList"></div>
   </div>
 
@@ -77,7 +175,7 @@
   <div class="card" id="twCard" style="display:none">
     <div class="sec-toolbar">
       <h3 style="margin:0"><span class="dot" style="background:#8e44ad"></span>🍱 餐具配套核对</h3>
-      <button class="check-all-btn" onclick="checkAll('tw',true)">✅ 全选</button>
+      <button class="check-all-btn" onclick="checkAll('tw',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div>
     <div id="twList"></div>
   </div>
@@ -85,8 +183,8 @@
   <!-- 装配师傅工具 -->
   <div class="card" id="toolCard" style="display:none">
     <div class="sec-toolbar">
-      <h3 style="margin:0"><span class="dot" style="background:#666"></span>🔧 装配师傅 · 工具装备</h3>
-      <button class="check-all-btn" onclick="checkAll('tool',true)">✅ 全选</button>
+      <h3 style="margin:0"><span class="dot" style="background:#4a4a4a"></span>🔧 装配师傅 · 工具装备</h3>
+      <button class="check-all-btn" onclick="checkAll('tool',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div>
     <div id="toolList"></div>
   </div>
@@ -96,12 +194,16 @@
 </div>
 
 <script>
-const CAT_LABEL = {meat:'🥩 荤菜',vegetable:'🥬 素菜',staple:'🍞 主食',side:'🥗 小菜',sauce:'🧂 蘸料',drink:'🥤 饮料水果',other:'📦 其他'};
-const CAT_ORDER = ['meat','vegetable','staple','side','sauce','drink','other'];
+// 主表分类顺序：牛肉、猪肉、鸡肉、蔬菜、小料、其他
+const CAT_LABEL = {
+  beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
+  vegetable:'🥬 蔬菜', sauce:'🧂 小料', other:'📦 其他',
+  tableware:'🍱 餐具配套', tool:'🔧 工具装备'
+};
+const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','other'];
 let prepData = null;
 let currentMode = 'merged';
 
-// 初始化日期为今天
 document.getElementById('datePick').valueAsDate = new Date();
 
 function switchMode(mode){
@@ -129,10 +231,9 @@ function urgBadge(u){
 function render(){
   if(!prepData) return;
   const d = prepData;
-  // 订单概览
   const orders = d.orders || [];
   if(!orders.length){
-    document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:20px;text-align:center">🍖 当天暂无待备订单</div>';
+    document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:24px;text-align:center;font-size:16px">🍖 当天暂无待备订单</div>';
     ['ingCard','twCard','toolCard'].forEach(id=>document.getElementById(id).style.display='none');
     document.getElementById('orderView').style.display='none';
     return;
@@ -157,34 +258,81 @@ function render(){
   }
 }
 
+// 备餐行：5列（份数/克数/总份数/总克数）+ 勾选 + 名字
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
-  const shortageCls = it.shortage>0?'txt-red':'';
-  const shortageTxt = it.shortage>0?`缺${round(it.shortage)}${it.unit||''}`:'充足';
-  return `<div class="prep-item ${checked?'checked':''}">
+  const unit = it.unit||'';
+  const perPkg = round(it.per_package||0);
+  const totPkg = round(it.total_packages||0);
+  const ordCnt = it.order_count||0;
+  const total = round(it.total);
+  const shortTxt = it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足';
+  const shortCls = it.shortage>0 ? '' : 'ok';
+  return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pi-name">${it.name}</div>
-    <div class="pi-qty">${round(it.total)}${it.unit||''}</div>
-    <div class="pi-stock">库存 ${round(it.stock)}${it.unit||''}</div>
-    <div class="pi-shortage ${shortageCls}">${shortageTxt}</div>
+    <div class="pr-name">${it.name}</div>
+    <div class="pr-ord">${ordCnt}单</div>
+    <div class="pr-per">${perPkg}${unit}/份</div>
+    <div class="pr-totpkg">${totPkg}份</div>
+    <div>
+      <div class="pr-total">${total}${unit}</div>
+      <div class="pr-short ${shortCls}">${shortTxt}</div>
+    </div>
+  </div>`;
+}
+
+// 表头行（每个分类块顶部）
+function headerRow(){
+  return `<div class="prep-header">
+    <div></div>
+    <div>名字</div>
+    <div>份数</div>
+    <div>克数</div>
+    <div>总份数</div>
+    <div style="text-align:right">总克数</div>
+  </div>`;
+}
+
+// 分类块：背景色 + 标题 + 表头 + 行
+function catBlock(cat, items, type, checkedMap){
+  const label = CAT_LABEL[cat] || cat;
+  const cls = 'cat-'+cat;
+  const typeStr = type==='tool' ? 'tool' : 'ing';
+  return `<div class="cat-block ${cls}">
+    <div class="cat-head">
+      <span>${label} <span class="cat-count">${items.length} 项</span></span>
+      <button class="check-all-btn" onclick="checkCat('${cat}','${typeStr}',true)">✅ 全选</button>
+    </div>
+    ${headerRow()}
+    ${items.map(it=>itemRow(it, type, checkedMap)).join('')}
   </div>`;
 }
 
 function renderMerged(){
   const d = prepData;
   const cm = d.checked_map || {};
-  // 食材
   const ingCats = d.ingredients || {};
   const hasIng = Object.keys(ingCats).length>0;
   document.getElementById('ingCard').style.display = hasIng?'':'none';
   if(hasIng){
-    let html='';
+    // 摘要：各类项数 + 总克数
+    let sumHtml='';
+    let totalItems=0;
     for(const cat of CAT_ORDER){
       const items = ingCats[cat];
       if(!items) continue;
-      html += `<div class="cat-hd">${CAT_LABEL[cat]||cat} · ${items.length}项</div>`;
-      html += items.map(it=>itemRow(it,'ing',cm)).join('');
+      totalItems += items.length;
+      const sumGram = items.reduce((s,x)=>s+(x.total||0),0);
+      sumHtml += `<div class="summary-chip">${CAT_LABEL[cat]} <b>${items.length}</b>项 · 共<b>${round(sumGram)}</b>g</div>`;
+    }
+    document.getElementById('ingSummary').innerHTML = sumHtml;
+
+    let html='';
+    for(const cat of CAT_ORDER){
+      const items = ingCats[cat];
+      if(!items || !items.length) continue;
+      html += catBlock(cat, items, 'ing', cm);
     }
     document.getElementById('ingList').innerHTML = html;
   }
@@ -192,15 +340,13 @@ function renderMerged(){
   const tw = d.tableware || [];
   document.getElementById('twCard').style.display = tw.length?'':'none';
   if(tw.length){
-    document.getElementById('twList').innerHTML = `<div class="cat-hd">🍱 餐具配套 · ${tw.length}项 · 打包前逐项核对</div>` +
-      tw.map(it=>itemRow(it,'ing',cm)).join('');
+    document.getElementById('twList').innerHTML = catBlock('tableware', tw, 'ing', cm);
   }
   // 工具
   const tools = d.tools || [];
   document.getElementById('toolCard').style.display = tools.length?'':'none';
   if(tools.length){
-    document.getElementById('toolList').innerHTML = `<div class="cat-hd">🔧 工具装备 · ${tools.length}项 · 装配师傅清点</div>` +
-      tools.map(it=>itemRow(it,'tool',cm)).join('');
+    document.getElementById('toolList').innerHTML = catBlock('tool', tools, 'tool', cm);
   }
 }
 
@@ -208,73 +354,61 @@ function renderByOrder(){
   const d = prepData;
   const box = document.getElementById('orderView');
   box.style.display='';
-  let html='';
-  for(const o of d.orders){
-    const req = null; // 我们用 merged 数据里的明细不够，逐单渲染需要再请求
-    // 逐单请求备餐需求
-  }
-  // 逐单加载
   box.innerHTML = d.orders.map(o=>`<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
       <h3 style="margin:0">📋 订单 #${o.id} · ⏰ ${o.meal_time||o.booking_time||'待定'} ${urgBadge(o.urgency)}</h3>
-      <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)">✅ 全选</button>
+      <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div><div class="muted" style="padding:16px">加载中...</div></div>`).join('');
-  // 逐单请求
   d.orders.forEach(o=>{
     fetch('/api/orders/'+o.id+'/requirements').then(r=>r.json()).then(res=>{
       if(!res.ok) return;
       const r = res.data;
-      // 拉取该订单勾选状态
-      const cm = {};
-      // 从 prepData 的 checked_map 反查（key是合并的，这里近似用）
-      // 实际逐单勾选状态需要单独接口，这里简化：从 merged 的 order_ids 反推
-      // 为准确，直接用后端 prep_checklist —— 我们用一个简单方式：遍历 prepData
       const container = document.querySelector('#ord-'+o.id+' .muted');
       if(!container) return;
       let html = '';
       if(r.ingredients.length){
-        html += '<div class="cat-hd">🥩 食材</div>';
-        html += r.ingredients.map(it=>{
-          const checked = isSingleChecked(o.id,'ingredient',it.id);
-          return itemRowSingle(o.id,'ingredient',it,checked);
-        }).join('');
+        // 按分类分组
+        const byCat = {};
+        for(const it of r.ingredients){
+          const c = subcatFor(it.name, it.category||'other');
+          byCat[c] = byCat[c] || [];
+          byCat[c].push(it);
+        }
+        for(const cat of CAT_ORDER){
+          if(!byCat[cat]) continue;
+          html += catBlock(cat, byCat[cat].map(it=>({
+            id:it.id, name:it.name, unit:it.unit, per_package:it.per_package,
+            total_packages:it.order_qty, order_count:1, total:it.need,
+            shortage:it.shortage, order_ids:[o.id]
+          })), 'ing', {});
+        }
       }
       if(r.tools.length){
-        html += '<div class="cat-hd">🔧 工具</div>';
-        html += r.tools.map(it=>{
-          const checked = isSingleChecked(o.id,'tool',it.id);
-          return itemRowSingle(o.id,'tool',it,checked);
-        }).join('');
+        html += catBlock('tool', r.tools.map(it=>({
+          id:it.id, name:it.name, unit:'', per_package:it.per_package,
+          total_packages:it.order_qty, order_count:1, total:it.need,
+          shortage:it.shortage, order_ids:[o.id]
+        })), 'tool', {});
       }
-      container.outerHTML = html;
+      container.outerHTML = html || '<div class="muted" style="padding:16px">无需求</div>';
     });
   });
 }
 
-// 逐单勾选状态判断：从 prepData.checked_map + order_ids 推断
-function isSingleChecked(oid, type, iid){
-  const cm = prepData.checked_map || {};
-  const key = (type==='ingredient'?'ing':'tool')+'_'+iid;
-  // 如果合并项勾选了，说明该 item 在所有涉及订单都勾了
-  if(cm[key]) return true;
-  // 否则需要查该订单的实际状态——merged 数据无法精确判断单订单，这里保守返回 false
-  // 实际使用中合并视图勾选会同步所有订单
-  return false;
-}
-
-function itemRowSingle(oid, type, it, checked){
-  const shortageCls = it.shortage>0?'txt-red':'';
-  const shortageTxt = it.shortage>0?`缺${round(it.shortage)}${it.unit||''}`:'充足';
-  return `<div class="prep-item ${checked?'checked':''}">
-    <input type="checkbox" ${checked?'checked':''} onchange="toggleSingle(${oid},'${type}',${it.id},${checked?0:1})">
-    <div class="pi-name">${it.name}</div>
-    <div class="pi-qty">${round(it.need)}${it.unit||''}</div>
-    <div class="pi-stock">库存 ${round(it.stock)}${it.unit||''}</div>
-    <div class="pi-shortage ${shortageCls}">${shortageTxt}</div>
-  </div>`;
+// 简单子分类（按订单视图用，按名字细分）
+function subcatFor(name, cat){
+  if(cat !== 'meat') {
+    if(['staple','side','sauce','drink'].includes(cat)) return 'sauce';
+    if(cat === 'tableware') return 'tableware';
+    return cat;
+  }
+  const n = name || '';
+  if(n.includes('牛')) return 'beef';
+  if(n.includes('鸡') || n.includes('掌中宝') || n.includes('脚筋') || n.includes('郡肝')) return 'chicken';
+  if(n.includes('猪') || n.includes('五花肉') || n.includes('松板肉') || n.includes('梅花肉') || n.includes('小肠') || n.includes('肠')) return 'pork';
+  return 'other';
 }
 
 function toggleItem(type, iid, checked){
-  // 找到该 item 涉及的订单
   const d = prepData;
   let order_ids = [];
   if(type==='ing'){
@@ -295,10 +429,21 @@ function toggleItem(type, iid, checked){
     .then(r=>r.json()).then(()=>loadPrep());
 }
 
-function toggleSingle(oid, type, iid, checked){
-  fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({order_id:oid, item_type:type, item_id:iid, checked:checked})})
-    .then(r=>r.json()).then(()=>loadPrep());
+function checkCat(cat, type, checked){
+  const d = prepData;
+  let items = [];
+  if(type==='ing'){
+    if(cat==='tableware'){
+      items = (d.tableware||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    } else {
+      items = (d.ingredients[cat]||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    }
+  } else {
+    items = (d.tools||[]).map(it=>({type:'tool', id:it.id, order_ids:it.order_ids}));
+  }
+  Promise.all(items.map(it=>fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_ids:it.order_ids, item_type:it.type, item_id:it.id, checked:checked})})))
+    .then(()=>loadPrep());
 }
 
 function checkAll(section, checked){
@@ -313,7 +458,6 @@ function checkAll(section, checked){
   } else {
     (d.tools||[]).forEach(it=>ids.push({type:'tool', id:it.id, order_ids:it.order_ids}));
   }
-  // 逐个调用（或用 batch）
   Promise.all(ids.map(it=>fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({order_ids:it.order_ids, item_type:it.type, item_id:it.id, checked:checked})})))
     .then(()=>loadPrep());
