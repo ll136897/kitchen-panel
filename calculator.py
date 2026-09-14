@@ -1,6 +1,75 @@
 """备餐计算引擎：套餐/单点 → 食材+工具需求；库存缺口计算；可备份数"""
+import re
+import datetime
 from models import get_db
 from parser import parse_order_text, match_packages_in_db
+
+
+def get_available_tool_stock():
+    """返回 {tool_id: 可用数量} = 总库存 - 已借出未归还数量"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, stock FROM tools")
+        stock = {r["id"]: r["stock"] or 0 for r in cur.fetchall()}
+        cur.execute("""
+            SELECT tool_id, SUM(quantity - returned_qty - lost_qty) as out
+            FROM tool_loans WHERE status IN ('borrowed','partial')
+            GROUP BY tool_id
+        """)
+        for r in cur.fetchall():
+            out = r["out"] or 0
+            stock[r["tool_id"]] = max(0, stock.get(r["tool_id"], 0) - out)
+        return stock
+
+
+def parse_time_str(t):
+    """把 '12.00' / '12:00' / '12点' 解析成 (hour, minute)，失败返回 None"""
+    if not t:
+        return None
+    m = re.search(r"(\d{1,2})[.:：点时](\d{1,2})", str(t))
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.search(r"(\d{1,2})", str(t))
+    if m:
+        return int(m.group(1)), 0
+    return None
+
+
+def calc_prep_urgency(order):
+    """根据用餐时间计算备餐紧迫性。
+    返回 {level: 'normal'|'soon'|'overdue', minutes_to_prep: int, label: str}
+    level: normal=充裕, soon=1小时内该备餐, overdue=已过应备餐时间
+    """
+    prep_lead = 2
+    try:
+        from models import get_db as _g
+        with _g() as c:
+            r = c.execute("SELECT value FROM settings WHERE key='prep_lead_hours'").fetchone()
+            if r:
+                prep_lead = float(r["value"])
+    except Exception:
+        pass
+
+    meal_t = order.get("meal_time") or order.get("booking_time")
+    hhmm = parse_time_str(meal_t)
+    if not hhmm:
+        return {"level": "normal", "minutes_to_prep": None, "label": "时间待定"}
+
+    now = datetime.datetime.now()
+    meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0)
+    prep_start = meal_dt - datetime.timedelta(hours=prep_lead)
+    diff_min = int((prep_start - now).total_seconds() / 60)
+
+    if diff_min < 0:
+        level = "overdue"
+        label = f"⚠️ 应在 {-diff_min} 分钟前开始备餐"
+    elif diff_min <= 60:
+        level = "soon"
+        label = f"⏰ 还剩 {diff_min} 分钟该备餐"
+    else:
+        level = "normal"
+        label = f"还有 {diff_min//60}小时{diff_min%60}分"
+    return {"level": level, "minutes_to_prep": diff_min, "label": label}
 
 
 def calc_order_requirements(order_id):
@@ -110,27 +179,31 @@ def calc_order_requirements(order_id):
                 })
 
         tools_result = []
+        avail_tools = get_available_tool_stock()
         for t_id, need in tool_demand.items():
             cur.execute("SELECT name, stock, threshold FROM tools WHERE id = ?", (t_id,))
             r = cur.fetchone()
             if r:
-                stock = r["stock"] or 0
+                total_stock = r["stock"] or 0
+                avail = avail_tools.get(t_id, total_stock)
                 tools_result.append({
                     "id": t_id, "name": r["name"],
-                    "need": need, "stock": stock,
-                    "shortage": max(0, need - stock),
+                    "need": need, "stock": avail, "total_stock": total_stock,
+                    "shortage": max(0, need - avail),
                     "threshold": r["threshold"] or 0,
-                    "warning": stock <= (r["threshold"] or 0),
+                    "warning": avail <= (r["threshold"] or 0),
                 })
 
         cur.execute("SELECT id, name, stock, threshold FROM tools")
         all_tools = [dict(r) for r in cur.fetchall()]
         existing_tids = {x["id"] for x in tools_result}
         for t in all_tools:
-            if t["id"] not in existing_tids and t["stock"] <= t["threshold"]:
+            avail = avail_tools.get(t["id"], t["stock"])
+            if t["id"] not in existing_tids and avail <= t["threshold"]:
                 tools_result.append({
                     "id": t["id"], "name": t["name"],
-                    "need": 0, "stock": t["stock"], "shortage": 0,
+                    "need": 0, "stock": avail, "total_stock": t["stock"],
+                    "shortage": 0,
                     "threshold": t["threshold"], "warning": True,
                 })
 
@@ -190,15 +263,17 @@ def calc_dashboard():
             })
 
         tool_panel = []
+        avail_tools = get_available_tool_stock()
         cur.execute("SELECT * FROM tools")
         for r in cur.fetchall():
             need = total_tool.get(r["id"], 0)
-            stock = r["stock"] or 0
+            total_stock = r["stock"] or 0
+            stock = avail_tools.get(r["id"], total_stock)
             shortage = max(0, need - stock)
             pct = round(min(100, (need / (stock + need) * 100))) if (stock + need) > 0 else 0
             tool_panel.append({
                 "id": r["id"], "name": r["name"],
-                "stock": stock, "need": need,
+                "stock": stock, "total_stock": total_stock, "need": need,
                 "shortage": shortage,
                 "threshold": r["threshold"] or 0,
                 "warning": stock <= (r["threshold"] or 0),
@@ -251,7 +326,7 @@ def calc_dashboard():
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, booking_date, booking_time, address, contact_name,
+            SELECT id, booking_date, booking_time, meal_time, address, contact_name,
                    contact_phone, amount, status, note
             FROM orders
             WHERE status IN ('pending','preparing')
@@ -267,6 +342,7 @@ def calc_dashboard():
                 WHERE op.order_id = ?
             """, (o["id"],))
             o["packages"] = [dict(x) for x in cur.fetchall()]
+            o["urgency"] = calc_prep_urgency(o)
             upcoming.append(o)
 
     return {
@@ -364,3 +440,141 @@ def preview_parse(raw_text):
     parsed["preview_ingredients"] = sorted(ing_list, key=lambda x: -x["need"])
     parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
     return parsed
+
+
+# 食材分类展示顺序与中文名
+CATEGORY_ORDER = ["meat", "vegetable", "staple", "side", "sauce", "drink", "tableware", "other"]
+CATEGORY_LABEL = {
+    "meat": "🥩 荤菜", "vegetable": "🥬 素菜", "staple": "🍞 主食",
+    "side": "🥗 小菜", "sauce": "🧂 蘸料", "drink": "🥤 饮料水果",
+    "tableware": "🍱 餐具配套", "other": "📦 其他",
+}
+
+
+def calc_merged_prep(order_ids):
+    """合并多订单的备餐需求。
+    返回：
+      orders: [{id, booking_time, meal_time, address, contact_name, packages, urgency}]
+      ingredients: {category: [{id, name, unit, total, shortage, stock, ...}]}  按分类
+      tools: [{id, name, total, shortage, stock, ...}]
+      tableware: [{id, name, unit, total, ...}]  餐具单独拎出给打包核对
+      checked_map: {"ing_<id>": bool, "tool_<id>": bool}  合并勾选状态（全部子项勾了才算勾）
+    """
+    if not order_ids:
+        order_ids = []
+
+    # 拉取订单基础信息
+    orders = []
+    with get_db() as conn:
+        cur = conn.cursor()
+        for oid in order_ids:
+            cur.execute("""
+                SELECT id, booking_date, booking_time, meal_time, address, contact_name,
+                       contact_phone, amount, status, note
+                FROM orders WHERE id = ?
+            """, (oid,))
+            r = cur.fetchone()
+            if not r:
+                continue
+            o = dict(r)
+            cur.execute("""
+                SELECT op.quantity, p.name
+                FROM order_packages op
+                LEFT JOIN packages p ON op.package_id = p.id
+                WHERE op.order_id = ?
+            """, (oid,))
+            o["packages"] = [dict(x) for x in cur.fetchall()]
+            o["urgency"] = calc_prep_urgency(o)
+            orders.append(o)
+
+    # 逐单算需求并合并
+    ing_merge = {}  # ing_id -> {name, unit, category, total, stock, threshold}
+    tool_merge = {}  # tool_id -> {name, total, stock, threshold}
+    # 记录每个 (order_id, item_type, item_id) 的明细，用于勾选
+    detail_keys = []  # [(order_id, item_type, item_id)]
+
+    for o in orders:
+        req = calc_order_requirements(o["id"])
+        for ing in req["ingredients"]:
+            key = ing["id"]
+            if key not in ing_merge:
+                ing_merge[key] = {
+                    "id": ing["id"], "name": ing["name"], "unit": ing["unit"],
+                    "category": "other", "total": 0, "stock": ing["stock"],
+                    "threshold": ing["threshold"], "order_ids": [],
+                }
+            ing_merge[key]["total"] += ing["need"]
+            ing_merge[key]["order_ids"].append(o["id"])
+            detail_keys.append((o["id"], "ingredient", ing["id"]))
+        for tl in req["tools"]:
+            key = tl["id"]
+            if key not in tool_merge:
+                tool_merge[key] = {
+                    "id": tl["id"], "name": tl["name"], "total": 0,
+                    "stock": tl["stock"], "threshold": tl["threshold"], "order_ids": [],
+                }
+            tool_merge[key]["total"] += tl["need"]
+            tool_merge[key]["order_ids"].append(o["id"])
+            detail_keys.append((o["id"], "tool", tl["id"]))
+
+    # 补全食材 category
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, category FROM ingredients")
+        cat_map = {r["id"]: r["category"] for r in cur.fetchall()}
+    for k, v in ing_merge.items():
+        v["category"] = cat_map.get(v["id"], "other")
+        v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
+
+    for v in tool_merge.values():
+        v["shortage"] = max(0, v["total"] - v["stock"])
+
+    # 勾选状态：从 prep_checklist 查，某合并项只有当所有相关 order 的该 item 都勾了才算勾
+    checked_map = {}
+    with get_db() as conn:
+        cur = conn.cursor()
+        # 收集每个 (order_id, item_type, item_id) 的 checked
+        cur.execute("""
+            SELECT order_id, item_type, item_id, checked FROM prep_checklist
+            WHERE order_id IN (%s)
+        """ % ",".join("?" * len(order_ids)) if order_ids else "SELECT 1 WHERE 0",
+                    tuple(order_ids) if order_ids else ())
+        if order_ids:
+            rows = cur.fetchall()
+            checked_detail = {(r["order_id"], r["item_type"], r["item_id"]): bool(r["checked"]) for r in rows}
+        else:
+            checked_detail = {}
+
+    # 按 item_id 聚合：同类型同item的所有detail都checked才算
+    ing_checked = {}
+    tool_checked = {}
+    for oid, itype, iid in detail_keys:
+        c = checked_detail.get((oid, itype, iid), False)
+        if itype == "ingredient":
+            ing_checked.setdefault(iid, []).append(c)
+        else:
+            tool_checked.setdefault(iid, []).append(c)
+    for iid, vals in ing_checked.items():
+        checked_map[f"ing_{iid}"] = all(vals) and len(vals) > 0
+    for iid, vals in tool_checked.items():
+        checked_map[f"tool_{iid}"] = all(vals) and len(vals) > 0
+
+    # 食材按分类分组
+    ingredients_by_cat = {}
+    for cat in CATEGORY_ORDER:
+        items = [v for v in ing_merge.values() if v["category"] == cat]
+        if items:
+            ingredients_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
+
+    # 餐具单独拎出
+    tableware = ingredients_by_cat.pop("tableware", [])
+
+    tools_list = sorted(tool_merge.values(), key=lambda x: -x["total"])
+
+    return {
+        "orders": orders,
+        "ingredients": ingredients_by_cat,
+        "tools": tools_list,
+        "tableware": tableware,
+        "checked_map": checked_map,
+    }

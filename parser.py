@@ -17,6 +17,27 @@ def _parse_amount(text):
     return float(m.group(1)) if m else 0.0
 
 
+def _normalize_date(s):
+    """把各种日期格式归一化成 YYYY-MM-DD。
+    支持：9.14 / 9-14 / 09.14 / 9月14日 / 2026-09-14
+    缺少年份时用当前年份。
+    """
+    import datetime
+    s = str(s).strip()
+    if not s:
+        return ""
+    # 已是 YYYY-MM-DD
+    m = re.match(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    # M.D 或 M-D
+    m = re.match(r"^(\d{1,2})[.\-/月](\d{1,2})日?$", s)
+    if m:
+        year = datetime.date.today().year
+        return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return s
+
+
 def parse_order_text(raw_text):
     """
     解析微信确认文本。
@@ -74,10 +95,10 @@ def parse_order_text(raw_text):
     for key, value_lines in sections:
         value = " ".join(v for v in value_lines if v).strip()
         if key == "预约时间":
-            # 9.11 12.00
+            # 9.11 12.00 / 9月11日 12点 / 09-11 12:00
             parts = re.split(r"[\s]+", value)
             if parts:
-                result["booking_date"] = parts[0]
+                result["booking_date"] = _normalize_date(parts[0])
             if len(parts) > 1:
                 result["booking_time"] = parts[1]
         elif key == "预约项目":

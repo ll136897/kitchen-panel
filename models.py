@@ -26,9 +26,14 @@ def init_db():
                 unit TEXT NOT NULL,              -- 单位：克/份/个/瓶
                 stock REAL NOT NULL DEFAULT 0,    -- 当前库存
                 threshold REAL NOT NULL DEFAULT 0,-- 预警阈值
-                cost REAL NOT NULL DEFAULT 0      -- 单位成本（用于定价）
+                cost REAL NOT NULL DEFAULT 0,      -- 单位成本（用于定价）
+                category TEXT NOT NULL DEFAULT 'other'  -- meat/vegetable/staple/side/sauce/drink/tableware
             )
         """)
+        # 迁移：老库补 category 字段
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(ingredients)").fetchall()]
+        if "category" not in cols:
+            cur.execute("ALTER TABLE ingredients ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
 
         # 工具库
         cur.execute("""
@@ -173,6 +178,41 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+
+        # 工具借出归还记录（户外烤肉工具要回收）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tool_loans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                tool_id INTEGER NOT NULL,
+                quantity REAL NOT NULL,           -- 借出数量
+                returned_qty REAL NOT NULL DEFAULT 0,  -- 已归还
+                lost_qty REAL NOT NULL DEFAULT 0,      -- 丢失/损坏
+                status TEXT NOT NULL DEFAULT 'borrowed', -- borrowed/returned/lost/partial
+                note TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                returned_at TEXT,
+                FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+                FOREIGN KEY (tool_id) REFERENCES tools(id)
+            )
+        """)
+
+        # 备餐勾选清单（后厨在线打勾用）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS prep_checklist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                item_type TEXT NOT NULL,          -- ingredient/tool
+                item_id INTEGER NOT NULL,
+                quantity REAL NOT NULL,
+                checked INTEGER NOT NULL DEFAULT 0,
+                checked_at TEXT,
+                FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+            )
+        """)
+
+        # 默认设置：备餐提前小时数
+        cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 
         conn.commit()
     print(f"[OK] 数据库已初始化: {DB_PATH}")

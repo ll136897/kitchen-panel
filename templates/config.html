@@ -11,8 +11,9 @@
   <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
   <a href="/" class="nav-item">📊 面板</a>
   <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
   <a href="/history" class="nav-item">📈 历史</a>
-  <a href="/config" class="nav-item">⚙️ 配置</a>
+  <a href="/config" class="nav-item active">⚙️ 配置</a>
 </nav>
 <div class="container">
   <h1 class="title">⚙️ 配置</h1>
@@ -33,6 +34,12 @@
       <input id="deliveryFee" type="number" step="1" style="width:90px">
       <button class="btn btn-primary" onclick="saveSettings()">保存</button>
       <span class="muted" id="deliveryHint"></span>
+    </div>
+    <div class="inline-form" style="margin-top:8px">
+      <label>⏰ 备餐提前(小时)</label>
+      <input id="prepLead" type="number" step="0.5" style="width:90px" placeholder="2">
+      <button class="btn btn-primary" onclick="savePrepLead()">保存</button>
+      <span class="muted">用餐时间 - 该值 = 应开始备餐时间</span>
     </div>
   </div>
 
@@ -120,10 +127,17 @@ function loadSettings(){
   fetch('/api/settings').then(r=>r.json()).then(d=>{
     const v = d.settings && d.settings.delivery_fee ? d.settings.delivery_fee.value : '100';
     document.getElementById('deliveryFee').value = v;
+    const pl = d.settings && d.settings.prep_lead_hours ? d.settings.prep_lead_hours.value : '2';
+    document.getElementById('prepLead').value = pl;
     // 顺便在 hint 里展示所有套餐拆分
     const rows = (d.packages||[]).map(p=>`${p.name} ¥${p.price}=${p.base_price}+配送¥${p.delivery}`).join('， ');
     document.getElementById('deliveryHint').textContent = rows;
   });
+}
+function savePrepLead(){
+  const v = document.getElementById('prepLead').value;
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prep_lead_hours:v})})
+    .then(r=>r.json()).then(()=>alert('✅ 已保存'));
 }
 function saveSettings(){
   const v = document.getElementById('deliveryFee').value;

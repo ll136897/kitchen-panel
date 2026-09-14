@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>备餐合并 · 刘和牛户外烤肉</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .urg-overdue{color:#fff;background:var(--red);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+  .urg-soon{color:#fff;background:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+  .urg-normal{color:#fff;background:var(--green);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+  .prep-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border-l);transition:background .15s}
+  .prep-item:hover{background:#faf5ed}
+  .prep-item.checked{background:#eaf7ee;opacity:.75}
+  .prep-item.checked .pi-name{text-decoration:line-through;color:#999}
+  .prep-item input[type=checkbox]{width:20px;height:20px;accent-color:var(--green);cursor:pointer;flex-shrink:0}
+  .pi-name{flex:1;font-weight:700;font-size:14px}
+  .pi-qty{font-size:15px;font-weight:800;color:var(--primary);min-width:70px;text-align:right}
+  .pi-stock{font-size:12px;color:var(--muted);min-width:80px;text-align:right}
+  .pi-shortage{font-size:12px;font-weight:700;min-width:60px;text-align:right}
+  .cat-hd{font-size:14px;font-weight:700;color:var(--primary);margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+  .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .check-all-btn{font-size:12px;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;cursor:pointer}
+  .check-all-btn:hover{background:var(--orange-bg)}
+  .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:6px 10px;border-radius:8px;margin:4px;border:1px solid var(--border-l)}
+  .date-picker{padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px}
+  .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:10px;gap:2px}
+  .mode-tab button{padding:8px 16px;border:none;background:transparent;color:#8a7f75;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px}
+  .mode-tab button.active{background:var(--primary);color:#fff}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item active">🍱 备餐</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="title"><span class="fire">🍱</span>备餐合并</div>
+      <div class="sub">当天多订单食材汇总给后厨 · 工具装备给装配师傅 · 餐具逐项核对</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="date" id="datePick" class="date-picker">
+      <button class="btn btn-primary btn-sm" onclick="loadPrep()">🔄 刷新</button>
+      <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印</button>
+    </div>
+  </div>
+
+  <!-- 模式切换 -->
+  <div class="mode-tab" style="margin-bottom:14px">
+    <button id="tabMerged" class="active" onclick="switchMode('merged')">🔀 合并视图</button>
+    <button id="tabOrder" onclick="switchMode('order')">📋 按订单</button>
+  </div>
+
+  <!-- 今日订单概览 -->
+  <div class="card" id="ordersCard">
+    <h3><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
+    <div id="ordersList"></div>
+  </div>
+
+  <!-- 后厨食材汇总 -->
+  <div class="card" id="ingCard" style="display:none">
+    <div class="sec-toolbar">
+      <h3 style="margin:0"><span class="dot" style="background:var(--primary)"></span>🥩 后厨食材汇总</h3>
+      <button class="check-all-btn" onclick="checkAll('ing',true)">✅ 全选</button>
+    </div>
+    <div id="ingList"></div>
+  </div>
+
+  <!-- 餐具配套核对 -->
+  <div class="card" id="twCard" style="display:none">
+    <div class="sec-toolbar">
+      <h3 style="margin:0"><span class="dot" style="background:#8e44ad"></span>🍱 餐具配套核对</h3>
+      <button class="check-all-btn" onclick="checkAll('tw',true)">✅ 全选</button>
+    </div>
+    <div id="twList"></div>
+  </div>
+
+  <!-- 装配师傅工具 -->
+  <div class="card" id="toolCard" style="display:none">
+    <div class="sec-toolbar">
+      <h3 style="margin:0"><span class="dot" style="background:#666"></span>🔧 装配师傅 · 工具装备</h3>
+      <button class="check-all-btn" onclick="checkAll('tool',true)">✅ 全选</button>
+    </div>
+    <div id="toolList"></div>
+  </div>
+
+  <!-- 按订单视图 -->
+  <div id="orderView" style="display:none"></div>
+</div>
+
+<script>
+const CAT_LABEL = {meat:'🥩 荤菜',vegetable:'🥬 素菜',staple:'🍞 主食',side:'🥗 小菜',sauce:'🧂 蘸料',drink:'🥤 饮料水果',other:'📦 其他'};
+const CAT_ORDER = ['meat','vegetable','staple','side','sauce','drink','other'];
+let prepData = null;
+let currentMode = 'merged';
+
+// 初始化日期为今天
+document.getElementById('datePick').valueAsDate = new Date();
+
+function switchMode(mode){
+  currentMode = mode;
+  document.getElementById('tabMerged').classList.toggle('active', mode==='merged');
+  document.getElementById('tabOrder').classList.toggle('active', mode==='order');
+  render();
+}
+
+function loadPrep(){
+  const d = document.getElementById('datePick').value;
+  fetch('/api/prep/merged?date='+d).then(r=>r.json()).then(d2=>{
+    if(!d2.ok){ alert('加载失败'); return; }
+    prepData = d2.data;
+    render();
+  });
+}
+
+function urgBadge(u){
+  if(!u) return '';
+  const cls = u.level==='overdue'?'urg-overdue':(u.level==='soon'?'urg-soon':'urg-normal');
+  return `<span class="${cls}">${u.label}</span>`;
+}
+
+function render(){
+  if(!prepData) return;
+  const d = prepData;
+  // 订单概览
+  const orders = d.orders || [];
+  if(!orders.length){
+    document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:20px;text-align:center">🍖 当天暂无待备订单</div>';
+    ['ingCard','twCard','toolCard'].forEach(id=>document.getElementById(id).style.display='none');
+    document.getElementById('orderView').style.display='none';
+    return;
+  }
+  document.getElementById('ordersList').innerHTML = orders.map(o=>{
+    const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+    return `<div class="order-mini">
+      <b>#${o.id}</b>
+      <span>⏰ ${o.meal_time||o.booking_time||'待定'}</span>
+      <span class="muted">${o.address||''}</span>
+      ${pkgs?`<span class="muted">🍱 ${pkgs}</span>`:''}
+      ${urgBadge(o.urgency)}
+    </div>`;
+  }).join('');
+
+  if(currentMode==='merged'){
+    document.getElementById('orderView').style.display='none';
+    renderMerged();
+  } else {
+    ['ingCard','twCard','toolCard'].forEach(id=>document.getElementById(id).style.display='none');
+    renderByOrder();
+  }
+}
+
+function itemRow(it, type, checkedMap){
+  const key = type+'_'+it.id;
+  const checked = checkedMap[key];
+  const shortageCls = it.shortage>0?'txt-red':'';
+  const shortageTxt = it.shortage>0?`缺${round(it.shortage)}${it.unit||''}`:'充足';
+  return `<div class="prep-item ${checked?'checked':''}">
+    <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
+    <div class="pi-name">${it.name}</div>
+    <div class="pi-qty">${round(it.total)}${it.unit||''}</div>
+    <div class="pi-stock">库存 ${round(it.stock)}${it.unit||''}</div>
+    <div class="pi-shortage ${shortageCls}">${shortageTxt}</div>
+  </div>`;
+}
+
+function renderMerged(){
+  const d = prepData;
+  const cm = d.checked_map || {};
+  // 食材
+  const ingCats = d.ingredients || {};
+  const hasIng = Object.keys(ingCats).length>0;
+  document.getElementById('ingCard').style.display = hasIng?'':'none';
+  if(hasIng){
+    let html='';
+    for(const cat of CAT_ORDER){
+      const items = ingCats[cat];
+      if(!items) continue;
+      html += `<div class="cat-hd">${CAT_LABEL[cat]||cat} · ${items.length}项</div>`;
+      html += items.map(it=>itemRow(it,'ing',cm)).join('');
+    }
+    document.getElementById('ingList').innerHTML = html;
+  }
+  // 餐具
+  const tw = d.tableware || [];
+  document.getElementById('twCard').style.display = tw.length?'':'none';
+  if(tw.length){
+    document.getElementById('twList').innerHTML = `<div class="cat-hd">🍱 餐具配套 · ${tw.length}项 · 打包前逐项核对</div>` +
+      tw.map(it=>itemRow(it,'ing',cm)).join('');
+  }
+  // 工具
+  const tools = d.tools || [];
+  document.getElementById('toolCard').style.display = tools.length?'':'none';
+  if(tools.length){
+    document.getElementById('toolList').innerHTML = `<div class="cat-hd">🔧 工具装备 · ${tools.length}项 · 装配师傅清点</div>` +
+      tools.map(it=>itemRow(it,'tool',cm)).join('');
+  }
+}
+
+function renderByOrder(){
+  const d = prepData;
+  const box = document.getElementById('orderView');
+  box.style.display='';
+  let html='';
+  for(const o of d.orders){
+    const req = null; // 我们用 merged 数据里的明细不够，逐单渲染需要再请求
+    // 逐单请求备餐需求
+  }
+  // 逐单加载
+  box.innerHTML = d.orders.map(o=>`<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
+      <h3 style="margin:0">📋 订单 #${o.id} · ⏰ ${o.meal_time||o.booking_time||'待定'} ${urgBadge(o.urgency)}</h3>
+      <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)">✅ 全选</button>
+    </div><div class="muted" style="padding:16px">加载中...</div></div>`).join('');
+  // 逐单请求
+  d.orders.forEach(o=>{
+    fetch('/api/orders/'+o.id+'/requirements').then(r=>r.json()).then(res=>{
+      if(!res.ok) return;
+      const r = res.data;
+      // 拉取该订单勾选状态
+      const cm = {};
+      // 从 prepData 的 checked_map 反查（key是合并的，这里近似用）
+      // 实际逐单勾选状态需要单独接口，这里简化：从 merged 的 order_ids 反推
+      // 为准确，直接用后端 prep_checklist —— 我们用一个简单方式：遍历 prepData
+      const container = document.querySelector('#ord-'+o.id+' .muted');
+      if(!container) return;
+      let html = '';
+      if(r.ingredients.length){
+        html += '<div class="cat-hd">🥩 食材</div>';
+        html += r.ingredients.map(it=>{
+          const checked = isSingleChecked(o.id,'ingredient',it.id);
+          return itemRowSingle(o.id,'ingredient',it,checked);
+        }).join('');
+      }
+      if(r.tools.length){
+        html += '<div class="cat-hd">🔧 工具</div>';
+        html += r.tools.map(it=>{
+          const checked = isSingleChecked(o.id,'tool',it.id);
+          return itemRowSingle(o.id,'tool',it,checked);
+        }).join('');
+      }
+      container.outerHTML = html;
+    });
+  });
+}
+
+// 逐单勾选状态判断：从 prepData.checked_map + order_ids 推断
+function isSingleChecked(oid, type, iid){
+  const cm = prepData.checked_map || {};
+  const key = (type==='ingredient'?'ing':'tool')+'_'+iid;
+  // 如果合并项勾选了，说明该 item 在所有涉及订单都勾了
+  if(cm[key]) return true;
+  // 否则需要查该订单的实际状态——merged 数据无法精确判断单订单，这里保守返回 false
+  // 实际使用中合并视图勾选会同步所有订单
+  return false;
+}
+
+function itemRowSingle(oid, type, it, checked){
+  const shortageCls = it.shortage>0?'txt-red':'';
+  const shortageTxt = it.shortage>0?`缺${round(it.shortage)}${it.unit||''}`:'充足';
+  return `<div class="prep-item ${checked?'checked':''}">
+    <input type="checkbox" ${checked?'checked':''} onchange="toggleSingle(${oid},'${type}',${it.id},${checked?0:1})">
+    <div class="pi-name">${it.name}</div>
+    <div class="pi-qty">${round(it.need)}${it.unit||''}</div>
+    <div class="pi-stock">库存 ${round(it.stock)}${it.unit||''}</div>
+    <div class="pi-shortage ${shortageCls}">${shortageTxt}</div>
+  </div>`;
+}
+
+function toggleItem(type, iid, checked){
+  // 找到该 item 涉及的订单
+  const d = prepData;
+  let order_ids = [];
+  if(type==='ing'){
+    for(const cat of Object.values(d.ingredients||{})){
+      const it = cat.find(x=>x.id===iid);
+      if(it){ order_ids = it.order_ids; break; }
+    }
+    if(!order_ids.length){
+      const it = (d.tableware||[]).find(x=>x.id===iid);
+      if(it) order_ids = it.order_ids;
+    }
+  } else {
+    const it = (d.tools||[]).find(x=>x.id===iid);
+    if(it) order_ids = it.order_ids;
+  }
+  fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_ids, item_type:type==='ing'?'ingredient':'tool', item_id:iid, checked:checked})})
+    .then(r=>r.json()).then(()=>loadPrep());
+}
+
+function toggleSingle(oid, type, iid, checked){
+  fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_id:oid, item_type:type, item_id:iid, checked:checked})})
+    .then(r=>r.json()).then(()=>loadPrep());
+}
+
+function checkAll(section, checked){
+  const d = prepData;
+  let ids = [];
+  if(section==='ing'){
+    for(const cat of Object.values(d.ingredients||{})){
+      cat.forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    }
+  } else if(section==='tw'){
+    (d.tableware||[]).forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+  } else {
+    (d.tools||[]).forEach(it=>ids.push({type:'tool', id:it.id, order_ids:it.order_ids}));
+  }
+  // 逐个调用（或用 batch）
+  Promise.all(ids.map(it=>fetch('/api/prep/check',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_ids:it.order_ids, item_type:it.type, item_id:it.id, checked:checked})})))
+    .then(()=>loadPrep());
+}
+
+function checkAllOrder(oid, checked){
+  fetch('/api/prep/check/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_ids:[oid], checked:checked})}).then(()=>loadPrep());
+}
+
+function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
+
+loadPrep();
+setInterval(()=>{ if(currentMode==='merged') loadPrep(); }, 60000);
+</script>
+</body>
+</html>

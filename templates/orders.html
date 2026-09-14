@@ -10,7 +10,8 @@
 <nav class="nav">
   <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
   <a href="/" class="nav-item">📊 面板</a>
-  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/orders" class="nav-item active">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
   <a href="/history" class="nav-item">📈 历史</a>
   <a href="/config" class="nav-item">⚙️ 配置</a>
 </nav>
@@ -28,6 +29,22 @@
   <div class="kpi-row" id="orderKPIs" style="margin-bottom:16px"></div>
 
   <div class="order-list" id="orderList"></div>
+</div>
+
+<!-- 工具归还弹窗 -->
+<div id="returnModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:16px">
+  <div class="card" style="max-width:560px;width:100%;max-height:90vh;overflow:auto">
+    <h3>🔧 工具归还 · 订单 <span id="retOid"></span></h3>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">核对归还数量，丢失/损坏需填写（将从库存扣除并记录报损）</div>
+    <table class="tbl" id="retTable">
+      <thead><tr><th>工具</th><th>借出</th><th>归还</th><th>丢失/损坏</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-primary" onclick="submitReturn()">✅ 确认归还</button>
+      <button class="btn" onclick="closeReturn()">取消</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -89,6 +106,7 @@ function loadOrders(){
           <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
           ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
           ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
+          ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
           ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
         </div>
         <div id="req-${o.id}" class="req-box" style="display:none"></div>
@@ -129,6 +147,45 @@ function viewReq(oid){
 function setStatus(oid,st){
   fetch('/api/orders/'+oid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})})
     .then(r=>r.json()).then(()=>loadOrders());
+}
+
+let currentReturnOid = null;
+function openReturn(oid){
+  currentReturnOid = oid;
+  document.getElementById('retOid').textContent = '#'+oid;
+  const tbody = document.querySelector('#retTable tbody');
+  tbody.innerHTML = '<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">加载中...</td></tr>';
+  document.getElementById('returnModal').style.display = 'flex';
+  fetch('/api/orders/'+oid+'/loans').then(r=>r.json()).then(d=>{
+    if(!d.ok || !d.data.length){
+      tbody.innerHTML = '<tr><td colspan="4" class="muted" style="text-align:center;padding:20px">该订单暂无工具借出记录（需先点"开始备餐"）</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.data.map(l=>`
+      <tr>
+        <td><b>${l.tool_name}</b></td>
+        <td>${l.quantity}</td>
+        <td><input type="number" id="ret-${l.id}" value="${l.returned_qty||l.quantity}" min="0" max="${l.quantity}" style="width:60px;padding:4px;border:1px solid var(--border);border-radius:6px"></td>
+        <td><input type="number" id="lost-${l.id}" value="${l.lost_qty||0}" min="0" max="${l.quantity}" style="width:60px;padding:4px;border:1px solid var(--border);border-radius:6px"></td>
+      </tr>`).join('');
+  });
+}
+function closeReturn(){ document.getElementById('returnModal').style.display='none'; }
+function submitReturn(){
+  if(!currentReturnOid) return;
+  const items = [];
+  document.querySelectorAll('#retTable tbody tr').forEach(tr=>{
+    const inputs = tr.querySelectorAll('input');
+    if(inputs.length===2){
+      const loanId = parseInt(inputs[0].id.replace('ret-',''));
+      items.push({loan_id:loanId, returned_qty:parseFloat(inputs[0].value||0), lost_qty:parseFloat(inputs[1].value||0)});
+    }
+  });
+  fetch('/api/orders/'+currentReturnOid+'/tools/return',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items})}).then(r=>r.json()).then(d=>{
+      if(d.ok){ alert('✅ 归还记录已保存'); closeReturn(); loadOrders(); }
+      else alert('失败：'+(d.msg||''));
+    });
 }
 
 loadOrders();

@@ -37,6 +37,7 @@
   <div class="nav-brand"><span class="flame">🔥</span>刘和牛</div>
   <a href="/" class="nav-item active">📊 面板</a>
   <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
   <a href="/history" class="nav-item">📈 历史</a>
   <a href="/config" class="nav-item">⚙️ 配置</a>
 </nav>
@@ -48,6 +49,7 @@
       <div class="sub">粘贴微信订单 → 自动解析 → 一键入库 · 库存预警 · 备餐能力</div>
     </div>
     <div style="display:flex;gap:8px">
+      <a href="/prep" class="btn btn-accent btn-sm">🍱 去备餐</a>
       <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印</button>
       <button class="btn btn-primary btn-sm" onclick="loadDash()">🔄 刷新</button>
     </div>
@@ -453,9 +455,12 @@ function loadDash(){
         for(const o of orders){
           const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
           const stTag = o.status==='preparing'?'<span class="tag tag-blue tag-sm">备餐中</span>':'<span class="tag tag-orange tag-sm">待备</span>';
+          const u = o.urgency || {};
+          const urgCls = u.level==='overdue'?'background:var(--red)':(u.level==='soon'?'background:var(--orange)':'background:var(--green)');
+          const urgTag = u.label?`<span class="tag tag-sm" style="color:#fff;${urgCls}">${u.label}</span>`:'';
           html += `<div class="upcoming-order ${o.status}">
             <div class="uo-main">
-              <div class="uo-time">⏰ ${o.booking_time||'时间待定'} ${stTag}</div>
+              <div class="uo-time">⏰ ${o.booking_time||'时间待定'} ${stTag} ${urgTag}</div>
               <div class="uo-addr">📍 ${o.address||'地址待定'} · 👤 ${o.contact_name||''} ${o.contact_phone||''}</div>
               ${pkgs?`<div class="uo-pkgs">🍱 ${pkgs}</div>`:''}
               ${o.note?`<div class="uo-pkgs muted">📝 ${o.note}</div>`:''}

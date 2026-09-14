@@ -3,7 +3,7 @@ import math
 from flask import Flask, request, jsonify, render_template, g
 from models import get_db, init_db
 from parser import parse_order_text, match_packages_in_db
-from calculator import calc_order_requirements, calc_dashboard, preview_parse
+from calculator import calc_order_requirements, calc_dashboard, preview_parse, calc_merged_prep, calc_prep_urgency
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -52,6 +52,11 @@ def orders_page():
 @app.route("/history")
 def history_page():
     return render_template("history.html")
+
+
+@app.route("/prep")
+def prep_page():
+    return render_template("prep.html")
 
 
 # ===== 订单解析与入库 =====
@@ -135,8 +140,26 @@ def update_order_status(oid):
         return jsonify({"ok": False, "msg": "状态非法"}), 400
     db = g.db
     db.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
+    # 转备餐中 → 自动借出该订单所需工具
+    if status == "preparing":
+        borrow_tools(db, oid)
     db.commit()
     return jsonify({"ok": True})
+
+
+def borrow_tools(db, order_id):
+    """根据订单需求创建工具借出记录（若已存在则跳过）"""
+    req = calc_order_requirements(order_id)
+    cur = db.cursor()
+    cur.execute("SELECT tool_id FROM tool_loans WHERE order_id=?", (order_id,))
+    existing = {r["tool_id"] for r in cur.fetchall()}
+    for t in req["tools"]:
+        if t["id"] in existing:
+            continue
+        cur.execute("""
+            INSERT INTO tool_loans (order_id, tool_id, quantity, status)
+            VALUES (?,?,?,'borrowed')
+        """, (order_id, t["id"], t["need"]))
 
 
 @app.route("/api/orders/<int:oid>/requirements")
@@ -571,6 +594,171 @@ def print_menu():
 <tbody>{tool_rows or '<tr><td colspan=2 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}</tbody></table>
 </body></html>"""
     return html
+
+
+# ===== 工具借出归还 =====
+@app.route("/api/orders/<int:oid>/loans")
+def get_order_loans(oid):
+    """获取订单的工具借出记录"""
+    db = g.db
+    cur = db.cursor()
+    cur.execute("""
+        SELECT tl.*, t.name as tool_name
+        FROM tool_loans tl JOIN tools t ON tl.tool_id = t.id
+        WHERE tl.order_id = ? ORDER BY tl.id
+    """, (oid,))
+    loans = [dict(r) for r in cur.fetchall()]
+    return jsonify({"ok": True, "data": loans})
+
+
+@app.route("/api/orders/<int:oid>/tools/return", methods=["POST"])
+def return_tools(oid):
+    """归还工具。body: {items: [{loan_id, returned_qty, lost_qty, note}]}
+    lost_qty > 0 时自动从工具总库存扣除（报损）。
+    """
+    data = request.get_json(force=True)
+    items = data.get("items", [])
+    db = g.db
+    cur = db.cursor()
+    done = 0
+    for it in items:
+        lid = it.get("loan_id")
+        returned = float(it.get("returned_qty", 0))
+        lost = float(it.get("lost_qty", 0))
+        note = it.get("note", "")
+        cur.execute("SELECT * FROM tool_loans WHERE id=? AND order_id=?", (lid, oid))
+        loan = cur.fetchone()
+        if not loan:
+            continue
+        total = loan["quantity"]
+        new_returned = min(total, returned)
+        new_lost = min(total - new_returned, lost)
+        if new_returned + new_lost >= total:
+            status = "returned" if new_lost == 0 else "lost"
+        else:
+            status = "partial"
+        cur.execute("""
+            UPDATE tool_loans SET returned_qty=?, lost_qty=?, status=?, note=?,
+            returned_at=datetime('now','localtime') WHERE id=?
+        """, (new_returned, new_lost, status, note, lid))
+        # 丢失工具从总库存扣除
+        if new_lost > 0:
+            cur.execute("UPDATE tools SET stock = stock - ? WHERE id=?", (new_lost, loan["tool_id"]))
+            cur.execute("""
+                INSERT INTO stock_logs (item_type, item_id, delta, reason)
+                VALUES ('tool',?,?,?)
+            """, (loan["tool_id"], -new_lost, f"订单#{oid} 工具丢失/损坏"))
+        done += 1
+    db.commit()
+    return jsonify({"ok": True, "done": done})
+
+
+# ===== 备餐合并视图 =====
+@app.route("/api/prep/merged")
+def prep_merged():
+    """合并备餐视图。默认取当天 pending/preparing 订单；可传 ?date=YYYY-MM-DD 或 ?ids=1,2,3"""
+    import datetime
+    db = g.db
+    cur = db.cursor()
+    ids_param = request.args.get("ids")
+    if ids_param:
+        order_ids = [int(x) for x in ids_param.split(",") if x.strip().isdigit()]
+    else:
+        date = request.args.get("date") or datetime.date.today().isoformat()
+        cur.execute("""
+            SELECT id FROM orders
+            WHERE status IN ('pending','preparing') AND booking_date = ?
+            ORDER BY booking_time
+        """, (date,))
+        order_ids = [r["id"] for r in cur.fetchall()]
+    data = calc_merged_prep(order_ids)
+    return jsonify({"ok": True, "data": data, "order_ids": order_ids})
+
+
+# ===== 备餐勾选 =====
+@app.route("/api/prep/check", methods=["POST"])
+def prep_check():
+    """勾选/取消备餐项。
+    body: {order_id or order_ids, item_type, item_id, checked}
+    order_ids: 数组，用于合并视图一次勾选多个订单的同一项。
+    """
+    data = request.get_json(force=True)
+    itype = data.get("item_type")
+    iid = data.get("item_id")
+    checked = 1 if data.get("checked") else 0
+    oids = data.get("order_ids")
+    if oids is None:
+        oids = [data.get("order_id")]
+    oids = [int(x) for x in oids if x]
+    if not oids or itype not in ("ingredient", "tool") or not iid:
+        return jsonify({"ok": False, "msg": "参数错误"}), 400
+    db = g.db
+    cur = db.cursor()
+    import datetime as _dt
+    ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for oid in oids:
+        cur.execute("""
+            SELECT id, quantity FROM prep_checklist
+            WHERE order_id=? AND item_type=? AND item_id=?
+        """, (oid, itype, iid))
+        row = cur.fetchone()
+        if row:
+            cur.execute("UPDATE prep_checklist SET checked=?, checked_at=? WHERE id=?",
+                        (checked, ts if checked else None, row["id"]))
+        else:
+            qty = 0
+            if itype == "ingredient":
+                cur.execute("SELECT per_package FROM package_ingredients WHERE ingredient_id=? LIMIT 1", (iid,))
+                r = cur.fetchone()
+                qty = r["per_package"] if r else 0
+            else:
+                cur.execute("SELECT per_package FROM package_tools WHERE tool_id=? LIMIT 1", (iid,))
+                r = cur.fetchone()
+                qty = r["per_package"] if r else 0
+            cur.execute("""
+                INSERT INTO prep_checklist (order_id, item_type, item_id, quantity, checked, checked_at)
+                VALUES (?,?,?,?,?,?)
+            """, (oid, itype, iid, qty, checked, ts if checked else None))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/prep/check/batch", methods=["POST"])
+def prep_check_batch():
+    """批量勾选：给指定订单的所有备餐项设置 checked 状态
+    body: {order_ids: [...], checked: 0/1}
+    """
+    data = request.get_json(force=True)
+    order_ids = data.get("order_ids", [])
+    checked = 1 if data.get("checked") else 0
+    db = g.db
+    cur = db.cursor()
+    import datetime as _dt
+    ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for oid in order_ids:
+        # 确保所有需求项都有记录
+        req = calc_order_requirements(oid)
+        for ing in req["ingredients"]:
+            cur.execute("SELECT id FROM prep_checklist WHERE order_id=? AND item_type='ingredient' AND item_id=?",
+                        (oid, ing["id"]))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO prep_checklist (order_id, item_type, item_id, quantity, checked)
+                    VALUES (?,?,?,?,?)
+                """, (oid, "ingredient", ing["id"], ing["need"], 0))
+        for tl in req["tools"]:
+            cur.execute("SELECT id FROM prep_checklist WHERE order_id=? AND item_type='tool' AND item_id=?",
+                        (oid, tl["id"]))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO prep_checklist (order_id, item_type, item_id, quantity, checked)
+                    VALUES (?,?,?,?,?)
+                """, (oid, "tool", tl["id"], tl["need"], 0))
+        # 批量更新该订单所有项
+        cur.execute("UPDATE prep_checklist SET checked=?, checked_at=? WHERE order_id=?",
+                    (checked, ts if checked else None, oid))
+    db.commit()
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
