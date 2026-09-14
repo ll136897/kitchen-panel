@@ -48,14 +48,131 @@ body{
   background:linear-gradient(90deg,transparent,var(--primary) 50%,transparent);
   opacity:.7;
 }
+/* ===== 品牌抬头 · 圆形徽章 + 渐变文字（结合门店 LOGO 刺绣风）===== */
 .nav-brand{
-  display:flex;align-items:center;gap:8px;padding:0 18px;color:#fff;
-  font-weight:700;font-size:15px;letter-spacing:.5px;
+  display:flex;align-items:center;gap:12px;
+  padding:0 14px 0 16px;
+  color:#fff;white-space:nowrap;cursor:default;
   border-right:1px solid rgba(255,255,255,.08);
-  background:linear-gradient(135deg,rgba(230,126,34,.15),rgba(192,57,43,.15));
-  white-space:nowrap;
+  background:linear-gradient(135deg,rgba(230,126,34,.12),rgba(192,57,43,.18));
+  position:relative;overflow:visible;
 }
-.nav-brand .flame{font-size:20px}
+/* 顶部微光晕条 */
+.nav-brand::before{
+  content:"";position:absolute;top:0;left:16px;right:0;height:2px;
+  background:linear-gradient(90deg,var(--primary),var(--accent),transparent);
+  opacity:.7;
+}
+
+/* 圆形徽章 LOGO */
+.nav-brand .nb-badge{
+  position:relative;width:38px;height:38px;flex-shrink:0;
+  border-radius:50%;
+  background:radial-gradient(circle at 40% 35%,#e8c9a8 0%,#c99063 55%,#8e4422 100%);
+  box-shadow:
+    inset 0 -2px 4px rgba(0,0,0,.4),
+    inset 0 2px 3px rgba(255,220,180,.35),
+    0 1px 3px rgba(0,0,0,.4);
+  display:flex;align-items:center;justify-content:center;
+}
+/* 徽章外圈 · 刺绣锁边感 */
+.nav-brand .nb-badge::before{
+  content:"";position:absolute;inset:-2px;border-radius:50%;
+  background:linear-gradient(135deg,#4a2818,#1a0d06);
+  z-index:-1;
+  box-shadow:0 0 0 1px #2a160d inset;
+}
+/* 徽章内圈细红线 */
+.nav-brand .nb-badge::after{
+  content:"";position:absolute;inset:2px;border-radius:50%;
+  border:1px solid rgba(230,126,34,.5);
+  pointer-events:none;
+}
+/* 徽章内的牛头主体（CSS 绘制剪影感） */
+.nav-brand .nb-badge .nb-bull{
+  position:relative;width:22px;height:22px;
+}
+/* 牛头身体 */
+.nav-brand .nb-badge .nb-bull::before{
+  content:"";position:absolute;
+  left:3px;top:6px;width:16px;height:13px;
+  background:linear-gradient(180deg,#c0392b,#8e251a);
+  border-radius:40% 40% 38% 38% / 55% 55% 45% 45%;
+  box-shadow:inset 0 -1px 2px rgba(0,0,0,.3), inset 0 1px 1px rgba(255,120,100,.5);
+}
+/* 两只牛角 */
+.nav-brand .nb-badge .nb-bull::after{
+  content:"";position:absolute;
+  left:-1px;top:1px;width:24px;height:7px;
+  background:transparent;
+  border-top:5px solid #c0392b;
+  border-radius:50% 50% 0 0;
+  box-shadow:0 -2px 0 #7a1e15;
+}
+/* 牛头眼睛 + 鼻子 + 小火焰 */
+.nav-brand .nb-badge .nb-bull .nb-eye,
+.nav-brand .nb-badge .nb-bull .nb-nose,
+.nav-brand .nb-badge .nb-bull .nb-fire{
+  position:absolute;font-size:6px;line-height:1;
+}
+.nav-brand .nb-badge .nb-bull .nb-eye{
+  color:#1a0d06;top:9px;
+}
+.nav-brand .nb-badge .nb-bull .nb-eye.l{left:7px}
+.nav-brand .nb-badge .nb-bull .nb-eye.r{right:7px}
+.nav-brand .nb-badge .nb-bull .nb-nose{
+  color:#fff;top:13px;left:50%;transform:translateX(-50%);
+  opacity:.85;font-size:5px;
+}
+/* 徽章底部小烧烤叉（叠在徽章右下） */
+.nav-brand .nb-badge .nb-fork{
+  position:absolute;bottom:-3px;right:-3px;
+  width:14px;height:14px;z-index:2;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.5));
+}
+
+/* 品牌名文字 */
+.nav-brand .nb-text{
+  display:flex;flex-direction:column;line-height:1.05;
+}
+.nav-brand .nb-text .nb-name{
+  font-weight:800;font-size:17px;letter-spacing:1px;
+  background:linear-gradient(180deg,#fff5e8 0%,#ffcc99 45%,#e67e22 75%,#c0392b 100%);
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;
+  text-shadow:0 0 2px rgba(230,126,34,.3);
+}
+.nav-brand .nb-text .nb-sub{
+  font-size:9px;letter-spacing:2.5px;font-weight:600;
+  color:rgba(255,255,255,.5);
+  text-transform:uppercase;margin-top:2px;
+}
+.nav-brand .nb-flame{
+  font-size:20px;
+  animation:nb-flame 1.6s ease-in-out infinite;
+  filter:drop-shadow(0 0 4px rgba(230,126,34,.6));
+}
+@keyframes nb-flame{
+  0%,100%{transform:translateY(0) rotate(-3deg);filter:drop-shadow(0 0 3px rgba(230,126,34,.6))}
+  50%{transform:translateY(-2px) rotate(3deg);filter:drop-shadow(0 0 8px rgba(255,160,50,.85))}
+}
+
+/* 原 .flame 类兼容 */
+.nav-brand .flame{font-size:20px;animation:nb-flame 1.6s ease-in-out infinite;
+  filter:drop-shadow(0 0 4px rgba(230,126,34,.6))}
+/* 悬停：徽章发光 */
+.nav-brand:hover .nb-badge{
+  box-shadow:
+    inset 0 -2px 4px rgba(0,0,0,.4),
+    inset 0 2px 3px rgba(255,220,180,.4),
+    0 0 0 2px rgba(230,126,34,.3),
+    0 0 14px rgba(230,126,34,.4);
+  transition:box-shadow .3s;
+}
+.nav-brand:hover .nb-flame,
+.nav-brand:hover .flame{
+  filter:drop-shadow(0 0 10px rgba(255,160,50,.9));
+}
 .nav-item{
   color:rgba(255,255,255,.7);
   text-decoration:none;padding:0 18px;
