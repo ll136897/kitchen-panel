@@ -21,11 +21,14 @@
               position:sticky;top:0;border-bottom:2px solid var(--border)}
   .ing-tbl td{padding:7px 6px;border-bottom:1px solid #f0ebe3}
   .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:12px;padding:5px 8px}
+  .ing-tbl tr.sub-head td{background:#f5efe8;font-size:11px;color:var(--muted);text-align:center;
+                           font-weight:600;padding:5px 6px;border-bottom:1px solid var(--border)}
+  .ing-tbl tr.sub-head td:first-child{text-align:left}
   .ing-tbl input{width:60px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
   .ing-tbl input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.15)}
   .ing-tbl .name-cell{font-weight:600;min-width:80px}
-  .ing-tbl .total-cell{font-weight:800;color:var(--primary)}
-  .ing-tbl .edit-actions{display:flex;gap:4px}
+  .ing-tbl .total-cell{font-weight:800;color:var(--primary);text-align:center}
+  .ing-tbl td{text-align:center}
   .ing-tbl .btn-mini{padding:3px 6px;font-size:11px;border-radius:6px;border:1px solid var(--border);
                      background:#fff;cursor:pointer;color:var(--muted)}
   .ing-tbl .btn-mini:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -163,9 +166,13 @@ function renderPkg(p, idx){
   });
   // 工具单独一组
   const tools = p.tools || [];
+  // 统计荤菜(牛猪鸡)/素菜(素菜+小菜)数量
+  let meatCount = 0, vegCount = 0;
+  ['beef','pork','chicken'].forEach(c => meatCount += (byCat[c]||[]).length);
+  ['vegetable','side'].forEach(c => vegCount += (byCat[c]||[]).length);
 
   let bodyHtml = '<table class="ing-tbl"><thead><tr>'+
-    '<th>食材/工具</th><th>单位</th><th>每份克数</th><th>份数</th><th>总量</th><th>操作</th>'+
+    '<th>名称</th><th>单位</th><th>每份数量</th><th>份数</th><th>总量</th><th>保存</th><th>删除</th>'+
     '</tr></thead><tbody>';
   for(const cat of CAT_ORDER){
     const items = byCat[cat];
@@ -178,20 +185,22 @@ function renderPkg(p, idx){
       return (b.per_package||0)-(a.per_package||0);
     });
     const label = CAT_LABEL[cat] || cat;
-    bodyHtml += `<tr class="cat-row"><td colspan="6" class="cat-${cat}">${label} · ${items.length}项</td></tr>`;
+    bodyHtml += `<tr class="cat-row"><td colspan="7" class="cat-${cat}">${label} · ${items.length}项</td></tr>`;
+    bodyHtml += subHeadRow();
     items.forEach(ing=>{
       const size = ing.per_package / Math.max(1, ing.portion_count||1);
       bodyHtml += renderIngRow(ing, size, p.id);
     });
   }
   if(tools.length){
-    bodyHtml += `<tr class="cat-row"><td colspan="6" class="cat-tool">🔧 工具装备 · ${tools.length}项</td></tr>`;
+    bodyHtml += `<tr class="cat-row"><td colspan="7" class="cat-tool">🔧 工具装备 · ${tools.length}项</td></tr>`;
+    bodyHtml += subHeadRow();
     tools.forEach(t=>{
       bodyHtml += renderToolRow(t, p.id);
     });
   }
   // 新增食材行
-  bodyHtml += `<tr><td colspan="6" style="padding:0">
+  bodyHtml += `<tr><td colspan="7" style="padding:0">
     <div class="add-row">
       <select id="newIng_${p.id}">
         <option value="">+ 选择食材添加...</option>
@@ -207,7 +216,7 @@ function renderPkg(p, idx){
     <div class="pkg-head" onclick="togglePkg(${p.id})">
       <div>
         <h3>${p.name}</h3>
-        <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 基价¥${p.base_price} · 总价¥${p.price} · ${ings.length}食材/${tools.length}工具</div>
+        <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 基价¥${p.base_price} · 总价¥${p.price} · 荤菜${meatCount}/素菜${vegCount}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:12px;padding:4px 10px" onclick="event.stopPropagation();exportPkgXlsx(${p.id})">📊 导出</button>
@@ -218,6 +227,10 @@ function renderPkg(p, idx){
   </div>`;
 }
 
+function subHeadRow(){
+  return `<tr class="sub-head"><td>名称</td><td>单位</td><td>每份数量</td><td>份数</td><td>总量</td><td>保存</td><td>删除</td></tr>`;
+}
+
 function renderIngRow(ing, size, pid){
   const rowId = `ing_${ing.id}`;
   return `<tr id="${rowId}">
@@ -226,10 +239,8 @@ function renderIngRow(ing, size, pid){
     <td><input type="number" value="${Math.round(size*100)/100}" step="0.1" id="sz_${ing.id}"></td>
     <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
     <td class="total-cell" id="tot_${ing.id}">${ing.per_package}${ing.unit}</td>
-    <td class="edit-actions">
-      <button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button>
-      <button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button>
-    </td>
+    <td><button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button></td>
+    <td><button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button></td>
   </tr>`;
 }
 
@@ -238,13 +249,11 @@ function renderToolRow(t, pid){
   return `<tr id="${rowId}">
     <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">工具</span></td>
     <td>个</td>
-    <td>-</td>
-    <td>-</td>
-    <td class="total-cell"><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}" style="width:60px;text-align:center"></td>
-    <td class="edit-actions">
-      <button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button>
-      <button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button>
-    </td>
+    <td><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}"></td>
+    <td>1</td>
+    <td class="total-cell" id="ttot_${t.id}">${t.per_package}</td>
+    <td><button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button></td>
+    <td><button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button></td>
   </tr>`;
 }
 
@@ -265,6 +274,11 @@ document.addEventListener('input', e=>{
     const row = document.getElementById('ing_'+id);
     const unit = row.querySelector('td:nth-child(2)').textContent;
     document.getElementById('tot_'+id).textContent = Math.round(sz*cnt*100)/100 + unit;
+  }
+  if(e.target.id && e.target.id.startsWith('tqty_')){
+    const id = e.target.id.split('_')[1];
+    const v = parseFloat(e.target.value)||0;
+    document.getElementById('ttot_'+id).textContent = Math.round(v*100)/100;
   }
 });
 
