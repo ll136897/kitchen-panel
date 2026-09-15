@@ -576,7 +576,7 @@ def preview_parse(raw_text):
 
 # 食材分类展示顺序与中文名（用户要求：牛肉、猪肉、鸡肉、蔬菜、小料）
 # 注：packaging/utensil 不在主表展示，单独拎出到包装核对区和餐具核对区
-CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "side", "sauce", "drink", "other"]
+CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "side", "sauce", "drink", "packaging", "utensil", "staple", "other", "tool"]
 CATEGORY_LABEL = {
     "beef": "🥩 牛肉",
     "pork": "🥓 猪肉",
@@ -585,17 +585,23 @@ CATEGORY_LABEL = {
     "side": "🥗 小菜",
     "sauce": "🧂 小料",
     "drink": "🎁 赠品",
+    "packaging": "📦 食材包装",
+    "utensil": "🍱 客户餐具",
+    "staple": "🍚 主食",
     "other": "📦 其他",
+    "tool": "🔧 工具",
 }
 
-# 食材包装单独拎出
+# 食材包装（独立分类，与菜单页一致）
 PACKAGING_CATEGORY = "packaging"
-# 客户餐具/工具单独拎出
+# 客户餐具/工具（独立分类，与菜单页一致）
 UTENSIL_CATEGORY = "utensil"
+# 工具分类
+TOOL_CATEGORY = "tool"
 
-# 小料类：合并 staple主食 / sauce蘸料 / drink饮料水果
-# 注：side(小菜) 不再合并到 sauce，独立分类显示
-SAUCE_LIKE_CATS = {"staple", "sauce", "drink"}
+# 小料类：不再合并，side/sauce/staple/drink 各自独立分类显示
+# （与菜单页 CAT_ORDER 一致：素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具）
+SAUCE_LIKE_CATS = set()
 
 
 def _subcategorize_meat(name, current_cat):

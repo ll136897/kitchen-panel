@@ -1196,20 +1196,14 @@ def print_menu():
         v["portion_size"] = round(v["per_package"] / max(1, pc), 2)
         v["total_portions"] = pc * v.get("total_packages", 1)
 
+    # 统一按 CATEGORY_ORDER 分组（含 packaging/utensil，与备餐/菜单页一致）
     ing_by_cat = {}
-    packaging_list = []
-    tableware_list = []
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_sum.values() if v.get("category") == cat]
         if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["total"]))
-    packaging_list = [v for v in ing_sum.values() if v.get("category") == PACKAGING_CATEGORY]
-    packaging_list = sorted(packaging_list, key=lambda x: -x["total"])
-    tableware_list = [v for v in ing_sum.values() if v.get("category") == UTENSIL_CATEGORY]
-    tableware_list = sorted(tableware_list, key=lambda x: -x["total"])
+            ing_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["total"] if x.get("total") else 0))
 
     # 渲染成一个可打印的 HTML（独立页面，无 nav，适合 A4 打印）
-    today = _json
     import datetime
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     order_lines = ""
@@ -1220,12 +1214,14 @@ def print_menu():
             <td>{o['address'] or ''}</td><td>{o['contact_name'] or ''}</td>
             <td>{pkg_str}</td></tr>"""
 
-    # 食材按分类渲染（与备餐表顺序一致）
+    # 分类配色（与备餐页/菜单页一致）
     cat_colors = {
         "beef": "#8e1e1a", "pork": "#c75d3e", "chicken": "#c9962b",
         "vegetable": "#3a8a3a", "side": "#5a8a3a", "sauce": "#7a5a3a",
-        "drink": "#666666", "other": "#6b4f3a",
+        "drink": "#666666", "staple": "#888888", "other": "#6b4f3a",
+        "packaging": "#d35400", "utensil": "#8e44ad", "tool": "#4a4a4a",
     }
+    # 食材按分类渲染（与备餐/菜单页顺序一致：含packaging/utensil，不再单独处理）
     ing_rows = ""
     for cat in CATEGORY_ORDER:
         items = ing_by_cat.get(cat, [])
@@ -1233,33 +1229,51 @@ def print_menu():
             continue
         label = CATEGORY_LABEL.get(cat, cat)
         color = cat_colors.get(cat, "#6b4f3a")
-        ing_rows += f'<tr><td colspan="5" style="background:{color};color:#fff;font-weight:700;padding:6px 8px;">{label}</td></tr>'
+        ing_rows += f'<tr class="cat-row"><td colspan="5" style="background:{color};color:#fff;font-weight:700;padding:7px 10px;font-size:14px;">{label} · {len(items)}项</td></tr>'
         for i in items:
-            ing_rows += f'<tr><td>{i["name"]}</td><td style="text-align:right">{i.get("total_portions","-")}份</td><td style="text-align:right">{i.get("portion_size","-")}{i["unit"]}/份</td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
-    if packaging_list:
-        ing_rows += '<tr><td colspan="5" style="background:#d35400;color:#fff;font-weight:700;padding:6px 8px;">📦 食材包装</td></tr>'
-        for i in packaging_list:
-            ing_rows += f'<tr><td>{i["name"]}</td><td></td><td></td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
-    if tableware_list:
-        ing_rows += '<tr><td colspan="5" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 客户餐具/工具</td></tr>'
-        for i in tableware_list:
-            ing_rows += f'<tr><td>{i["name"]}</td><td></td><td></td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
+            tot_portions = i.get("total_portions", 0)
+            per_size = i.get("portion_size", 0)
+            # packaging/utensil 无份数/克数（与菜单页一致：每份数量=1）
+            if cat in (PACKAGING_CATEGORY, UTENSIL_CATEGORY):
+                tot_portions = i.get("total_packages", 0)
+                per_size = 1
+            ing_rows += (
+                f'<tr><td class="name-cell">{i["name"]}</td>'
+                f'<td class="num-cell">{round(tot_portions) if tot_portions else "-"}</td>'
+                f'<td class="num-cell">{round(per_size,2) if per_size else "-"}</td>'
+                f'<td class="num-cell total-cell">{round(i["total"],2) if i.get("total") else "-"}</td>'
+                f'<td>{i.get("unit","")}</td></tr>'
+            )
 
-    tool_rows = "".join(
-        f'<tr><td>{t["name"]}</td><td>{t["total"]}</td></tr>'
-        for t in tools_sorted)
+    # 工具单独渲染（与备餐页一致：🔧 工具分类）
+    tool_rows = ""
+    if tools_sorted:
+        tool_rows += f'<tr class="cat-row"><td colspan="5" style="background:#4a4a4a;color:#fff;font-weight:700;padding:7px 10px;font-size:14px;">🔧 工具 · {len(tools_sorted)}项</td></tr>'
+        for t in tools_sorted:
+            tool_rows += (
+                f'<tr><td class="name-cell">{t["name"]}</td>'
+                f'<td class="num-cell">{round(t.get("total",0))}</td>'
+                f'<td class="num-cell">1</td>'
+                f'<td class="num-cell total-cell">{round(t.get("total",0))}</td>'
+                f'<td>个</td></tr>'
+            )
 
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <title>备餐单 · {now}</title>
 <style>
   @media print{{ @page{{ size:A4; margin:12mm }} }}
-  body{{ font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:#2b1e14; padding:20px; }}
+  body{{ font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:#2b1e14; padding:20px; max-width:800px; margin:0 auto; }}
   h1{{ font-size:22px; margin:0 0 4px; }}
   .meta{{ color:#8a7f75; font-size:13px; margin-bottom:14px; }}
   .sec-title{{ font-size:15px; font-weight:700; margin:18px 0 8px; padding-bottom:4px; border-bottom:2px solid #c0392b; color:#c0392b; }}
   table{{ width:100%; border-collapse:collapse; font-size:13px; }}
-  th{{ background:#f3efe8; text-align:left; padding:6px 8px; }}
-  td{{ padding:6px 8px; border-bottom:1px solid #efe8dd; }}
+  thead th{{ background:#f3efe8; text-align:left; padding:7px 10px; font-weight:700; color:#666; }}
+  thead th.num-col{{ text-align:center; }}
+  tbody td{{ padding:8px 10px; border-bottom:1px solid #efe8dd; }}
+  tbody td.name-cell{{ font-weight:700; }}
+  tbody td.num-cell{{ text-align:center; color:#444; font-weight:600; }}
+  tbody td.total-cell{{ text-align:right; color:#c0392b; font-weight:800; font-family:"DIN","Helvetica Neue",sans-serif; }}
+  tbody tr.cat-row td{{ padding:7px 10px; }}
   .print-btn{{ margin:12px 6px 12px 0; padding:8px 16px; background:#c0392b; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
   .back-btn{{ margin:12px 0; padding:8px 16px; background:#fff; color:#2b1e14; border:1.5px solid #c0392b; border-radius:6px; font-size:14px; cursor:pointer; text-decoration:none; display:inline-block; }}
   .back-btn:hover{{ background:#fdecea; }}
@@ -1274,13 +1288,11 @@ def print_menu():
 <table><thead><tr><th>#</th><th>时间</th><th>地址</th><th>联系人</th><th>套餐</th></tr></thead>
 <tbody>{order_lines or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">暂无待备订单</td></tr>'}</tbody></table>
 
-<div class="sec-title">🥩 食材汇总</div>
-<table><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>总克数</th><th></th></tr></thead>
-<tbody>{ing_rows or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}</tbody></table>
-
-<div class="sec-title">🔧 工具汇总</div>
-<table><thead><tr><th>工具</th><th>合计数量</th></tr></thead>
-<tbody>{tool_rows or '<tr><td colspan=2 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}</tbody></table>
+<div class="sec-title">🥩 备餐核对清单</div>
+<table><thead><tr>
+  <th>名字</th><th class="num-col">份数</th><th class="num-col">克数</th><th class="num-col">总量</th><th>单位</th>
+</tr></thead>
+<tbody>{ing_rows or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}{tool_rows}</tbody></table>
 </body></html>"""
     return html
 

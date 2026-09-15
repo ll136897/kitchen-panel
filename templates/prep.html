@@ -118,9 +118,9 @@
   .cat-packaging .prep-row{background:#fbeee5}
   .cat-packaging .prep-row:nth-child(odd){background:#f5e0d2}
 
-  .cat-tableware .cat-head{background:#8e44ad}             /* 客户餐具/工具·紫 */
-  .cat-tableware .prep-row{background:#f1e9f4}
-  .cat-tableware .prep-row:nth-child(odd){background:#ebdff0}
+  .cat-tableware .cat-head,.cat-utensil .cat-head{background:#8e44ad}      /* 客户餐具·紫 */
+  .cat-tableware .prep-row,.cat-utensil .prep-row{background:#f1e9f4}
+  .cat-tableware .prep-row:nth-child(odd),.cat-utensil .prep-row:nth-child(odd){background:#ebdff0}
 
   .cat-tool     .cat-head{background:#4a4a4a}              /* 工具·深灰 */
   .cat-tool     .prep-row{background:#ededed}
@@ -232,15 +232,15 @@
 </div>
 
 <script>
-// 备餐分类顺序（与菜单页 CAT_ORDER 一致）：
+// 备餐分类顺序（与菜单页/后端 CATEGORY_ORDER 一致）：
 // 牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具
 const CAT_LABEL = {
   beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
   vegetable:'🥬 素菜', side:'🥗 小菜', sauce:'🧂 小料', drink:'🎁 赠品',
-  packaging:'📦 食材包装', tableware:'🍱 客户餐具',
+  packaging:'📦 食材包装', utensil:'🍱 客户餐具',
   staple:'🍚 主食', other:'📦 其他', tool:'🔧 工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','tableware','staple','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
 // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
 const FIXED_ORDER = [
   ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
@@ -449,7 +449,7 @@ function renderMerged(){
     let type = 'ing';
     if(cat==='packaging'){
       items = pk;
-    } else if(cat==='tableware'){
+    } else if(cat==='utensil'){
       items = tw;
     } else if(cat==='tool'){
       items = tools; type='tool';
@@ -582,7 +582,7 @@ function checkCat(cat, type, checked){
   const d = prepData;
   let items = [];
   if(type==='ing'){
-    if(cat==='tableware'){
+    if(cat==='utensil'){
       items = (d.tableware||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
     } else if(cat==='packaging'){
       items = (d.packaging||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
