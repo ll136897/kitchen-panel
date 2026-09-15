@@ -32,6 +32,42 @@ try:
 except Exception as _e:
     print(f"[migrate] 删除刷子跳过: {_e}")
 
+# 迁移：拆分"卡式炉/烤盘"为"卡式炉"和"烤盘"两个独立工具（兼容已有数据库）
+try:
+    _db = get_db()
+    _cur = _db.cursor()
+    _cur.execute("SELECT id FROM tools WHERE name = '卡式炉/烤盘'")
+    _row = _cur.fetchone()
+    if _row:
+        _old_id = _row["id"]
+        # 1. 新增两个新工具（卡式炉+烤盘），库存/阈值/成本按合理拆分
+        _cur.execute("SELECT stock, threshold, cost FROM tools WHERE id = ?", (_old_id,))
+        _old = _cur.fetchone()
+        _old_stock = _old["stock"] if _old else 15
+        _old_thr = _old["threshold"] if _old else 3
+        _cur.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
+                     ("卡式炉", _old_stock, _old_thr, 65.0))
+        _cur.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
+                     ("烤盘", _old_stock, _old_thr, 15.0))
+        _new_stove = _cur.execute("SELECT id FROM tools WHERE name='卡式炉'").fetchone()["id"]
+        _new_pan = _cur.execute("SELECT id FROM tools WHERE name='烤盘'").fetchone()["id"]
+        # 2. 给每个套餐添加两条 package_tools 关联，per_package 等于原值
+        _cur.execute("SELECT package_id, per_package FROM package_tools WHERE tool_id = ?", (_old_id,))
+        for _r in _cur.fetchall():
+            _cur.execute("INSERT INTO package_tools (package_id, tool_id, per_package) VALUES (?,?,?)",
+                         (_r["package_id"], _new_stove, _r["per_package"]))
+            _cur.execute("INSERT INTO package_tools (package_id, tool_id, per_package) VALUES (?,?,?)",
+                         (_r["package_id"], _new_pan, _r["per_package"]))
+        # 3. 删除旧"卡式炉/烤盘"的 package_tools 关联和工具记录
+        _cur.execute("DELETE FROM package_tools WHERE tool_id = ?", (_old_id,))
+        _cur.execute("DELETE FROM tool_loans WHERE tool_id = ?", (_old_id,))
+        _cur.execute("DELETE FROM tools WHERE id = ?", (_old_id,))
+        _db.commit()
+        print(f"[migrate] 已拆分'卡式炉/烤盘'(id={_old_id})为卡式炉(id={_new_stove})+烤盘(id={_new_pan})")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 拆分卡式炉/烤盘跳过: {_e}")
+
 
 @app.before_request
 def before():
