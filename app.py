@@ -59,6 +59,11 @@ def prep_page():
     return render_template("prep.html")
 
 
+@app.route("/menu")
+def menu_page():
+    return render_template("menu.html")
+
+
 # ===== 订单解析与入库 =====
 @app.route("/api/parse", methods=["POST"])
 def api_parse():
@@ -311,10 +316,12 @@ def manage_packages():
         pkgs = [dict(r) for r in cur.fetchall()]
         for p in pkgs:
             cur.execute("""
-                SELECT pi.id, pi.per_package, i.name as ing_name, i.id as ing_id, i.unit
+                SELECT pi.id, pi.per_package, pi.portion_count,
+                       i.name as ing_name, i.id as ing_id, i.unit, i.category
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
                 WHERE pi.package_id = ?
+                ORDER BY i.category, i.name
             """, (p["id"],))
             p["ingredients"] = [dict(r) for r in cur.fetchall()]
             cur.execute("""
@@ -362,6 +369,112 @@ def del_package(pid):
     db.execute("DELETE FROM packages WHERE id=?", (pid,))
     db.commit()
     return jsonify({"ok": True})
+
+
+# 修改套餐里某食材的配量(每份克数 + 份数)
+@app.route("/api/packages/<int:pid>/ingredient/<int:pi_id>", methods=["PUT", "DELETE"])
+def update_pkg_ingredient(pid, pi_id):
+    db = g.db
+    cur = db.cursor()
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM package_ingredients WHERE id=? AND package_id=?", (pi_id, pid))
+        db.commit()
+        return jsonify({"ok": True})
+    data = request.get_json(force=True)
+    size = float(data.get("portion_size", 0))
+    count = float(data.get("portion_count", 1))
+    total = size * count
+    cur.execute("""
+        UPDATE package_ingredients SET per_package=?, portion_count=?
+        WHERE id=? AND package_id=?
+    """, (total, count, pi_id, pid))
+    db.commit()
+    return jsonify({"ok": True, "per_package": total, "portion_count": count})
+
+
+# 新增套餐食材
+@app.route("/api/packages/<int:pid>/ingredient", methods=["POST"])
+def add_pkg_ingredient(pid):
+    db = g.db
+    cur = db.cursor()
+    data = request.get_json(force=True)
+    ing_id = data.get("ingredient_id")
+    size = float(data.get("portion_size", 0))
+    count = float(data.get("portion_count", 1))
+    total = size * count
+    if not ing_id:
+        return jsonify({"ok": False, "msg": "缺少食材ID"}), 400
+    cur.execute("SELECT id FROM package_ingredients WHERE package_id=? AND ingredient_id=?", (pid, ing_id))
+    if cur.fetchone():
+        return jsonify({"ok": False, "msg": "该食材已存在，请直接修改"}), 400
+    cur.execute("""
+        INSERT INTO package_ingredients (package_id, ingredient_id, per_package, portion_count)
+        VALUES (?,?,?,?)
+    """, (pid, ing_id, total, count))
+    db.commit()
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+
+# 修改套餐工具配量
+@app.route("/api/packages/<int:pid>/tool/<int:pt_id>", methods=["PUT", "DELETE"])
+def update_pkg_tool(pid, pt_id):
+    db = g.db
+    cur = db.cursor()
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM package_tools WHERE id=? AND package_id=?", (pt_id, pid))
+        db.commit()
+        return jsonify({"ok": True})
+    data = request.get_json(force=True)
+    per = float(data.get("per_package", 1))
+    cur.execute("UPDATE package_tools SET per_package=? WHERE id=? AND package_id=?", (per, pt_id, pid))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+# 导出菜单原数据(JSON / CSV)
+@app.route("/api/menu/export")
+def export_menu():
+    import csv, io, json as _json
+    fmt = request.args.get("format", "json")
+    cur = g.db.cursor()
+    cur.execute("SELECT * FROM packages ORDER BY min_people")
+    pkgs = [dict(r) for r in cur.fetchall()]
+    for p in pkgs:
+        cur.execute("""
+            SELECT i.name as ingredient, i.unit, i.category, pi.per_package, pi.portion_count
+            FROM package_ingredients pi
+            JOIN ingredients i ON pi.ingredient_id = i.id
+            WHERE pi.package_id = ?
+            ORDER BY i.category, i.name
+        """, (p["id"],))
+        p["ingredients"] = [dict(r) for r in cur.fetchall()]
+        cur.execute("""
+            SELECT t.name as tool, pt.per_package
+            FROM package_tools pt
+            JOIN tools t ON pt.tool_id = t.id
+            WHERE pt.package_id = ?
+        """, (p["id"],))
+        p["tools"] = [dict(r) for r in cur.fetchall()]
+
+    if fmt == "csv":
+        buf = io.StringIO()
+        buf.write("\ufeff")  # BOM for Excel
+        w = csv.writer(buf)
+        w.writerow(["套餐", "人数范围", "类别", "食材/工具", "单位", "每份克数", "份数", "总量", "基价", "总价"])
+        for p in pkgs:
+            people = f"{p['min_people']}-{p['max_people']}人"
+            for ing in p["ingredients"]:
+                size = ing["per_package"] / max(1, ing["portion_count"])
+                w.writerow([p["name"], people, ing["category"], ing["ingredient"],
+                           ing["unit"], round(size, 2), ing["portion_count"],
+                           ing["per_package"], p["base_price"], p["price"]])
+            for t in p["tools"]:
+                w.writerow([p["name"], people, "tool", t["tool"], "个", "", "",
+                            t["per_package"], p["base_price"], p["price"]])
+        resp = app.response_class(buf.getvalue(), mimetype="text/csv")
+        resp.headers["Content-Disposition"] = "attachment; filename=menu.csv"
+        return resp
+    return jsonify({"ok": True, "data": pkgs})
 
 
 @app.route("/api/dishes", methods=["GET", "POST"])

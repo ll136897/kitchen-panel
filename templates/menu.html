@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>菜单原数据 · 刘和牛备餐系统</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .pkg-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;margin:12px 0;overflow:hidden}
+  .pkg-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;
+            background:linear-gradient(90deg,#8e1e1a,#c0392b);color:#fff}
+  .pkg-head h3{margin:0;font-size:17px}
+  .pkg-meta{font-size:13px;opacity:.9}
+  .pkg-body{padding:0;display:none}
+  .pkg-card.open .pkg-body{display:block}
+  .pkg-card.open .pkg-head{border-radius:0}
+  .pkg-toggle{font-size:20px;font-weight:700}
+  .ing-tbl{width:100%;border-collapse:collapse;font-size:14px}
+  .ing-tbl th{background:#f5efe8;padding:8px;text-align:left;font-size:12px;color:var(--muted);
+              position:sticky;top:0;border-bottom:2px solid var(--border)}
+  .ing-tbl td{padding:7px 8px;border-bottom:1px solid #f0ebe3}
+  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:13px;padding:6px 10px}
+  .ing-tbl input{width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
+  .ing-tbl input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.15)}
+  .ing-tbl .name-cell{font-weight:600;min-width:100px}
+  .ing-tbl .total-cell{font-weight:800;color:var(--primary)}
+  .ing-tbl .edit-actions{display:flex;gap:4px}
+  .ing-tbl .btn-mini{padding:3px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);
+                     background:#fff;cursor:pointer;color:var(--muted)}
+  .ing-tbl .btn-mini:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .ing-tbl .btn-mini.del:hover{background:#c0392b}
+  .ing-tbl .btn-mini.save{background:var(--green);color:#fff;border-color:var(--green)}
+  .ing-tbl .row-editing{background:#fff8e1}
+  .add-row{display:flex;gap:6px;padding:10px;background:#faf5ed;align-items:center;flex-wrap:wrap}
+  .add-row select,.add-row input{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px}
+  .add-row select{flex:1;min-width:140px}
+  .add-row input{width:60px;text-align:center}
+  .add-row .btn-add{padding:5px 12px;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+  .toolbar{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+  .toolbar .btn{font-size:13px}
+  .cat-beef{background:#8e1e1a}
+  .cat-pork{background:#c75d3e}
+  .cat-chicken{background:#c9962b}
+  .cat-vegetable{background:#3a8a3a}
+  .cat-sauce{background:#7a5a3a}
+  .cat-tableware{background:#8e44ad}
+  .cat-staple,.cat-side,.cat-drink,.cat-other{background:#666}
+  .cat-tool{background:#4a4a4a}
+  .badge-cat{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;color:#fff;margin-left:4px}
+</style>
+</head>
+<body>
+<nav class="nav">  <a href="javascript:history.length>1?history.back():'/'" class="nav-back" title="返回" aria-label="返回">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </a>
+  <div class="nav-brand">
+    <div class="nb-badge"><svg viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="21" cy="21" r="20" fill="none" stroke="#1a0d06" stroke-width="1.5"/>
+  <circle cx="21" cy="21" r="18.5" fill="none" stroke="#1a0d06" stroke-width="0.5"/>
+  <circle cx="21" cy="21" r="17.5" fill="#fafafa" stroke="#c0392b" stroke-width="0.7"/>
+  <path d="M 13 14 Q 13 10 16 10 L 26 10 Q 29 10 29 14 L 29 22 Q 29 27 21 28 Q 13 27 13 22 Z" fill="#c0392b" stroke="#1a0d06" stroke-width="0.6"/>
+  <path d="M 14 10 Q 11 5 13 3 Q 15 5 16 10" fill="#c0392b" stroke="#1a0d06" stroke-width="0.5"/>
+  <path d="M 28 10 Q 31 5 29 3 Q 27 5 26 10" fill="#c0392b" stroke="#1a0d06" stroke-width="0.5"/>
+  <circle cx="17" cy="17" r="1.2" fill="#1a0d06"/>
+  <circle cx="25" cy="17" r="1.2" fill="#1a0d06"/>
+  <ellipse cx="21" cy="21" rx="1.8" ry="1.1" fill="#1a0d06"/>
+  <circle cx="20.3" cy="21" r="0.4" fill="#fff"/>
+  <circle cx="21.7" cy="21" r="0.4" fill="#fff"/>
+  <path d="M 19 23 Q 21 24.5 23 23" stroke="#1a0d06" stroke-width="0.5" fill="none" stroke-linecap="round"/>
+  <g transform="translate(29,15) rotate(0)">
+    <path d="M 1.5 0 L 1.5 4" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
+    <path d="M 3.5 0 L 3.5 3.5" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
+    <path d="M 5.5 0 L 5.5 4" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
+    <line x1="0.5" y1="4" x2="6.5" y2="4" stroke="#1a0d06" stroke-width="0.9" stroke-linecap="round"/>
+    <line x1="3.5" y1="4" x2="3.5" y2="14" stroke="#1a0d06" stroke-width="0.9" stroke-linecap="round"/>
+  </g>
+  <path d="M 7 30 L 35 30 L 33 35 L 21 37 L 9 35 Z" fill="#e67e22" stroke="#1a0d06" stroke-width="0.6"/>
+</svg></div>
+    <div class="nb-text">
+      <div class="nb-name">刘和牛备餐系统</div>
+      <div class="nb-sub">LIU &amp; WAGYU · KITCHEN</div>
+    </div>
+    <span class="nb-flame">🔥</span>
+  </div>
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
+  <a href="/history" class="nav-item">📈 历史</a>
+  <a href="/menu" class="nav-item active">📜 菜单</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="title">📜 菜单原数据</div>
+      <div class="sub">查看/修改套餐食材配量 · 每份克数 × 份数 = 总量</div>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-primary btn-sm" onclick="loadMenu()">🔄 刷新</button>
+      <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
+      <button class="btn btn-sm" onclick="collapseAll()">📦 全收起</button>
+      <button class="btn btn-sm" onclick="exportCSV()">📥 导出CSV</button>
+      <button class="btn btn-sm" onclick="exportJSON()">📥 导出JSON</button>
+    </div>
+  </div>
+
+  <div id="menuList"></div>
+</div>
+
+<script>
+let packages = [];
+let allIngredients = [];
+const CAT_LABEL = {
+  beef:'🥩牛肉', pork:'🥓猪肉', chicken:'🍗鸡肉',
+  vegetable:'🥬蔬菜', sauce:'🧂小料', tableware:'🍱餐具配套',
+  staple:'主食', side:'小菜', drink:'饮料', other:'其他', tool:'🔧工具'
+};
+const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','staple','side','drink','tableware','other','tool'];
+
+// 细分 meat → beef/pork/chicken（与 calculator 一致）
+function subcategorize(name, cat){
+  if(cat !== 'meat') return cat;
+  if(/牛|肥牛|牛肋|牛骰|安格斯/.test(name)) return 'beef';
+  if(/猪|五花|香猪|松板|梅花|肠/.test(name)) return 'pork';
+  if(/鸡|鸡翅|鸡腿|郡肝|掌中宝/.test(name)) return 'chicken';
+  return 'beef';
+}
+
+function loadMenu(){
+  Promise.all([
+    fetch('/api/packages').then(r=>r.json()),
+    fetch('/api/ingredients').then(r=>r.json())
+  ]).then(([pkgRes, ingRes])=>{
+    packages = pkgRes.data || [];
+    allIngredients = (ingRes.data || []).sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+    render();
+  });
+}
+
+function render(){
+  const box = document.getElementById('menuList');
+  if(!packages.length){
+    box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">暂无套餐数据</div>';
+    return;
+  }
+  box.innerHTML = packages.map((p,idx)=>renderPkg(p,idx)).join('');
+}
+
+function renderPkg(p, idx){
+  const ings = p.ingredients || [];
+  // 按分类分组
+  const byCat = {};
+  ings.forEach(ing=>{
+    const c = subcategorize(ing.ing_name, ing.category);
+    if(!byCat[c]) byCat[c] = [];
+    byCat[c].push(ing);
+  });
+  // 工具单独一组
+  const tools = p.tools || [];
+
+  let bodyHtml = '<table class="ing-tbl"><thead><tr>'+
+    '<th>食材/工具</th><th>单位</th><th>每份克数</th><th>份数</th><th>总量</th><th>操作</th>'+
+    '</tr></thead><tbody>';
+  for(const cat of CAT_ORDER){
+    const items = byCat[cat];
+    if(!items || !items.length) continue;
+    const label = CAT_LABEL[cat] || cat;
+    bodyHtml += `<tr class="cat-row"><td colspan="6" class="cat-${cat}">${label} · ${items.length}项</td></tr>`;
+    items.forEach(ing=>{
+      const size = ing.per_package / Math.max(1, ing.portion_count||1);
+      bodyHtml += renderIngRow(ing, size, p.id);
+    });
+  }
+  if(tools.length){
+    bodyHtml += `<tr class="cat-row"><td colspan="6" class="cat-tool">🔧 工具装备 · ${tools.length}项</td></tr>`;
+    tools.forEach(t=>{
+      bodyHtml += renderToolRow(t, p.id);
+    });
+  }
+  // 新增食材行
+  bodyHtml += `<tr><td colspan="6" style="padding:0">
+    <div class="add-row">
+      <select id="newIng_${p.id}">
+        <option value="">+ 选择食材添加...</option>
+        ${allIngredients.map(i=>`<option value="${i.id}">${i.name} (${i.unit}) [${CAT_LABEL[subcategorize(i.name,i.category)]||i.category}]</option>`).join('')}
+      </select>
+      <input type="number" id="newSize_${p.id}" placeholder="克数" step="0.1">
+      <input type="number" id="newCnt_${p.id}" placeholder="份数" step="1" value="1">
+      <button class="btn-add" onclick="addIng(${p.id})">➕ 添加</button>
+    </div></td></tr>`;
+  bodyHtml += '</tbody></table>';
+
+  return `<div class="pkg-card" id="pkg_${p.id}">
+    <div class="pkg-head" onclick="togglePkg(${p.id})">
+      <div>
+        <h3>${p.name}</h3>
+        <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 基价¥${p.base_price} · 总价¥${p.price} · ${ings.length}食材/${tools.length}工具</div>
+      </div>
+      <span class="pkg-toggle">▾</span>
+    </div>
+    <div class="pkg-body">${bodyHtml}</div>
+  </div>`;
+}
+
+function renderIngRow(ing, size, pid){
+  const rowId = `ing_${ing.id}`;
+  return `<tr id="${rowId}">
+    <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${subcategorize(ing.ing_name, ing.category)}">${CAT_LABEL[subcategorize(ing.ing_name, ing.category)]||''}</span></td>
+    <td>${ing.unit}</td>
+    <td><input type="number" value="${Math.round(size*100)/100}" step="0.1" id="sz_${ing.id}"></td>
+    <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
+    <td class="total-cell" id="tot_${ing.id}">${ing.per_package}${ing.unit}</td>
+    <td class="edit-actions">
+      <button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button>
+      <button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+function renderToolRow(t, pid){
+  return `<tr>
+    <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">工具</span></td>
+    <td>个</td>
+    <td>-</td>
+    <td>-</td>
+    <td class="total-cell">${t.per_package}</td>
+    <td class="edit-actions">
+      <button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button>
+      <button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button>
+    </td>
+  </tr>`;
+}
+
+// 实时计算总量
+document.addEventListener('input', e=>{
+  if(e.target.id && e.target.id.startsWith('sz_')){
+    const id = e.target.id.split('_')[1];
+    const sz = parseFloat(e.target.value)||0;
+    const cnt = parseFloat(document.getElementById('cnt_'+id).value)||1;
+    const row = document.getElementById('ing_'+id);
+    const unit = row.querySelector('td:nth-child(2)').textContent;
+    document.getElementById('tot_'+id).textContent = Math.round(sz*cnt*100)/100 + unit;
+  }
+  if(e.target.id && e.target.id.startsWith('cnt_')){
+    const id = e.target.id.split('_')[1];
+    const sz = parseFloat(document.getElementById('sz_'+id).value)||0;
+    const cnt = parseFloat(e.target.value)||1;
+    const row = document.getElementById('ing_'+id);
+    const unit = row.querySelector('td:nth-child(2)').textContent;
+    document.getElementById('tot_'+id).textContent = Math.round(sz*cnt*100)/100 + unit;
+  }
+});
+
+function togglePkg(pid){
+  const card = document.getElementById('pkg_'+pid);
+  card.classList.toggle('open');
+}
+
+function expandAll(){ packages.forEach(p=>document.getElementById('pkg_'+p.id)?.classList.add('open')); }
+function collapseAll(){ packages.forEach(p=>document.getElementById('pkg_'+p.id)?.classList.remove('open')); }
+
+function saveIng(pid, ingId){
+  const sz = parseFloat(document.getElementById('sz_'+ingId).value)||0;
+  const cnt = parseFloat(document.getElementById('cnt_'+ingId).value)||1;
+  fetch(`/api/packages/${pid}/ingredient/${ingId}`,{
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({portion_size:sz, portion_count:cnt})
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok){
+      const row = document.getElementById('ing_'+ingId);
+      const unit = row.querySelector('td:nth-child(2)').textContent;
+      document.getElementById('tot_'+ingId).textContent = Math.round(res.per_package*100)/100 + unit;
+      row.style.background = '#e8f5e9';
+      setTimeout(()=>row.style.background='', 800);
+    }
+  });
+}
+
+function delIng(pid, ingId){
+  if(!confirm('确认删除该食材配量?')) return;
+  fetch(`/api/packages/${pid}/ingredient/${ingId}`,{method:'DELETE'})
+    .then(r=>r.json()).then(res=>{ if(res.ok) loadMenu(); });
+}
+
+function saveTool(pid, ptId){
+  // 工具暂只支持改总量，弹出输入
+  const v = prompt('输入工具数量:');
+  if(v===null) return;
+  fetch(`/api/packages/${pid}/tool/${ptId}`,{
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({per_package:parseFloat(v)||1})
+  }).then(r=>r.json()).then(res=>{ if(res.ok) loadMenu(); });
+}
+
+function delTool(pid, ptId){
+  if(!confirm('确认删除该工具配量?')) return;
+  fetch(`/api/packages/${pid}/tool/${ptId}`,{method:'DELETE'})
+    .then(r=>r.json()).then(res=>{ if(res.ok) loadMenu(); });
+}
+
+function addIng(pid){
+  const sel = document.getElementById('newIng_'+pid);
+  const ingId = parseInt(sel.value);
+  if(!ingId){ alert('请先选择食材'); return; }
+  const sz = parseFloat(document.getElementById('newSize_'+pid).value)||0;
+  const cnt = parseFloat(document.getElementById('newCnt_'+pid).value)||1;
+  if(sz<=0){ alert('请输入每份克数'); return; }
+  fetch(`/api/packages/${pid}/ingredient`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ingredient_id:ingId, portion_size:sz, portion_count:cnt})
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok) loadMenu();
+    else alert(res.msg||'添加失败');
+  });
+}
+
+function exportCSV(){ window.open('/api/menu/export?format=csv','_blank'); }
+function exportJSON(){ window.open('/api/menu/export?format=json','_blank'); }
+
+loadMenu();
+</script>
+</body>
+</html>
