@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>订单详情 · 刘和牛备餐系统</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+.detail-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:14px;margin:10px 0}
+.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.detail-grid .cell{background:#faf6ef;padding:8px 10px;border-radius:8px}
+.detail-grid .k{font-size:11px;color:var(--muted);margin-bottom:2px}
+.detail-grid .v{font-size:14px;font-weight:600}
+.req-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.req-tbl th{background:#3a2416;color:#fff;padding:6px;text-align:center;font-size:11px}
+.req-tbl td{padding:5px 6px;border-bottom:1px solid #f0ebe3;text-align:center}
+.cat-row{background:#8e1e1a;color:#fff;font-weight:700;padding:5px 8px !important;text-align:left !important}
+@media(max-width:600px){.detail-grid{grid-template-columns:1fr}.req-tbl{font-size:12px}.req-tbl th,.req-tbl td{padding:4px 3px}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
+  <a href="/finance" class="nav-item">📈 财务</a>
+  <a href="/menu" class="nav-item">📜 菜单</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
+    <div>
+      <div class="title">📋 订单详情 <span id="ordId" style="color:var(--primary)"></span></div>
+      <div class="sub" id="ordSub">加载中...</div>
+    </div>
+    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadDetail)"><span class="btn-icon">🔄</span> 刷新</button>
+  </div>
+
+  <!-- 基本信息 -->
+  <div class="detail-card">
+    <h3 style="margin:0 0 10px">📝 订单信息</h3>
+    <div class="detail-grid" id="infoGrid"></div>
+  </div>
+
+  <!-- 备餐需求 -->
+  <div class="detail-card">
+    <h3 style="margin:0 0 10px">🥩 备餐需求</h3>
+    <table class="req-tbl" id="reqTable">
+      <thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>总克数</th><th>库存</th><th>缺口</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- 工具借还 -->
+  <div class="detail-card" id="loanCard" style="display:none">
+    <h3 style="margin:0 0 10px">🔧 工具借还</h3>
+    <table class="req-tbl" id="loanTable">
+      <thead><tr><th>工具</th><th>借出</th><th>归还</th><th>丢失</th><th>状态</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+<script>
+function loadDetail(){
+  const oid = {{ oid }};
+  fetch(`/api/orders/${oid}/detail`).then(r=>r.json()).then(d=>{
+    if(!d.ok){document.getElementById('ordSub').textContent='订单不存在';return;}
+    const o = d.data;
+    document.getElementById('ordId').textContent = '#' + o.id;
+    const u = o.urgency||{};
+    document.getElementById('ordSub').textContent = `${o.booking_date||'日期待定'} ${o.booking_time||''} · ${u.label||''}`;
+
+    // 基本信息
+    const stMap = {pending:'待备',preparing:'备餐中',done:'已完成',cancelled:'已取消'};
+    const payMap = {unpaid:'未收',partial:'部分',paid:'已收'};
+    const depMap = {pending:'待退',returned:'已退',forfeited:'扣留'};
+    document.getElementById('infoGrid').innerHTML = `
+      <div class="cell"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
+      <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone||'-'}</div></div>
+      <div class="cell"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
+      <div class="cell"><div class="k">💰 金额</div><div class="v">¥${o.amount||0}</div></div>
+      <div class="cell"><div class="k">🔒 押金</div><div class="v">¥${o.deposit||0} (${depMap[o.deposit_status]||'-'})</div></div>
+      <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
+      <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
+      <div class="cell"><div class="k">📋 状态</div><div class="v">${stMap[o.status]||o.status}</div></div>
+      <div class="cell" style="grid-column:1/-1"><div class="k">📝 备注</div><div class="v">${o.note||'-'}</div></div>
+    `;
+
+    // 备餐需求（按分类分组，小肠排末位）
+    const reqs = o.requirements||{};
+    const ings = reqs.ingredients||[];
+    const catOrder = ['beef','pork','chicken','vegetable','sauce','other'];
+    const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 蔬菜',sauce:'🧂 小料',other:'📦 其他'};
+    const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',sauce:'#7a5a3a',other:'#6b4f3a'};
+    // 分组
+    const byCat = {};
+    ings.forEach(i=>{
+      const c = i.category||'other';
+      byCat.setdefault = byCat.setdefault||{};
+      byCat[c] = byCat[c]||[];
+      byCat[c].push(i);
+    });
+    let html = '';
+    for(const cat of catOrder){
+      let items = byCat[cat]||[];
+      if(!items.length) continue;
+      // 小肠排末位
+      items.sort((a,b)=>{
+        const sa = (a.name||'').includes('小肠')?1:0;
+        const sb = (b.name||'').includes('小肠')?1:0;
+        if(sa!==sb) return sa-sb;
+        return (b.need||0)-(a.need||0);
+      });
+      html += `<tr><td colspan="6" class="cat-row" style="background:${catColor[cat]}">${catLabel[cat]||cat}</td></tr>`;
+      for(const i of items){
+        const pc = i.portion_count||1;
+        const ps = i.portion_size||i.per_package||0;
+        const tp = i.total_portions||pc*(i.order_qty||1);
+        const short = (i.shortage||0)>0 ? `<span style="color:#e74c3c">缺${i.shortage}${i.unit||''}</span>` : '<span style="color:#27ae60">✓</span>';
+        html += `<tr><td style="text-align:left">${i.name}</td><td>${tp}份</td><td>${ps}${i.unit||''}</td><td style="font-weight:700">${i.need||0}${i.unit||''}</td><td>${i.stock||0}</td><td>${short}</td></tr>`;
+      }
+    }
+    document.querySelector('#reqTable tbody').innerHTML = html || '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">无备餐需求</td></tr>';
+
+    // 工具借还
+    const loans = o.tool_loans||[];
+    if(loans.length){
+      document.getElementById('loanCard').style.display='block';
+      const stMap2 = {borrowed:'借出',returned:'已还',partial:'部分还',lost:'丢失'};
+      document.querySelector('#loanTable tbody').innerHTML = loans.map(l=>`<tr>
+        <td style="text-align:left">${l.tool_name||'-'}</td>
+        <td>${l.quantity}</td><td>${l.returned_qty||0}</td><td>${l.lost_qty||0}</td>
+        <td>${stMap2[l.status]||l.status}</td>
+      </tr>`).join('');
+    }
+  });
+}
+
+// ===== 刷新特效 =====
+function refreshWithFx(fn){
+  const btn = event.target.closest('.btn-refresh');
+  if(btn){ btn.classList.add('spinning'); setTimeout(()=>btn.classList.remove('spinning'), 800); }
+  if(typeof fn === 'function') fn();
+  showRefreshToast();
+}
+function showRefreshToast(){
+  let t = document.getElementById('refreshToast');
+  if(t) t.remove();
+  t = document.createElement('div');
+  t.id = 'refreshToast';
+  t.className = 'refresh-toast';
+  t.textContent = '✓ 已刷新';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2200);
+}
+loadDetail();
+</script>
+</body>
+</html>

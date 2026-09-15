@@ -49,6 +49,43 @@ def orders_page():
     return render_template("orders.html")
 
 
+@app.route("/orders/<int:oid>")
+def order_detail_page(oid):
+    return render_template("order_detail.html", oid=oid)
+
+
+@app.route("/api/orders/<int:oid>/detail")
+def order_detail(oid):
+    """订单详情：基本信息 + 备餐需求 + 工具借还 + 成本明细"""
+    db = g.db
+    cur = db.cursor()
+    cur.execute("SELECT * FROM orders WHERE id = ?", (oid,))
+    r = cur.fetchone()
+    if not r:
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    o = dict(r)
+    # 套餐
+    cur.execute("""
+        SELECT op.*, p.name as pkg_name, p.min_people, p.max_people
+        FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
+        WHERE op.order_id = ?
+    """, (oid,))
+    o["packages"] = [dict(x) for x in cur.fetchall()]
+    # 备餐需求
+    from calculator import calc_order_requirements, calc_prep_urgency
+    req = calc_order_requirements(oid)
+    o["requirements"] = req
+    o["urgency"] = calc_prep_urgency(o)
+    # 工具借还
+    cur.execute("""
+        SELECT tl.*, t.name as tool_name, t.cost
+        FROM tool_loans tl LEFT JOIN tools t ON tl.tool_id = t.id
+        WHERE tl.order_id = ?
+    """, (oid,))
+    o["tool_loans"] = [dict(x) for x in cur.fetchall()]
+    return jsonify({"ok": True, "data": o})
+
+
 @app.route("/history")
 @app.route("/finance")
 def finance_page():
@@ -959,7 +996,7 @@ def print_menu():
                 "FROM orders WHERE status IN ('pending','preparing') ORDER BY id")
     orders = [dict(r) for r in cur.fetchall()]
 
-    ing_sum = {}  # id -> {name, unit, total}
+    ing_sum = {}  # id -> {name, unit, total, per_package, total_portions, total_packages}
     tool_sum = {}
     order_details = []
 
@@ -975,14 +1012,22 @@ def print_menu():
 
         for pk in pkgs:
             cur.execute("""
-                SELECT pi.per_package, i.name, i.unit, i.id
+                SELECT pi.per_package, pi.portion_count, i.name, i.unit, i.id
                 FROM package_ingredients pi JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
+                WHERE pi.package_id = ? AND pi.cost_only = 0
             """, (pk["id"],))
             for r in cur.fetchall():
                 key = r["id"]
-                ing_sum.setdefault(key, {"name": r["name"], "unit": r["unit"], "total": 0})
+                ing_sum.setdefault(key, {
+                    "name": r["name"], "unit": r["unit"], "total": 0,
+                    "per_package": r["per_package"],
+                    "portion_count": r["portion_count"] or 1,
+                    "total_packages": 0,
+                })
                 ing_sum[key]["total"] += r["per_package"] * pk["quantity"]
+                ing_sum[key]["total_packages"] += pk["quantity"]
+                ing_sum[key]["per_package"] = r["per_package"]
+                ing_sum[key]["portion_count"] = r["portion_count"] or 1
             cur.execute("""
                 SELECT pt.per_package, t.name, t.id
                 FROM package_tools pt JOIN tools t ON pt.tool_id = t.id
@@ -997,7 +1042,7 @@ def print_menu():
 
     # 食材按分类分组，与备餐表顺序一致
     from calculator import CATEGORY_ORDER, CATEGORY_LABEL, PACKAGING_CATEGORY, \
-        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat
+        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _ing_sort_key
     db2 = get_db()
     cur2 = db2.cursor()
     cur2.execute("SELECT id, category, name FROM ingredients")
@@ -1010,6 +1055,10 @@ def print_menu():
         if sub_cat in SAUCE_LIKE_CATS:
             sub_cat = "sauce"
         v["category"] = sub_cat
+        # 计算份数列
+        pc = v.get("portion_count", 1) or 1
+        v["portion_size"] = round(v["per_package"] / max(1, pc), 2)
+        v["total_portions"] = pc * v.get("total_packages", 1)
 
     ing_by_cat = {}
     packaging_list = []
@@ -1017,7 +1066,7 @@ def print_menu():
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_sum.values() if v.get("category") == cat]
         if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
+            ing_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["total"]))
     packaging_list = [v for v in ing_sum.values() if v.get("category") == PACKAGING_CATEGORY]
     packaging_list = sorted(packaging_list, key=lambda x: -x["total"])
     tableware_list = [v for v in ing_sum.values() if v.get("category") == UTENSIL_CATEGORY]
@@ -1047,17 +1096,17 @@ def print_menu():
             continue
         label = CATEGORY_LABEL.get(cat, cat)
         color = cat_colors.get(cat, "#6b4f3a")
-        ing_rows += f'<tr><td colspan="2" style="background:{color};color:#fff;font-weight:700;padding:6px 8px;">{label}</td></tr>'
+        ing_rows += f'<tr><td colspan="5" style="background:{color};color:#fff;font-weight:700;padding:6px 8px;">{label}</td></tr>'
         for i in items:
-            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+            ing_rows += f'<tr><td>{i["name"]}</td><td style="text-align:right">{i.get("total_portions","-")}份</td><td style="text-align:right">{i.get("portion_size","-")}{i["unit"]}/份</td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
     if packaging_list:
-        ing_rows += '<tr><td colspan="2" style="background:#d35400;color:#fff;font-weight:700;padding:6px 8px;">📦 食材包装</td></tr>'
+        ing_rows += '<tr><td colspan="5" style="background:#d35400;color:#fff;font-weight:700;padding:6px 8px;">📦 食材包装</td></tr>'
         for i in packaging_list:
-            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+            ing_rows += f'<tr><td>{i["name"]}</td><td></td><td></td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
     if tableware_list:
-        ing_rows += '<tr><td colspan="2" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 客户餐具/工具</td></tr>'
+        ing_rows += '<tr><td colspan="5" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 客户餐具/工具</td></tr>'
         for i in tableware_list:
-            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+            ing_rows += f'<tr><td>{i["name"]}</td><td></td><td></td><td style="text-align:right;font-weight:700">{round(i["total"],2)}{i["unit"]}</td><td></td></tr>'
 
     tool_rows = "".join(
         f'<tr><td>{t["name"]}</td><td>{t["total"]}</td></tr>'
@@ -1089,8 +1138,8 @@ def print_menu():
 <tbody>{order_lines or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">暂无待备订单</td></tr>'}</tbody></table>
 
 <div class="sec-title">🥩 食材汇总</div>
-<table><thead><tr><th>食材</th><th>合计用量</th></tr></thead>
-<tbody>{ing_rows or '<tr><td colspan=2 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}</tbody></table>
+<table><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>总克数</th><th></th></tr></thead>
+<tbody>{ing_rows or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}</tbody></table>
 
 <div class="sec-title">🔧 工具汇总</div>
 <table><thead><tr><th>工具</th><th>合计数量</th></tr></thead>

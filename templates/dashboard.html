@@ -571,7 +571,7 @@ function loadDash(){
           const u = o.urgency || {};
           const urgCls = u.level==='overdue'?'background:var(--red)':(u.level==='soon'?'background:var(--orange)':'background:var(--green)');
           const urgTag = u.label?`<span class="tag tag-sm" style="color:#fff;${urgCls}">${u.label}</span>`:'';
-          html += `<div class="upcoming-order ${o.status}">
+          html += `<div class="upcoming-order ${o.status}" onclick="location.href='/orders/${o.id}'" style="cursor:pointer">
             <div class="uo-main">
               <div class="uo-time">⏰ ${o.booking_time||'时间待定'} ${stTag} ${urgTag}</div>
               <div class="uo-addr">📍 ${o.address||'地址待定'} · 👤 ${o.contact_name||''} ${o.contact_phone||''}</div>

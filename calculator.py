@@ -189,16 +189,22 @@ def calc_order_requirements(order_id):
     with get_db() as conn:
         cur = conn.cursor()
         for ing_id, info in ing_demand.items():
-            cur.execute("SELECT name, unit, stock, threshold FROM ingredients WHERE id = ?", (ing_id,))
+            cur.execute("SELECT name, unit, stock, threshold, category FROM ingredients WHERE id = ?", (ing_id,))
             r = cur.fetchone()
             if r:
                 stock = r["stock"] or 0
                 need = info["total"]
+                # 细分 meat 类 + 合并小料
+                cat = r["category"] or "other"
+                cat = _subcategorize_meat(r["name"], cat)
+                if cat in SAUCE_LIKE_CATS:
+                    cat = "sauce"
                 ingredients_result.append({
                     "id": ing_id, "name": r["name"], "unit": r["unit"],
                     "need": round(need, 2), "stock": stock,
                     "shortage": round(max(0, need - stock), 2),
                     "threshold": r["threshold"] or 0,
+                    "category": cat,
                     "warning": stock <= (r["threshold"] or 0),
                     "per_package": info["per_package"],
                     "order_qty": info["order_qty"],
@@ -506,7 +512,7 @@ def preview_parse(raw_text):
     for cat in CATEGORY_ORDER:
         items = [v for v in preview_ing.values() if v["category"] == cat]
         if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: -x["need"])
+            ing_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["need"]))
     packaging_list = [v for v in preview_ing.values() if v["category"] == PACKAGING_CATEGORY]
     packaging_list = sorted(packaging_list, key=lambda x: -x["need"])
     utensil_list = [v for v in preview_ing.values() if v["category"] == UTENSIL_CATEGORY]
@@ -561,7 +567,7 @@ def preview_parse(raw_text):
                 "total_packages": ei["qty"],
                 "category": cat,
             })
-            ing_by_cat[cat].sort(key=lambda x: -x["need"])
+            ing_by_cat[cat].sort(key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["need"]))
     parsed["preview_extra_ingredients"] = extra_ings_matched
     return parsed
 
@@ -590,17 +596,32 @@ SAUCE_LIKE_CATS = {"staple", "side", "sauce", "drink"}
 def _subcategorize_meat(name, current_cat):
     """把 meat 类按食材名细分成 beef / pork / chicken。
     韩式风味肠归 pork（市售多为猪肉肠）。
+    爆汁烤小肠归 beef（实际是牛肠）。
     """
     if current_cat != "meat":
         return current_cat
     n = name or ""
+    # 小肠优先归牛肉（爆汁烤小肠 = 牛肠）
+    if "小肠" in n:
+        return "beef"
     if "牛" in n:
         return "beef"
     if "鸡" in n or "掌中宝" in n or "脚筋" in n or "郡肝" in n:
         return "chicken"
-    if "猪" in n or "五花肉" in n or "松板肉" in n or "梅花肉" in n or "小肠" in n or "肠" in n:
+    if "猪" in n or "五花肉" in n or "松板肉" in n or "梅花肉" in n or "肠" in n:
         return "pork"
     return "other"
+
+
+# 食材排序优先级（数字越大越靠后）
+# 小肠在牛肉类里排最末（用户要求）
+def _ing_sort_key(name, category):
+    """返回排序 key：(category_order_index, sub_priority)
+    sub_priority: 0=正常 1=小肠(放末位)
+    """
+    cat_idx = CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else len(CATEGORY_ORDER)
+    sub = 1 if "小肠" in (name or "") else 0
+    return (cat_idx, sub)
 
 
 def calc_merged_prep(order_ids):
@@ -739,11 +760,12 @@ def calc_merged_prep(order_ids):
         checked_map[f"tool_{iid}"] = all(vals) and len(vals) > 0
 
     # 食材按分类分组（主表顺序：牛肉、猪肉、鸡肉、蔬菜、小料、其他）
+    # 小肠在牛肉类里排最末
     ingredients_by_cat = {}
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_merge.values() if v["category"] == cat]
         if items:
-            ingredients_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
+            ingredients_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["total"]))
 
     # 食材包装单独拎出（不在主表显示，给包装核对区）
     packaging = [v for v in ing_merge.values() if v["category"] == PACKAGING_CATEGORY]
