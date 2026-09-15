@@ -542,8 +542,32 @@ def print_menu():
                 tool_sum.setdefault(key, {"name": r["name"], "total": 0})
                 tool_sum[key]["total"] += r["per_package"] * pk["quantity"]
 
-    ings_sorted = sorted(ing_sum.values(), key=lambda x: -x["total"])
     tools_sorted = sorted(tool_sum.values(), key=lambda x: -x["total"])
+
+    # 食材按分类分组，与备餐表顺序一致
+    from calculator import CATEGORY_ORDER, CATEGORY_LABEL, TABLEWARE_CATEGORY, \
+        SAUCE_LIKE_CATS, _subcategorize_meat
+    db2 = get_db()
+    cur2 = db2.cursor()
+    cur2.execute("SELECT id, category, name FROM ingredients")
+    cat_map = {r["id"]: (r["category"], r["name"]) for r in cur2.fetchall()}
+    db2.close()
+
+    for k, v in ing_sum.items():
+        raw_cat, name = cat_map.get(k, ("other", v["name"]))
+        sub_cat = _subcategorize_meat(name, raw_cat)
+        if sub_cat in SAUCE_LIKE_CATS:
+            sub_cat = "sauce"
+        v["category"] = sub_cat
+
+    ing_by_cat = {}
+    tableware_list = []
+    for cat in CATEGORY_ORDER:
+        items = [v for v in ing_sum.values() if v.get("category") == cat]
+        if items:
+            ing_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
+    tableware_list = [v for v in ing_sum.values() if v.get("category") == TABLEWARE_CATEGORY]
+    tableware_list = sorted(tableware_list, key=lambda x: -x["total"])
 
     # 渲染成一个可打印的 HTML（独立页面，无 nav，适合 A4 打印）
     today = _json
@@ -556,9 +580,27 @@ def print_menu():
         <tr><td>{o['id']}</td><td>{o['booking_date']} {o['booking_time'] or ''}</td>
             <td>{o['address'] or ''}</td><td>{o['contact_name'] or ''}</td>
             <td>{pkg_str}</td></tr>"""
-    ing_rows = "".join(
-        f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
-        for i in ings_sorted)
+
+    # 食材按分类渲染（与备餐表顺序一致）
+    cat_colors = {
+        "beef": "#8e1e1a", "pork": "#c75d3e", "chicken": "#c9962b",
+        "vegetable": "#3a8a3a", "sauce": "#7a5a3a", "other": "#6b4f3a",
+    }
+    ing_rows = ""
+    for cat in CATEGORY_ORDER:
+        items = ing_by_cat.get(cat, [])
+        if not items:
+            continue
+        label = CATEGORY_LABEL.get(cat, cat)
+        color = cat_colors.get(cat, "#6b4f3a")
+        ing_rows += f'<tr><td colspan="2" style="background:{color};color:#fff;font-weight:700;padding:6px 8px;">{label}</td></tr>'
+        for i in items:
+            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+    if tableware_list:
+        ing_rows += '<tr><td colspan="2" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 餐具配套</td></tr>'
+        for i in tableware_list:
+            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+
     tool_rows = "".join(
         f'<tr><td>{t["name"]}</td><td>{t["total"]}</td></tr>'
         for t in tools_sorted)
