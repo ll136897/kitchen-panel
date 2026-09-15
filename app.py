@@ -1233,28 +1233,33 @@ def print_menu():
         for i in items:
             tot_portions = i.get("total_portions", 0)
             per_size = i.get("portion_size", 0)
-            # packaging/utensil 无份数/克数（与菜单页一致：每份数量=1）
-            if cat in (PACKAGING_CATEGORY, UTENSIL_CATEGORY):
+            unit = i.get("unit", "") or ""
+            # packaging/utensil/tool(无克数列) 与菜单页一致：克数显示"—"
+            is_simple = cat in (PACKAGING_CATEGORY, UTENSIL_CATEGORY)
+            if is_simple:
                 tot_portions = i.get("total_packages", 0)
-                per_size = 1
+                per_size = None  # 不显示克数
+            total_val = round(i["total"], 2) if i.get("total") else 0
+            total_str = f"{total_val}{unit}" if total_val else "-"
             ing_rows += (
                 f'<tr><td class="name-cell">{i["name"]}</td>'
                 f'<td class="num-cell">{round(tot_portions) if tot_portions else "-"}</td>'
-                f'<td class="num-cell">{round(per_size,2) if per_size else "-"}</td>'
-                f'<td class="num-cell total-cell">{round(i["total"],2) if i.get("total") else "-"}</td>'
-                f'<td>{i.get("unit","")}</td></tr>'
+                f'<td class="num-cell">{round(per_size,2) if per_size else "—"}</td>'
+                f'<td class="num-cell total-cell">{total_str}</td>'
+                f'<td>{unit}</td></tr>'
             )
 
-    # 工具单独渲染（与备餐页一致：🔧 工具分类）
+    # 工具单独渲染（与备餐页一致：🔧 工具分类，克数列显示"—"，单位默认"个"）
     tool_rows = ""
     if tools_sorted:
         tool_rows += f'<tr class="cat-row"><td colspan="5" style="background:#4a4a4a;color:#fff;font-weight:700;padding:7px 10px;font-size:14px;">🔧 工具 · {len(tools_sorted)}项</td></tr>'
         for t in tools_sorted:
+            t_total = round(t.get("total", 0))
             tool_rows += (
                 f'<tr><td class="name-cell">{t["name"]}</td>'
-                f'<td class="num-cell">{round(t.get("total",0))}</td>'
-                f'<td class="num-cell">1</td>'
-                f'<td class="num-cell total-cell">{round(t.get("total",0))}</td>'
+                f'<td class="num-cell">{t_total}</td>'
+                f'<td class="num-cell">—</td>'
+                f'<td class="num-cell total-cell">{t_total}个</td>'
                 f'<td>个</td></tr>'
             )
 

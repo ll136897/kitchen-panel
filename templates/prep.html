@@ -382,22 +382,28 @@ function render(){
 }
 
 // 备餐行：7列（勾选|名字|份数|克数|单位|总量|状态）
+// 注：packaging/utensil/tool 无"克数"列（显示—），工具单位默认"个"
+// 总量列统一为"数字+单位"格式（如 600克、8个）
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
-  const unit = it.unit||'';
+  // 判断是否为简单分类（无克数）
+  const isSimple = ['packaging','utensil','tool'].includes(it._cat);
+  let unit = it.unit||'';
+  if(type==='tool' && !unit){ unit = '个'; }
   const totPkg = round(it.total_portions||it.total_packages||0);
-  const perSize = round(it.portion_size||0);
+  const perSize = isSimple ? '' : round(it.portion_size||0);
   const total = round(it.total);
+  const totalStr = total + unit;
   const shortTxt = it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足';
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
     <div class="pr-name">${it.name}</div>
     <div class="pr-ord">${totPkg}</div>
-    <div class="pr-per">${perSize}</div>
+    <div class="pr-per">${perSize||'—'}</div>
     <div class="pr-unit">${unit}</div>
-    <div class="pr-total">${total}</div>
+    <div class="pr-total">${totalStr}</div>
     <div class="pr-short ${shortCls}">${shortTxt}</div>
   </div>`;
 }
@@ -420,8 +426,10 @@ function catBlock(cat, items, type, checkedMap){
   const label = CAT_LABEL[cat] || cat;
   const cls = 'cat-'+cat;
   const typeStr = type==='tool' ? 'tool' : 'ing';
+  // 给每个 item 标记所属分类，供 itemRow 判断是否需要克数列
+  const taggedItems = items.map(it=>({...it, _cat:cat}));
   // 判断该分类是否全部已勾选
-  const allChecked = items.every(it=>checkedMap[typeStr+'_'+it.id]);
+  const allChecked = taggedItems.every(it=>checkedMap[typeStr+'_'+it.id]);
   const btnText = allChecked ? '❎ 取消全选' : '✅ 全选';
   const btnAction = allChecked ? 'false' : 'true';
   return `<div class="cat-block ${cls}">
@@ -430,7 +438,7 @@ function catBlock(cat, items, type, checkedMap){
       <button class="check-all-btn" onclick="checkCat('${cat}','${typeStr}',${btnAction})">${btnText}</button>
     </div>
     ${headerRow()}
-    ${items.map(it=>itemRow(it, type, checkedMap)).join('')}
+    ${taggedItems.map(it=>itemRow(it, type, checkedMap)).join('')}
   </div>`;
 }
 

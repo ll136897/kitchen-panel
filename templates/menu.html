@@ -239,24 +239,27 @@ function renderIngRow(ing, size, pid){
   const rowId = `ing_${ing.id}`;
   const c = subcategorize(ing.ing_name, ing.category);
   // 食材包装/客户餐具：去掉每份数量列，份数为编辑框（每份数量隐含=1，总量=份数）
+  // 总量列统一为"数字+单位"格式（如 600克、8个）
   if(['packaging','utensil'].includes(c)){
     const cnt = Math.round((ing.per_package||0)*100)/100;
+    const unit = ing.unit||'';
     return `<tr id="${rowId}">
       <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
       <td><input type="number" value="${cnt}" step="1" id="cnt_${ing.id}"></td>
       <td class="muted" style="font-size:11px">—</td>
-      <td>${ing.unit}</td>
-      <td class="total-cell" id="tot_${ing.id}">${cnt}</td>
+      <td>${unit}</td>
+      <td class="total-cell" id="tot_${ing.id}">${cnt}${unit}</td>
       <td><button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button></td>
       <td><button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button></td>
     </tr>`;
   }
+  const unit = ing.unit||'';
   return `<tr id="${rowId}">
     <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
     <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
     <td><input type="number" value="${Math.round(size*100)/100}" step="0.1" id="sz_${ing.id}"></td>
-    <td>${ing.unit}</td>
-    <td class="total-cell" id="tot_${ing.id}">${ing.per_package}</td>
+    <td>${unit}</td>
+    <td class="total-cell" id="tot_${ing.id}">${ing.per_package}${unit}</td>
     <td><button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button></td>
     <td><button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button></td>
   </tr>`;
@@ -264,13 +267,14 @@ function renderIngRow(ing, size, pid){
 
 function renderToolRow(t, pid){
   const rowId = `tool_${t.id}`;
-  // 工具：去掉每份数量列，份数为编辑框（总量=份数）
+  // 工具：去掉每份数量列，份数为编辑框（总量=份数×单位，默认"个"）
+  const unit = '个';
   return `<tr id="${rowId}">
     <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">${catEmoji('tool')}</span></td>
     <td><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}"></td>
     <td class="muted" style="font-size:11px">—</td>
-    <td>个</td>
-    <td class="total-cell" id="ttot_${t.id}">${t.per_package}</td>
+    <td>${unit}</td>
+    <td class="total-cell" id="ttot_${t.id}">${t.per_package}${unit}</td>
     <td><button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button></td>
     <td><button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button></td>
   </tr>`;
@@ -299,7 +303,7 @@ document.addEventListener('input', e=>{
   if(e.target.id && e.target.id.startsWith('tqty_')){
     const id = e.target.id.split('_')[1];
     const v = parseFloat(e.target.value)||0;
-    document.getElementById('ttot_'+id).textContent = Math.round(v*100)/100;
+    document.getElementById('ttot_'+id).textContent = Math.round(v*100)/100 + '个';
   }
 });
 
@@ -344,6 +348,7 @@ function saveTool(pid, ptId){
     body:JSON.stringify({per_package:v})
   }).then(r=>r.json()).then(res=>{
     if(res.ok){
+      document.getElementById('ttot_'+ptId).textContent = Math.round((res.per_package||v)*100)/100 + '个';
       const row = document.getElementById('tool_'+ptId);
       row.style.background = '#e8f5e9';
       setTimeout(()=>row.style.background='', 800);
