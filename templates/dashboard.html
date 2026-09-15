@@ -64,7 +64,7 @@
     </div>
 
     <input type="file" id="imgInput" accept="image/*" style="display:none" onchange="ocrFromFile(this)">
-    <textarea id="rawText" placeholder="📋 模式：粘贴微信客户确认订单文字，或者选照片&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元"></textarea>
+    <textarea id="rawText" placeholder="📋 粘贴微信客户确认订单文字，或选照片识别&#10;&#10;批量粘贴：多个订单之间用 --- 分隔&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元&#10;---&#10;预约时间:9.16 18.00&#10;预约项目:&#10;5-6人餐 （搭建）&#10;预约地址:..."></textarea>
     <div class="btn-row">
       <button class="btn btn-accent" onclick="pasteFromClipboard()">📋 粘贴</button>
       <button class="btn btn-accent" onclick="document.getElementById('imgInput').click()">📷 选照片</button>
@@ -183,6 +183,16 @@ function clearText(){
   document.getElementById('parsePreview').innerHTML = '';
   document.getElementById('ocrStatus').style.display = 'none';
 }
+function showStockToast(msg){
+  let t = document.getElementById('stockToast');
+  if(t) t.remove();
+  t = document.createElement('div');
+  t.id = 'stockToast';
+  t.className = 'refresh-toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2500);
+}
 
 // 点按钮后聚焦 textarea，闪烁边框提示，用户长按会弹系统粘贴菜单
 async function pasteFromClipboard(){
@@ -266,12 +276,37 @@ function parseCurrent(){
 }
 
 // --- 订单解析 ---
+function renderBatchPreview(items){
+  const cards = items.map((data,i)=>{
+    const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
+    return `<div style="background:#faf5ed;border-radius:10px;padding:12px;margin:8px 0;border:1px solid #e8dfd0">
+      <h4 style="margin:0 0 8px;font-size:14px">订单 ${i+1} · ${data.contact_name||'未识别'} · ¥${data.amount||0}</h4>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">📅 ${data.booking_date||'-'}/${data.booking_time||'-'} · 📍 ${data.address||'-'}</div>
+      <div class="chips">${pkgs}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('parsePreview').classList.add('show');
+  document.getElementById('parsePreview').innerHTML = `
+    <div class="order-preview">
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn btn-success" onclick="confirmOrder()">✅ 批量入库 ${items.length} 单</button>
+        <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
+      </div>
+      <h4>📦 批量预览 · ${items.length} 个订单</h4>
+      ${cards}
+    </div>`;
+}
 function parseOrder(){
   const raw = document.getElementById('rawText').value.trim();
   if(!raw) return;
   fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
     .then(r=>r.json()).then(d=>{
       if(!d.ok){ alert(d.msg||'解析失败'); return; }
+      if(d.batch){
+        // 批量预览：多个订单卡片
+        renderBatchPreview(d.items);
+        return;
+      }
       const data = d.data;
       const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
       const extraT = Object.entries(data.extra_tools||{});
@@ -343,6 +378,10 @@ function parseOrder(){
       document.getElementById('parsePreview').classList.add('show');
       document.getElementById('parsePreview').innerHTML = `
         <div class="order-preview">
+          <div class="btn-row" style="margin-bottom:12px">
+            <button class="btn btn-success" onclick="confirmOrder()">✅ 确认入库</button>
+            <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
+          </div>
           <h4>✅ 订单解析结果</h4>
           <div class="preview-grid">
             <div class="cell"><div class="k">📅 预约日期</div><div class="v">${data.booking_date||'未识别'}</div></div>
@@ -358,10 +397,6 @@ function parseOrder(){
           <table class="tbl">${ingHeader}<tbody>${ingHtml}</tbody></table>`:''}
           ${tools?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具需求预览</h4>
           <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${tools}</tbody></table>`:''}
-          <div class="btn-row">
-            <button class="btn btn-success" onclick="confirmOrder()">✅ 确认入库</button>
-            <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
-          </div>
         </div>`;
     });
 }
@@ -372,10 +407,15 @@ function confirmOrder(){
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         clearText();
+        document.getElementById('parsePreview').classList.remove('show');
         loadDash();
-        alert('✅ 订单 #'+d.order_id+' 已入库');
+        if(d.batch){
+          showStockToast(`✅ 批量入库 ${d.count} 单`);
+        } else {
+          showStockToast(`✅ 订单 #${d.order_id} 已入库`);
+        }
       } else {
-        alert('入库失败：'+(d.msg||'未知错误'));
+        showStockToast('入库失败：'+(d.msg||'未知错误'));
       }
     });
 }
@@ -435,10 +475,11 @@ function confirmStock(){
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         clearText();
+        document.getElementById('parsePreview').classList.remove('show');
         loadDash();
-        alert('✅ 成功入库 '+d.done+' 项');
+        showStockToast(`✅ 成功入库 ${d.done} 项`);
       } else {
-        alert('入库失败：'+(d.msg||'未知错误'));
+        showStockToast('入库失败：'+(d.msg||'未知错误'));
       }
     });
 }

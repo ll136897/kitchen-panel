@@ -68,52 +68,73 @@ def menu_page():
 # ===== 订单解析与入库 =====
 @app.route("/api/parse", methods=["POST"])
 def api_parse():
-    """解析订单文本预览（不入库）"""
+    """解析订单文本预览（不入库）。支持批量：用 --- 分隔多个订单"""
     data = request.get_json(force=True)
     raw = data.get("raw_text", "")
     if not raw.strip():
         return jsonify({"ok": False, "msg": "文本为空"}), 400
+    import re as _re
+    chunks = _re.split(r'\n[\-=]{3,}\n', raw.strip())
+    chunks = [c.strip() for c in chunks if c.strip()]
+    if len(chunks) > 1:
+        previews = []
+        for i, chunk in enumerate(chunks):
+            parsed = preview_parse(chunk)
+            parsed["_batch_idx"] = i + 1
+            previews.append(parsed)
+        return jsonify({"ok": True, "batch": True, "count": len(previews), "items": previews})
     parsed = preview_parse(raw)
     return jsonify({"ok": True, "data": parsed})
 
 
 @app.route("/api/orders", methods=["POST"])
 def create_order():
-    """创建订单：接收 raw_text，自动解析入库"""
+    """创建订单：接收 raw_text（单个或批量用 --- 分隔），自动解析入库"""
     data = request.get_json(force=True)
     raw = data.get("raw_text", "")
     if not raw.strip():
         return jsonify({"ok": False, "msg": "文本为空"}), 400
 
-    parsed = parse_order_text(raw)
-    matched = match_packages_in_db(parsed["packages"])
+    # 批量：用 --- 或 === 分隔多个订单
+    import re as _re
+    chunks = _re.split(r'\n[\-=]{3,}\n', raw.strip())
+    chunks = [c.strip() for c in chunks if c.strip()]
 
     db = g.db
     cur = db.cursor()
-    cur.execute("""
-        INSERT INTO orders
-        (raw_text, booking_date, booking_time, address, contact_name,
-         contact_phone, amount, deposit, meal_time, pickup_time, note, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
-    """, (
-        raw, parsed["booking_date"], parsed["booking_time"],
-        parsed["address"], parsed["contact_name"], parsed["contact_phone"],
-        parsed["amount"], parsed["deposit"], parsed["meal_time"],
-        parsed["pickup_time"], parsed["note"],
-    ))
-    order_id = cur.lastrowid
-
-    for pk in matched:
-        if not pk["package_id"]:
-            continue
+    order_ids = []
+    results = []
+    for chunk in chunks:
+        parsed = parse_order_text(chunk)
+        matched = match_packages_in_db(parsed["packages"])
         cur.execute("""
-            INSERT INTO order_packages
-            (order_id, package_id, people, quantity)
-            VALUES (?,?,?,?)
-        """, (order_id, pk["package_id"], pk["people"], pk["quantity"]))
+            INSERT INTO orders
+            (raw_text, booking_date, booking_time, address, contact_name,
+             contact_phone, amount, deposit, meal_time, pickup_time, note, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
+        """, (
+            chunk, parsed["booking_date"], parsed["booking_time"],
+            parsed["address"], parsed["contact_name"], parsed["contact_phone"],
+            parsed["amount"], parsed["deposit"], parsed["meal_time"],
+            parsed["pickup_time"], parsed["note"],
+        ))
+        order_id = cur.lastrowid
+        order_ids.append(order_id)
+        for pk in matched:
+            if not pk["package_id"]:
+                continue
+            cur.execute("""
+                INSERT INTO order_packages
+                (order_id, package_id, people, quantity)
+                VALUES (?,?,?,?)
+            """, (order_id, pk["package_id"], pk["people"], pk["quantity"]))
+        results.append({"order_id": order_id, "name": parsed.get("contact_name", ""),
+                        "date": parsed.get("booking_date", ""), "amount": parsed.get("amount", 0)})
 
     db.commit()
-    return jsonify({"ok": True, "order_id": order_id})
+    if len(results) == 1:
+        return jsonify({"ok": True, "order_id": order_ids[0]})
+    return jsonify({"ok": True, "batch": True, "count": len(results), "orders": results})
 
 
 @app.route("/api/orders")
