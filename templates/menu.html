@@ -20,7 +20,7 @@
   .ing-tbl th{background:#f5efe8;padding:8px 6px;text-align:left;font-size:11px;color:var(--muted);
               position:sticky;top:0;border-bottom:2px solid var(--border)}
   .ing-tbl td{padding:7px 6px;border-bottom:1px solid #f0ebe3}
-  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:12px;padding:5px 8px;text-align:center}
+  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:11px;padding:8px 6px;text-align:center}
   .ing-tbl tr.cat-row td:first-child{text-align:left}
   .ing-tbl input{width:60px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
   .ing-tbl input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.15)}
@@ -227,10 +227,17 @@ function renderPkg(p, idx){
   </div>`;
 }
 
+// 取分类标签的纯emoji（去掉文字，只保留图标）
+function catEmoji(cat){
+  const lbl = CAT_LABEL[cat] || '';
+  return lbl.replace(/[\u4e00-\u9fa5\w\s]/g,'').trim();
+}
+
 function renderIngRow(ing, size, pid){
   const rowId = `ing_${ing.id}`;
+  const c = subcategorize(ing.ing_name, ing.category);
   return `<tr id="${rowId}">
-    <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${subcategorize(ing.ing_name, ing.category)}">${CAT_LABEL[subcategorize(ing.ing_name, ing.category)]||''}</span></td>
+    <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
     <td>${ing.unit}</td>
     <td><input type="number" value="${Math.round(size*100)/100}" step="0.1" id="sz_${ing.id}"></td>
     <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
@@ -243,7 +250,7 @@ function renderIngRow(ing, size, pid){
 function renderToolRow(t, pid){
   const rowId = `tool_${t.id}`;
   return `<tr id="${rowId}">
-    <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">工具</span></td>
+    <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">${catEmoji('tool')}</span></td>
     <td>个</td>
     <td><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}"></td>
     <td>1</td>
