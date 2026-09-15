@@ -310,7 +310,12 @@ function parseOrder(){
       const data = d.data;
       const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
       const extraT = Object.entries(data.extra_tools||{});
-      const extraChips = extraT.map(([k,v])=>`<span class="chip warn">${k} +${v}</span>`).join('');
+      const extraChips = extraT.map(([k,v])=>{
+        const q = (typeof v==='object') ? v.qty : v;
+        const mode = (typeof v==='object') ? (v.mode||'add') : 'add';
+        const label = mode==='set' ? `共${q}` : `+${q}`;
+        return `<span class="chip warn">${k} ${label}</span>`;
+      }).join('');
       const ings = (data.preview_ingredients||{});
       const tableware = (data.preview_tableware||[]);
       const packaging = (data.preview_packaging||[]);

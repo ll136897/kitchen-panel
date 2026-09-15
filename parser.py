@@ -208,17 +208,36 @@ def _num_from_str(s):
     return CHINESE_NUM_MAP.get(s)
 
 
+def _detect_mode(seg):
+    """判断备注片段是'覆盖'(set)还是'增量'(add)。
+
+    语义规则：
+      - '拿4把椅子' / '要4把椅子' / '配4把椅子' → 总数=4（覆盖套餐默认）
+      - '加1把椅子' / '多加1把' / '再加1把'      → 在套餐基础上 +1（增量）
+      - '多拿1张' / '多要1个'                     → 增量
+    增量关键词命中即为 add，否则为 set。
+    """
+    if re.search(r"(多加|再加|加|多拿|多要|多配|多带|多备)", seg):
+        return "add"
+    return "set"
+
+
 def _parse_extra_tools(note):
     """
     从备注解析额外工具需求，支持：
       - 阿拉伯数字："多拿1张桌子，1个椅子"
       - 中文数字："配一套卡式炉"
       - 加号分隔："配一套新卡式炉+烤盘"
-    返回 {工具名: 数量}（用数据库标准名）
+    返回 {工具名: {"qty": 数量, "mode": "set"|"add"}}
+      mode="set" → 覆盖（总数=qty）；mode="add" → 增量（套餐基础上 +qty）
     """
     if not note:
         return {}
-    tools = {}
+    # 收集每个工具的所有 (mode, qty) 条目，最后统一解析
+    tool_entries = {}  # std_name -> [(mode, qty), ...]
+
+    def _add_entry(std_name, mode, qty):
+        tool_entries.setdefault(std_name, []).append((mode, qty))
 
     # 拆分成段：按 + ，,。；;、 空格 切分
     segments = re.split(r"[+，,。；;、\s]+", note)
@@ -231,6 +250,7 @@ def _parse_extra_tools(note):
         for seg in segments:
             if alias not in seg:
                 continue
+            mode = _detect_mode(seg)
             n = None
             # 数字在前：1张桌子 / 一套卡式炉 / 一套新卡式炉
             m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(alias)}", seg)
@@ -246,7 +266,7 @@ def _parse_extra_tools(note):
                 if re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(alias)}", seg):
                     n = 1
             if n:
-                tools[std_name] = tools.get(std_name, 0) + n
+                _add_entry(std_name, mode, n)
 
     # 2. 再用数据库完整工具名兜底匹配
     with get_db() as conn:
@@ -254,11 +274,12 @@ def _parse_extra_tools(note):
         cur.execute("SELECT name FROM tools")
         known_tools = [r["name"] for r in cur.fetchall()]
     for tname in known_tools:
-        if tname in [v for v in tools.values()] or tname in tools:
+        if tname in tool_entries:
             continue
         for seg in segments:
             if tname not in seg:
                 continue
+            mode = _detect_mode(seg)
             n = None
             m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(tname)}", seg)
             if m:
@@ -270,9 +291,20 @@ def _parse_extra_tools(note):
             if n is None and re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(tname)}", seg):
                 n = 1
             if n:
-                tools[tname] = tools.get(tname, 0) + n
+                _add_entry(tname, mode, n)
 
-    return tools
+    # 解析每个工具的最终 mode 和 qty
+    result = {}
+    for std_name, entries in tool_entries.items():
+        has_add = any(m == "add" for m, _ in entries)
+        if has_add:
+            # 有任意增量 → 全部累加
+            total = sum(q for _, q in entries)
+            result[std_name] = {"qty": total, "mode": "add"}
+        else:
+            # 全是覆盖 → 取最后一个（最终总数）
+            result[std_name] = {"qty": entries[-1][1], "mode": "set"}
+    return result
 
 
 def _parse_extra_ingredients(note):
@@ -290,6 +322,7 @@ def _parse_extra_ingredients(note):
     segments = re.split(r"[+，,。；;、\s]+", note)
 
     for seg in segments:
+        mode = _detect_mode(seg)
         # 匹配 "加一份XX" / "加2份XX" / "多加一份XX" / "一份XX"
         m = re.search(r"(?:多加|加|再加)?\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*[份盘份盘]?\s*(.+)", seg)
         if not m:
@@ -301,7 +334,7 @@ def _parse_extra_ingredients(note):
                 # 去掉前面的"加""多加"等
                 name = re.sub(r"^(多加|加|再加|配|带|拿|加一份|加两份)", "", name).strip()
                 if name and len(name) >= 2 and n:
-                    results.append({"name": name, "qty": n})
+                    results.append({"name": name, "qty": n, "mode": mode})
                 continue
             continue
         n = _num_from_str(m.group(1))
@@ -318,7 +351,7 @@ def _parse_extra_ingredients(note):
         if not name or len(name) < 2 or name in ("一份", "两份", "无", "没有", "地址", "时间"):
             continue
         if n:
-            results.append({"name": name, "qty": n})
+            results.append({"name": name, "qty": n, "mode": mode})
     return results
 
 
@@ -349,6 +382,7 @@ def match_extra_ingredients_to_db(extra_ings):
     for ei in extra_ings:
         name = ei["name"]
         qty = ei["qty"]
+        mode = ei.get("mode", "add")
         matched = None
         # 1. 精确匹配
         for ing in all_ings:
@@ -382,6 +416,7 @@ def match_extra_ingredients_to_db(extra_ings):
                 "qty": qty,
                 "per_package": per_pkg,
                 "total": round(total, 2),
+                "mode": mode,
             })
         else:
             results.append({
@@ -392,6 +427,7 @@ def match_extra_ingredients_to_db(extra_ings):
                 "per_package": 1,
                 "total": qty,
                 "raw_name": name,
+                "mode": mode,
             })
     return results
 

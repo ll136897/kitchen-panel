@@ -121,7 +121,13 @@ function renderPreview(p){
     return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}</td><td>${x.stock}</td><td>${short||'充足'}</td></tr>`;
   }).join('') || '<tr><td colspan=4 class="muted">无工具需求</td></tr>';
   const extra = Object.keys(p.extra_tools||{});
-  const extraStr = extra.length ? extra.map(k=>`${k}+${p.extra_tools[k]}`).join('，') : '<span class="muted">无</span>';
+  const extraStr = extra.length ? extra.map(k=>{
+    const v = p.extra_tools[k];
+    const q = (typeof v==='object') ? v.qty : v;
+    const mode = (typeof v==='object') ? (v.mode||'add') : 'add';
+    const label = mode==='set' ? `共${q}` : `+${q}`;
+    return `${k}${label}`;
+  }).join('，') : '<span class="muted">无</span>';
 
   document.getElementById('preview').innerHTML = `
     <div class="card">

@@ -159,14 +159,19 @@ def calc_order_requirements(order_id):
         # 备注解析额外工具
         parsed = parse_order_text(raw_text)
         extra = parsed.get("extra_tools", {})
-        for tname, qty in extra.items():
+        for tname, info in extra.items():
+            qty = info["qty"] if isinstance(info, dict) else info
+            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
             cur.execute("SELECT id FROM tools WHERE name = ?", (tname,))
             tr = cur.fetchone()
             if tr:
                 tid = tr["id"]
                 if tid not in tool_demand:
                     tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": 0}
-                tool_demand[tid]["total"] += qty
+                if mode == "set":
+                    tool_demand[tid]["total"] = qty       # 覆盖：总数=qty
+                else:
+                    tool_demand[tid]["total"] += qty      # 增量：套餐基础上 +qty
                 tool_demand[tid]["per_package"] = qty
                 tool_demand[tid]["order_qty"] += 1
 
@@ -178,9 +183,13 @@ def calc_order_requirements(order_id):
             if not iid:
                 continue
             amount = ei["total"]  # 已经算好的总克数
+            mode = ei.get("mode", "add")
             if iid not in ing_demand:
                 ing_demand[iid] = {"total": 0, "per_package": ei["per_package"], "order_qty": 0}
-            ing_demand[iid]["total"] += amount
+            if mode == "set":
+                ing_demand[iid]["total"] = amount        # 覆盖
+            else:
+                ing_demand[iid]["total"] += amount       # 增量
             ing_demand[iid]["per_package"] = ei["per_package"]
             ing_demand[iid]["order_qty"] += ei["qty"]
 
@@ -478,7 +487,9 @@ def preview_parse(raw_text):
                 preview_tool[r["id"]]["need"] += amount
 
         # 备注额外工具
-        for tname, qty in parsed["extra_tools"].items():
+        for tname, info in parsed["extra_tools"].items():
+            qty = info["qty"] if isinstance(info, dict) else info
+            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
             cur.execute("SELECT id, stock, threshold FROM tools WHERE name = ?", (tname,))
             r = cur.fetchone()
             if r:
@@ -488,7 +499,41 @@ def preview_parse(raw_text):
                         "threshold": r["threshold"], "need": 0,
                         "per_package": qty,
                     }
-                preview_tool[r["id"]]["need"] += qty
+                if mode == "set":
+                    preview_tool[r["id"]]["need"] = qty      # 覆盖
+                else:
+                    preview_tool[r["id"]]["need"] += qty     # 增量
+
+        # 备注额外加菜：合并到 preview_ing（按食材 id），set 覆盖 / add 增量
+        from parser import match_extra_ingredients_to_db
+        extra_ings_matched = match_extra_ingredients_to_db(parsed.get("extra_ingredients", []))
+        for ei in extra_ings_matched:
+            iid = ei.get("matched_id")
+            if not iid:
+                continue
+            cat = _subcategorize_meat(ei.get("matched_name", ""), ei.get("category", "other"))
+            if cat in SAUCE_LIKE_CATS:
+                cat = "sauce"
+            mode = ei.get("mode", "add")
+            amount = ei["total"]
+            if iid in preview_ing:
+                if mode == "set":
+                    preview_ing[iid]["need"] = amount
+                else:
+                    preview_ing[iid]["need"] += amount
+                preview_ing[iid]["per_package"] = ei["per_package"]
+                preview_ing[iid]["total_packages"] = preview_ing[iid].get("total_packages", 0) + ei["qty"]
+            else:
+                preview_ing[iid] = {
+                    "id": iid, "name": ei["matched_name"], "unit": ei["unit"],
+                    "stock": ei["stock"], "threshold": ei["threshold"],
+                    "need": amount, "category": cat,
+                    "per_package": ei["per_package"],
+                    "portion_count": 1,
+                    "portion_size": ei["per_package"],
+                    "total_packages": ei["qty"],
+                    "total_portions": ei["qty"],
+                }
 
     # 细分 meat → beef/pork/chicken，合并小料类，分离餐具
     for v in preview_ing.values():
@@ -524,50 +569,7 @@ def preview_parse(raw_text):
     parsed["preview_tableware"] = utensil_list
     parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
 
-    # 备注里的额外加菜（单点食材）
-    from parser import match_extra_ingredients_to_db
-    extra_ings_matched = match_extra_ingredients_to_db(parsed.get("extra_ingredients", []))
-    # 把加菜合并到对应的分类里
-    for ei in extra_ings_matched:
-        if not ei.get("matched_id"):
-            continue
-        cat = _subcategorize_meat(ei.get("matched_name", ""), ei.get("category", "other"))
-        if cat in SAUCE_LIKE_CATS:
-            cat = "sauce"
-        if cat == PACKAGING_CATEGORY:
-            packaging_list.append({
-                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
-                "stock": ei["stock"], "threshold": ei["threshold"],
-                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
-                "warning": ei["stock"] <= ei["threshold"],
-                "per_package": ei["per_package"],
-                "total_packages": ei["qty"],
-                "category": cat,
-            })
-            packaging_list.sort(key=lambda x: -x["need"])
-        elif cat == UTENSIL_CATEGORY:
-            utensil_list.append({
-                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
-                "stock": ei["stock"], "threshold": ei["threshold"],
-                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
-                "warning": ei["stock"] <= ei["threshold"],
-                "per_package": ei["per_package"],
-                "total_packages": ei["qty"],
-                "category": cat,
-            })
-            utensil_list.sort(key=lambda x: -x["need"])
-        else:
-            ing_by_cat.setdefault(cat, [])
-            ing_by_cat[cat].append({
-                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
-                "stock": ei["stock"], "threshold": ei["threshold"],
-                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
-                "warning": ei["stock"] <= ei["threshold"],
-                "per_package": ei["per_package"],
-                "total_packages": ei["qty"],
-                "category": cat,
-            })
-            ing_by_cat[cat].sort(key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["need"]))
+    # 备注额外加菜已在上方合并进 preview_ing（set 覆盖 / add 增量）
     parsed["preview_extra_ingredients"] = extra_ings_matched
     return parsed
 
