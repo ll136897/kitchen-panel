@@ -36,10 +36,10 @@ body{
   padding-top:var(--nav-h);
 }
 
-/* ---- 顶栏（木质纹理渐变 + 紧凑导航）---- */
+/* ---- 顶栏（木质纹理渐变，固定不滑动）---- */
 .nav{
   position:fixed;top:0;left:0;right:0;height:var(--nav-h);z-index:50;
-  display:flex;align-items:stretch;justify-content:center;overflow-x:auto;
+  display:flex;align-items:stretch;justify-content:space-around;
   background:linear-gradient(180deg,#3a2416 0%,#2a1910 100%);
   box-shadow:0 2px 8px rgba(0,0,0,.25);
 }
@@ -48,22 +48,14 @@ body{
   background:linear-gradient(90deg,transparent,var(--primary) 50%,transparent);
   opacity:.7;
 }
-/* 品牌小标识（最左，紧凑）*/
-.nav-logo{
-  display:flex;align-items:center;gap:5px;
-  padding:0 10px;flex-shrink:0;
-  font-size:15px;font-weight:800;color:#fff;
-  border-right:1px solid rgba(255,255,255,.08);
-  background:linear-gradient(135deg,rgba(230,126,34,.12),rgba(192,57,43,.18));
-}
-.nav-logo .nl-icon{font-size:17px;filter:drop-shadow(0 0 3px rgba(230,126,34,.6))}
 .nav-item{
   color:rgba(255,255,255,.75);
-  text-decoration:none;padding:0 13px;
-  display:flex;align-items:center;gap:5px;
-  font-size:14px;font-weight:500;
+  text-decoration:none;
+  display:flex;align-items:center;justify-content:center;gap:4px;
+  font-size:13px;font-weight:500;
   border-bottom:3px solid transparent;
-  transition:color .15s,background .15s;white-space:nowrap;flex-shrink:0;
+  transition:color .15s,background .15s;white-space:nowrap;
+  flex:1 1 0;min-width:0;
 }
 .nav-item:hover{color:#fff;background:rgba(255,255,255,.05)}
 .nav-item.active{
@@ -310,9 +302,7 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
 @media(max-width:600px){
   .container{padding:14px 10px 60px}
   .card{padding:14px;border-radius:12px}
-  .nav-item{padding:0 9px;font-size:13px;gap:3px}
-  .nav-logo{padding:0 8px;font-size:14px}
-  .nav-logo .nl-icon{font-size:15px}
+  .nav-item{font-size:11px;gap:2px}
   .tbl{font-size:12px}
   .tbl th,.tbl td{padding:8px 6px}
   .kpi-row{grid-template-columns:repeat(2,1fr);gap:8px}

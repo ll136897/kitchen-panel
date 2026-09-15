@@ -431,13 +431,19 @@ def update_pkg_tool(pid, pt_id):
     return jsonify({"ok": True})
 
 
-# 导出菜单原数据(JSON / CSV)
+# 导出菜单原数据(JSON / CSV / Excel)
 @app.route("/api/menu/export")
 def export_menu():
     import csv, io, json as _json
     fmt = request.args.get("format", "json")
+    pid = request.args.get("pid")  # 单套餐导出
     cur = g.db.cursor()
-    cur.execute("SELECT * FROM packages ORDER BY min_people")
+    sql = "SELECT * FROM packages ORDER BY min_people"
+    params = ()
+    if pid:
+        sql = "SELECT * FROM packages WHERE id=? ORDER BY min_people"
+        params = (int(pid),)
+    cur.execute(sql, params)
     pkgs = [dict(r) for r in cur.fetchall()]
     for p in pkgs:
         cur.execute("""
@@ -456,6 +462,8 @@ def export_menu():
         """, (p["id"],))
         p["tools"] = [dict(r) for r in cur.fetchall()]
 
+    fname = f"menu_{pkgs[0]['name']}" if len(pkgs)==1 else "menu_all"
+
     if fmt == "csv":
         buf = io.StringIO()
         buf.write("\ufeff")  # BOM for Excel
@@ -472,9 +480,114 @@ def export_menu():
                 w.writerow([p["name"], people, "tool", t["tool"], "个", "", "",
                             t["per_package"], p["base_price"], p["price"]])
         resp = app.response_class(buf.getvalue(), mimetype="text/csv")
-        resp.headers["Content-Disposition"] = "attachment; filename=menu.csv"
+        resp.headers["Content-Disposition"] = f"attachment; filename={fname}.csv"
         return resp
     return jsonify({"ok": True, "data": pkgs})
+
+
+# 导出 Excel(xlsx)
+@app.route("/api/menu/export/xlsx")
+def export_menu_xlsx():
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    except ImportError:
+        return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
+    pid = request.args.get("pid")
+    cur = g.db.cursor()
+    if pid:
+        cur.execute("SELECT * FROM packages WHERE id=?", (int(pid),))
+    else:
+        cur.execute("SELECT * FROM packages ORDER BY min_people")
+    pkgs = [dict(r) for r in cur.fetchall()]
+    for p in pkgs:
+        cur.execute("""
+            SELECT i.name as ingredient, i.unit, i.category, pi.per_package, pi.portion_count
+            FROM package_ingredients pi
+            JOIN ingredients i ON pi.ingredient_id = i.id
+            WHERE pi.package_id = ?
+            ORDER BY i.category, i.name
+        """, (p["id"],))
+        p["ingredients"] = [dict(r) for r in cur.fetchall()]
+        cur.execute("""
+            SELECT t.name as tool, pt.per_package
+            FROM package_tools pt
+            JOIN tools t ON pt.tool_id = t.id
+            WHERE pt.package_id = ?
+        """, (p["id"],))
+        p["tools"] = [dict(r) for r in cur.fetchall()]
+
+    cat_colors = {
+        'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
+        'vegetable': '3A8A3A', 'sauce': '7A5A3A', 'tableware': '8E44AD',
+        'staple': '666666', 'side': '666666', 'drink': '666666',
+        'other': '666666', 'tool': '4A4A4A'
+    }
+    cat_labels = {
+        'beef': '牛肉', 'pork': '猪肉', 'chicken': '鸡肉',
+        'vegetable': '蔬菜', 'sauce': '小料', 'tableware': '餐具配套',
+        'staple': '主食', 'side': '小菜', 'drink': '饮料',
+        'other': '其他', 'tool': '工具'
+    }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "菜单" if len(pkgs) > 1 else pkgs[0]["name"]
+    headers = ["套餐", "人数", "分类", "食材/工具", "单位", "每份克数", "份数", "总量", "基价", "总价"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill("solid", fgColor="3A2416")
+        cell.alignment = Alignment(horizontal="center")
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for p in pkgs:
+        people = f"{p['min_people']}-{p['max_people']}人"
+        # 按分类分组
+        by_cat = {}
+        for ing in p["ingredients"]:
+            c = ing["category"] or "other"
+            by_cat.setdefault(c, []).append(ing)
+        for cat, items in by_cat.items():
+            color = cat_colors.get(cat, "666666")
+            label = cat_labels.get(cat, cat)
+            # 分类标题行
+            ws.append([p["name"], people, label, f"{len(items)}项", "", "", "", "", "", ""])
+            for cell in ws[ws.max_row]:
+                cell.fill = PatternFill("solid", fgColor=color)
+                cell.font = Font(bold=True, color="FFFFFF", size=10)
+            for ing in items:
+                size = ing["per_package"] / max(1, ing["portion_count"])
+                ws.append([p["name"], people, label, ing["ingredient"], ing["unit"],
+                          round(size, 2), ing["portion_count"], ing["per_package"],
+                          p["base_price"], p["price"]])
+                for cell in ws[ws.max_row]:
+                    cell.border = border
+                    cell.alignment = Alignment(horizontal="center")
+                ws.cell(ws.max_row, 4).alignment = Alignment(horizontal="left")
+        # 工具
+        if p["tools"]:
+            ws.append([p["name"], people, "工具", f"{len(p['tools'])}项", "", "", "", "", "", ""])
+            for cell in ws[ws.max_row]:
+                cell.fill = PatternFill("solid", fgColor="4A4A4A")
+                cell.font = Font(bold=True, color="FFFFFF", size=10)
+            for t in p["tools"]:
+                ws.append([p["name"], people, "工具", t["tool"], "个", "", "",
+                          t["per_package"], p["base_price"], p["price"]])
+                for cell in ws[ws.max_row]:
+                    cell.border = border
+                    cell.alignment = Alignment(horizontal="center")
+                ws.cell(ws.max_row, 4).alignment = Alignment(horizontal="left")
+    # 列宽
+    widths = [12, 10, 10, 18, 6, 10, 6, 10, 8, 8]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[chr(64+i)].width = w
+    import io as _io
+    buf = _io.BytesIO()
+    wb.save(buf)
+    fname = f"menu_{pkgs[0]['name']}" if len(pkgs)==1 else "menu_all"
+    resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    resp.headers["Content-Disposition"] = f"attachment; filename={fname}.xlsx"
+    return resp
 
 
 @app.route("/api/dishes", methods=["GET", "POST"])

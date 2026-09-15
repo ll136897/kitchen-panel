@@ -9,35 +9,45 @@
   .pkg-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;margin:12px 0;overflow:hidden}
   .pkg-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;
             background:linear-gradient(90deg,#8e1e1a,#c0392b);color:#fff}
-  .pkg-head h3{margin:0;font-size:17px}
-  .pkg-meta{font-size:13px;opacity:.9}
-  .pkg-body{padding:0;display:none}
-  .pkg-card.open .pkg-body{display:block}
+  .pkg-head h3{margin:0;font-size:16px}
+  .pkg-meta{font-size:12px;opacity:.85}
+  .pkg-body{padding:0;max-height:0;overflow:hidden;transition:max-height .3s ease}
+  .pkg-card.open .pkg-body{max-height:none}
   .pkg-card.open .pkg-head{border-radius:0}
-  .pkg-toggle{font-size:20px;font-weight:700}
+  .pkg-toggle{font-size:18px;font-weight:700;transition:transform .2s}
+  .pkg-card.open .pkg-toggle{transform:rotate(180deg)}
   .ing-tbl{width:100%;border-collapse:collapse;font-size:14px}
-  .ing-tbl th{background:#f5efe8;padding:8px;text-align:left;font-size:12px;color:var(--muted);
+  .ing-tbl th{background:#f5efe8;padding:8px 6px;text-align:left;font-size:11px;color:var(--muted);
               position:sticky;top:0;border-bottom:2px solid var(--border)}
-  .ing-tbl td{padding:7px 8px;border-bottom:1px solid #f0ebe3}
-  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:13px;padding:6px 10px}
-  .ing-tbl input{width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
+  .ing-tbl td{padding:7px 6px;border-bottom:1px solid #f0ebe3}
+  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:12px;padding:5px 8px}
+  .ing-tbl input{width:60px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
   .ing-tbl input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.15)}
-  .ing-tbl .name-cell{font-weight:600;min-width:100px}
+  .ing-tbl .name-cell{font-weight:600;min-width:80px}
   .ing-tbl .total-cell{font-weight:800;color:var(--primary)}
   .ing-tbl .edit-actions{display:flex;gap:4px}
-  .ing-tbl .btn-mini{padding:3px 8px;font-size:12px;border-radius:6px;border:1px solid var(--border);
+  .ing-tbl .btn-mini{padding:3px 6px;font-size:11px;border-radius:6px;border:1px solid var(--border);
                      background:#fff;cursor:pointer;color:var(--muted)}
   .ing-tbl .btn-mini:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
   .ing-tbl .btn-mini.del:hover{background:#c0392b}
   .ing-tbl .btn-mini.save{background:var(--green);color:#fff;border-color:var(--green)}
   .ing-tbl .row-editing{background:#fff8e1}
   .add-row{display:flex;gap:6px;padding:10px;background:#faf5ed;align-items:center;flex-wrap:wrap}
-  .add-row select,.add-row input{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:14px}
-  .add-row select{flex:1;min-width:140px}
-  .add-row input{width:60px;text-align:center}
-  .add-row .btn-add{padding:5px 12px;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
-  .toolbar{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
-  .toolbar .btn{font-size:13px}
+  .add-row select,.add-row input{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px}
+  .add-row select{flex:1;min-width:120px}
+  .add-row input{width:55px;text-align:center}
+  .add-row .btn-add{padding:5px 12px;background:var(--green);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px}
+  .toolbar{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
+  .toolbar .btn{font-size:12px;padding:6px 10px}
+  @media(max-width:600px){
+    .pkg-head{padding:10px 12px}
+    .pkg-head h3{font-size:15px}
+    .pkg-meta{font-size:11px}
+    .ing-tbl{font-size:13px}
+    .ing-tbl th,.ing-tbl td{padding:6px 4px}
+    .ing-tbl input{width:50px;font-size:13px}
+    .toolbar .btn{font-size:11px;padding:5px 8px}
+  }
   .cat-beef{background:#8e1e1a}
   .cat-pork{background:#c75d3e}
   .cat-chicken{background:#c9962b}
@@ -51,7 +61,6 @@
 </head>
 <body>
 <nav class="nav">
-  <div class="nav-logo"><span class="nl-icon">🐂</span>刘和牛</div>
   <a href="/" class="nav-item">📊 面板</a>
   <a href="/orders" class="nav-item">📋 订单</a>
   <a href="/prep" class="nav-item">🍱 备餐</a>
@@ -70,8 +79,7 @@
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>
       <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
       <button class="btn btn-sm" onclick="collapseAll()">📦 全收起</button>
-      <button class="btn btn-sm" onclick="exportCSV()">📥 导出CSV</button>
-      <button class="btn btn-sm" onclick="exportJSON()">📥 导出JSON</button>
+      <button class="btn btn-sm" onclick="exportAllXlsx()">📊 导出全部Excel</button>
     </div>
   </div>
 
@@ -167,7 +175,10 @@ function renderPkg(p, idx){
         <h3>${p.name}</h3>
         <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 基价¥${p.base_price} · 总价¥${p.price} · ${ings.length}食材/${tools.length}工具</div>
       </div>
-      <span class="pkg-toggle">▾</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:12px;padding:4px 10px" onclick="event.stopPropagation();exportPkgXlsx(${p.id})">📊 导出</button>
+        <span class="pkg-toggle">▾</span>
+      </div>
     </div>
     <div class="pkg-body">${bodyHtml}</div>
   </div>`;
@@ -285,8 +296,8 @@ function addIng(pid){
   });
 }
 
-function exportCSV(){ window.open('/api/menu/export?format=csv','_blank'); }
-function exportJSON(){ window.open('/api/menu/export?format=json','_blank'); }
+function exportAllXlsx(){ window.open('/api/menu/export/xlsx','_blank'); }
+function exportPkgXlsx(pid){ window.open(`/api/menu/export/xlsx?pid=${pid}`,'_blank'); }
 
 loadMenu();
 
