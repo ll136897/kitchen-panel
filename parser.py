@@ -240,6 +240,9 @@ def _parse_extra_tools(note):
 
     # 拆分成段：按 + ，,。；;、 空格 切分
     segments = re.split(r"[+，,。；;、\s]+", note)
+    # 过滤时间相关段：含"X点""X点钟""X点左右"等时间表达的都是时间安排，
+    # 不是工具数量需求（如"15点钟搭好天幕桌椅"不应被解析成15个天幕）
+    segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
 
     # 量词集合
     quantifier = "[张个把条只套份台]?"
@@ -319,6 +322,8 @@ def _parse_extra_ingredients(note):
     results = []
     # 按加号/逗号/顿号/分号/空格切分
     segments = re.split(r"[+，,。；;、\s]+", note)
+    # 过滤时间相关段（含"X点""X点钟"等时间表达，非食材需求）
+    segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
 
     for seg in segments:
         mode = _detect_mode(seg)
