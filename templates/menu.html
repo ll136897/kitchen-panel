@@ -352,8 +352,19 @@ function addIng(pid){
   });
 }
 
-function exportAllXlsx(){ window.open('/api/menu/export/xlsx','_blank'); }
-function exportPkgXlsx(pid){ window.open(`/api/menu/export/xlsx?pid=${pid}`,'_blank'); }
+function exportAllXlsx(){ downloadFile('/api/menu/export/xlsx'); }
+function exportPkgXlsx(pid){ downloadFile(`/api/menu/export/xlsx?pid=${pid}`); }
+// 用隐藏iframe下载，避免window.open新标签页空白
+function downloadFile(url){
+  let f = document.getElementById('dl_frame');
+  if (!f){
+    f = document.createElement('iframe');
+    f.id = 'dl_frame';
+    f.style.display = 'none';
+    document.body.appendChild(f);
+  }
+  f.src = url;
+}
 
 loadMenu();
 
