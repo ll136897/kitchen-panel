@@ -20,10 +20,8 @@
   .ing-tbl th{background:#f5efe8;padding:8px 6px;text-align:left;font-size:11px;color:var(--muted);
               position:sticky;top:0;border-bottom:2px solid var(--border)}
   .ing-tbl td{padding:7px 6px;border-bottom:1px solid #f0ebe3}
-  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:12px;padding:5px 8px}
-  .ing-tbl tr.sub-head td{background:#f5efe8;font-size:11px;color:var(--muted);text-align:center;
-                           font-weight:600;padding:5px 6px;border-bottom:1px solid var(--border)}
-  .ing-tbl tr.sub-head td:first-child{text-align:left}
+  .ing-tbl tr.cat-row td{font-weight:700;color:#fff;font-size:12px;padding:5px 8px;text-align:center}
+  .ing-tbl tr.cat-row td:first-child{text-align:left}
   .ing-tbl input{width:60px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;font-size:14px;text-align:center}
   .ing-tbl input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.15)}
   .ing-tbl .name-cell{font-weight:600;min-width:80px}
@@ -185,16 +183,18 @@ function renderPkg(p, idx){
       return (b.per_package||0)-(a.per_package||0);
     });
     const label = CAT_LABEL[cat] || cat;
-    bodyHtml += `<tr class="cat-row"><td colspan="7" class="cat-${cat}">${label} · ${items.length}项</td></tr>`;
-    bodyHtml += subHeadRow();
+    bodyHtml += `<tr class="cat-row cat-${cat}">
+      <td>${label} · ${items.length}项</td><td>单位</td><td>每份数量</td><td>份数</td><td>总量</td><td>保存</td><td>删除</td>
+    </tr>`;
     items.forEach(ing=>{
       const size = ing.per_package / Math.max(1, ing.portion_count||1);
       bodyHtml += renderIngRow(ing, size, p.id);
     });
   }
   if(tools.length){
-    bodyHtml += `<tr class="cat-row"><td colspan="7" class="cat-tool">🔧 工具装备 · ${tools.length}项</td></tr>`;
-    bodyHtml += subHeadRow();
+    bodyHtml += `<tr class="cat-row cat-tool">
+      <td>🔧 工具装备 · ${tools.length}项</td><td>单位</td><td>每份数量</td><td>份数</td><td>总量</td><td>保存</td><td>删除</td>
+    </tr>`;
     tools.forEach(t=>{
       bodyHtml += renderToolRow(t, p.id);
     });
@@ -225,10 +225,6 @@ function renderPkg(p, idx){
     </div>
     <div class="pkg-body">${bodyHtml}</div>
   </div>`;
-}
-
-function subHeadRow(){
-  return `<tr class="sub-head"><td>名称</td><td>单位</td><td>每份数量</td><td>份数</td><td>总量</td><td>保存</td><td>删除</td></tr>`;
 }
 
 function renderIngRow(ing, size, pid){
