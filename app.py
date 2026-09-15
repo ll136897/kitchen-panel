@@ -82,6 +82,36 @@ try:
 except Exception as _e:
     print(f"[migrate] 重命名应季水果三样跳过: {_e}")
 
+# 迁移：修复历史订单 booking_date/booking_time 解析错误（旧 parser 对"9月11日12点"等格式解析失败）
+# 重新用 raw_text 解析，更新非标准 YYYY-MM-DD 的 booking_date
+try:
+    import re as _re
+    _db = get_db()
+    _cur = _db.cursor()
+    _cur.execute("SELECT id, raw_text, booking_date, booking_time FROM orders")
+    _fixed = 0
+    for _r in _cur.fetchall():
+        _bd = _r["booking_date"] or ""
+        # 标准 YYYY-MM-DD 且不等于"待定"之类垃圾值则跳过
+        if _re.match(r"^\d{4}-\d{2}-\d{2}$", _bd):
+            continue
+        if not _r["raw_text"]:
+            continue
+        from parser import parse_order_text as _pot
+        _parsed = _pot(_r["raw_text"])
+        _new_bd = _parsed.get("booking_date", "")
+        _new_bt = _parsed.get("booking_time", "")
+        if _new_bd:
+            _cur.execute("UPDATE orders SET booking_date=?, booking_time=? WHERE id=?",
+                         (_new_bd, _new_bt or _r["booking_time"], _r["id"]))
+            _fixed += 1
+    if _fixed:
+        _db.commit()
+        print(f"[migrate] 已修复 {_fixed} 个订单的 booking_date/booking_time")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 修复订单 booking_date 跳过: {_e}")
+
 
 @app.before_request
 def before():
@@ -434,10 +464,10 @@ def manage_ingredients():
         return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     data = request.get_json(force=True)
     db.execute("""
-        INSERT INTO ingredients (name, unit, stock, threshold, cost)
-        VALUES (?,?,?,?,?)
+        INSERT INTO ingredients (name, unit, stock, threshold, cost, category)
+        VALUES (?,?,?,?,?,?)
     """, (data["name"], data.get("unit", ""), data.get("stock", 0),
-          data.get("threshold", 0), data.get("cost", 0)))
+          data.get("threshold", 0), data.get("cost", 0), data.get("category", "other")))
     db.commit()
     return jsonify({"ok": True})
 
@@ -446,11 +476,24 @@ def manage_ingredients():
 def update_ingredient(iid):
     data = request.get_json(force=True)
     db = g.db
+    # 支持部分更新：只更新传入的字段（避免未传字段被置空）
+    cur = db.execute("SELECT * FROM ingredients WHERE id=?", (iid,))
+    existing = cur.fetchone()
+    if not existing:
+        return jsonify({"ok": False, "msg": "not found"}), 404
+    existing = dict(existing)
+    fields = ["name", "unit", "stock", "threshold", "cost", "category"]
+    updates = {}
+    for f in fields:
+        if f in data:
+            updates[f] = data[f]
+        else:
+            updates[f] = existing[f]
     db.execute("""
-        UPDATE ingredients SET name=?, unit=?, stock=?, threshold=?, cost=?
+        UPDATE ingredients SET name=?, unit=?, stock=?, threshold=?, cost=?, category=?
         WHERE id=?
-    """, (data["name"], data.get("unit", ""), data.get("stock", 0),
-          data.get("threshold", 0), data.get("cost", 0), iid))
+    """, (updates["name"], updates["unit"], updates["stock"], updates["threshold"],
+          updates["cost"], updates["category"], iid))
     db.commit()
     return jsonify({"ok": True})
 
@@ -503,7 +546,7 @@ def manage_packages():
                        i.name as ing_name, i.id as ing_id, i.unit, i.category
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
+                WHERE pi.package_id = ? AND pi.cost_only = 0
                 ORDER BY i.category, i.name
             """, (p["id"],))
             p["ingredients"] = [dict(r) for r in cur.fetchall()]
@@ -695,7 +738,7 @@ def export_menu_xlsx():
             SELECT i.name as ingredient, i.unit, i.category, pi.per_package, pi.portion_count
             FROM package_ingredients pi
             JOIN ingredients i ON pi.ingredient_id = i.id
-            WHERE pi.package_id = ?
+            WHERE pi.package_id = ? AND pi.cost_only = 0
         """, (p["id"],))
         p["ingredients"] = [dict(r) for r in cur.fetchall()]
         cur.execute("""

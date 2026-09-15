@@ -363,9 +363,12 @@ function render(){
   }
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
     const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+    // 显示预约日期+时间（与订单页一致），用餐时间单独标
+    const dtStr = [o.booking_date, o.booking_time].filter(Boolean).join(' ') || '待定';
+    const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
     return `<div class="order-mini">
       <b>#${o.id}</b>
-      <span>⏰ ${o.meal_time||o.booking_time||'待定'}</span>
+      <span>📅 ${dtStr}${mealStr}</span>
       <span class="muted">${o.address||''}</span>
       ${pkgs?`<span class="muted">🍱 ${pkgs}</span>`:''}
       ${urgBadge(o.urgency)}
@@ -497,10 +500,14 @@ function renderByOrder(){
   const d = prepData;
   const box = document.getElementById('orderView');
   box.style.display='';
-  box.innerHTML = d.orders.map(o=>`<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
-      <h3 style="margin:0">📋 订单 #${o.id} · ⏰ ${o.meal_time||o.booking_time||'待定'} ${urgBadge(o.urgency)}</h3>
+  box.innerHTML = d.orders.map(o=>{
+    const dtStr = [o.booking_date, o.booking_time].filter(Boolean).join(' ') || '待定';
+    const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
+    return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
+      <h3 style="margin:0">📋 订单 #${o.id} · 📅 ${dtStr}${mealStr} ${urgBadge(o.urgency)}</h3>
       <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
-    </div><div class="muted" style="padding:16px">加载中...</div></div>`).join('');
+    </div><div class="muted" style="padding:16px">加载中...</div></div>`;
+  }).join('');
   d.orders.forEach(o=>{
     fetch('/api/orders/'+o.id+'/requirements').then(r=>r.json()).then(res=>{
       if(!res.ok) return;
@@ -535,6 +542,7 @@ function renderByOrder(){
         const type = (cat==='tool') ? 'tool' : 'ing';
         html += catBlock(cat, byCat[cat].map(it=>({
           id:it.id, name:it.name, unit:it.unit||'', per_package:it.per_package,
+          portion_size:it.portion_size, total_portions:it.total_portions,
           total_packages:it.total_packages||it.order_qty, order_count:1, total:it.total||it.need,
           shortage:it.shortage, order_ids:it.order_ids||[o.id]
         })), type, {});

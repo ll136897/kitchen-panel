@@ -336,13 +336,14 @@ function parseOrder(){
         drink:'#666', staple:'#666', other:'#666'
       };
       const catOrder = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','other'];
-      // 表头：食材 | 份数 | 克数/份 | 单位 | 总克数 | 库存 | 缺口
+      // 表头：食材 | 份数 | 克数/份 | 单位 | 总量 | 库存 | 缺口
+      // 总量列统一为"数字+单位"格式（如 600克、8个）
       const ingHeader = `<thead><tr>
         <th style="min-width:80px">食材</th>
         <th>份数</th>
         <th>克数/份</th>
         <th>单位</th>
-        <th>总克数</th>
+        <th>总量</th>
         <th>库存</th>
         <th>缺口</th>
       </tr></thead>`;
@@ -356,14 +357,16 @@ function parseOrder(){
           const sc = i.shortage>0?'txt-red':'';
           const pkg = i.total_portions||i.total_packages||1;
           const per = i.portion_size||i.per_package||0;
+          const unit = i.unit||'';
+          const needStr = (i.need||0) + unit;
           return `<tr>
             <td>${i.name}</td>
-            <td style="text-align:center;font-weight:700">${pkg}份</td>
-            <td style="text-align:center">${per}</td>
-            <td style="text-align:center">${i.unit||''}</td>
-            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}</td>
+            <td style="text-align:center;font-weight:700">${pkg}</td>
+            <td style="text-align:center">${per||'—'}</td>
+            <td style="text-align:center">${unit}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${needStr}</td>
             <td>${i.stock}</td>
-            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage+unit:'-'}</td>
           </tr>`;
         }).join('');
         ingHtml += `<tr><td colspan="7" style="background:${color};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${label} · ${items.length}项</td></tr>${rows}`;
@@ -373,14 +376,16 @@ function parseOrder(){
           const sc = i.shortage>0?'txt-red':'';
           const pkg = i.total_portions||i.total_packages||1;
           const per = i.portion_size||i.per_package||0;
+          const unit = i.unit||'';
+          const needStr = (i.need||0) + unit;
           return `<tr>
             <td>${i.name}</td>
-            <td style="text-align:center;font-weight:700">${pkg}份</td>
-            <td style="text-align:center">${per}</td>
-            <td style="text-align:center">${i.unit||''}</td>
-            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}</td>
+            <td style="text-align:center;font-weight:700">${pkg}</td>
+            <td style="text-align:center">${per||'—'}</td>
+            <td style="text-align:center">${unit}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${needStr}</td>
             <td>${i.stock}</td>
-            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage+unit:'-'}</td>
           </tr>`;
         }).join('');
         ingHtml += `<tr><td colspan="7" style="background:#d35400;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">📦 食材包装 · ${packaging.length}项</td></tr>${rows}`;
@@ -390,14 +395,16 @@ function parseOrder(){
           const sc = i.shortage>0?'txt-red':'';
           const pkg = i.total_portions||i.total_packages||1;
           const per = i.portion_size||i.per_package||0;
+          const unit = i.unit||'';
+          const needStr = (i.need||0) + unit;
           return `<tr>
             <td>${i.name}</td>
-            <td style="text-align:center;font-weight:700">${pkg}份</td>
-            <td style="text-align:center">${per}</td>
-            <td style="text-align:center">${i.unit||''}</td>
-            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}</td>
+            <td style="text-align:center;font-weight:700">${pkg}</td>
+            <td style="text-align:center">${per||'—'}</td>
+            <td style="text-align:center">${unit}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${needStr}</td>
             <td>${i.stock}</td>
-            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage+unit:'-'}</td>
           </tr>`;
         }).join('');
         ingHtml += `<tr><td colspan="7" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 客户餐具/工具 · ${tableware.length}项</td></tr>${rows}`;

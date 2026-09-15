@@ -63,7 +63,7 @@
     </div>
     <table class="tbl" id="ingTable">
       <thead><tr>
-        <th>食材</th><th>单位</th><th>库存</th><th>阈值</th>
+        <th>食材</th><th>分类</th><th>单位</th><th>库存</th><th>阈值</th>
         <th class="cost-cell">成本¥/单位</th><th>小计¥</th><th>调整</th>
       </tr></thead>
       <tbody></tbody>
@@ -87,6 +87,19 @@
     </div>
     <div id="addIng" style="display:none" class="inline-form">
       <input id="ingName" placeholder="名称">
+      <select id="ingCat" style="min-width:90px">
+        <option value="beef">🥩 牛肉</option>
+        <option value="pork">🥓 猪肉</option>
+        <option value="chicken">🍗 鸡肉</option>
+        <option value="vegetable">🥬 素菜</option>
+        <option value="side">🥗 小菜</option>
+        <option value="sauce">🧂 小料</option>
+        <option value="drink">🎁 赠品</option>
+        <option value="packaging">📦 食材包装</option>
+        <option value="utensil">🍱 客户餐具</option>
+        <option value="staple">🍚 主食</option>
+        <option value="other">📦 其他</option>
+      </select>
       <input id="ingUnit" placeholder="单位" size="6">
       <input id="ingStock" type="number" placeholder="库存" size="6">
       <input id="ingThr" type="number" placeholder="阈值" size="6">
@@ -141,27 +154,72 @@ function calcPrice(){
     });
 }
 
+// 食材分类顺序与菜单页一致
+const ING_CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other'];
+const ING_CAT_LABEL = {
+  beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
+  vegetable:'🥬 素菜', side:'🥗 小菜', sauce:'🧂 小料', drink:'🎁 赠品',
+  packaging:'📦 食材包装', utensil:'🍱 客户餐具',
+  staple:'🍚 主食', other:'📦 其他'
+};
+const ING_CAT_COLOR = {
+  beef:'#8e1e1a', pork:'#c75d3e', chicken:'#c9962b',
+  vegetable:'#3a8a3a', side:'#5a8a3a', sauce:'#7a5a3a',
+  drink:'#666', packaging:'#d35400', utensil:'#8e44ad',
+  staple:'#888', other:'#6b4f3a'
+};
+
 function loadIngs(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
     const data = d.data||[];
+    // 按分类分组，保持菜单页顺序
+    const byCat = {};
+    data.forEach(x=>{
+      const c = x.category || 'other';
+      (byCat[c] = byCat[c]||[]).push(x);
+    });
     let totalCost = 0;
-    const html=data.map(x=>{
-      const sub = (x.stock||0)*(x.cost||0);
-      totalCost += sub;
-      return `<tr>
-        <td>${x.name}</td><td>${x.unit}</td>
-        <td style="text-align:right">${x.stock}</td><td style="text-align:right">${x.threshold}</td>
-        <td class="cost-cell">
-          <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
-            onchange="updateCost('ingredient',${x.id},this.value)" id="cost-ing-${x.id}">
-        </td>
-        <td style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
-        <td><input type="number" id="adj-ing-${x.id}" size="4" placeholder="±" class="inbound-input">
-        <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id})">补/损</button></td>
-      </tr>`;
-    }).join('');
-    document.querySelector('#ingTable tbody').innerHTML=html;
+    let html = '';
+    for(const cat of ING_CAT_ORDER){
+      const items = byCat[cat];
+      if(!items || !items.length) continue;
+      const color = ING_CAT_COLOR[cat] || '#6b4f3a';
+      const label = ING_CAT_LABEL[cat] || cat;
+      // 分类标题行
+      html += `<tr><td colspan="8" style="background:${color};color:#fff;font-weight:700;padding:6px 8px;font-size:13px">${label} · ${items.length}项</td></tr>`;
+      for(const x of items){
+        const sub = (x.stock||0)*(x.cost||0);
+        totalCost += sub;
+        const catOptions = ING_CAT_ORDER.map(c=>`<option value="${c}" ${c===cat?'selected':''}>${ING_CAT_LABEL[c]}</option>`).join('');
+        html += `<tr>
+          <td><input type="text" value="${x.name}" onchange="editIng(${x.id},'name',this.value)" style="border:none;background:transparent;font-weight:700;min-width:80px"></td>
+          <td><select onchange="editIng(${x.id},'category',this.value)" style="border:1px solid #ddd;border-radius:4px;padding:2px;font-size:12px;background:#f9f9f9">${catOptions}</select></td>
+          <td><input type="text" value="${x.unit||''}" onchange="editIng(${x.id},'unit',this.value)" size="4" style="border:none;background:transparent;text-align:center"></td>
+          <td style="text-align:right;font-weight:700">${x.stock}</td><td style="text-align:right">${x.threshold}</td>
+          <td class="cost-cell">
+            <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
+              onchange="updateCost('ingredient',${x.id},this.value)" id="cost-ing-${x.id}">
+          </td>
+          <td style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
+          <td><input type="number" id="adj-ing-${x.id}" size="4" placeholder="±" class="inbound-input">
+          <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id})">补/损</button></td>
+        </tr>`;
+      }
+    }
+    document.querySelector('#ingTable tbody').innerHTML=html || '<tr><td colspan="8" class="muted" style="text-align:center;padding:16px">暂无食材，点击"+ 添加食材"</td></tr>';
     document.getElementById('ingCostTotal').textContent = `库存价值合计: ¥${totalCost.toFixed(2)}`;
+  });
+}
+
+// 内联编辑食材字段（name/unit/category）
+function editIng(id, field, value){
+  fetch(`/api/ingredients/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({[field]:value})}).then(r=>r.json()).then(d=>{
+    if(d.ok){
+      showRefreshToast();
+      // 仅在分类变化时重新加载（重排），其他字段不重排避免输入框失焦
+      if(field==='category') loadIngs();
+    }
   });
 }
 
@@ -211,14 +269,31 @@ function toggleInbound(){
 
 function loadInboundTable(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
-    const html=(d.data||[]).map(x=>`<tr class="inbound-row">
-      <td>${x.name}<span class="muted">(${x.unit})</span></td>
-      <td style="text-align:right">${x.stock}</td>
-      <td><input type="number" class="inbound-input" id="ib-qty-${x.id}" placeholder="0" step="0.1"></td>
-      <td><input type="number" class="inbound-input" id="ib-price-${x.id}" placeholder="¥" step="0.01" value="${x.cost||''}"></td>
-      <td><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:100px"></td>
-    </tr>`).join('');
-    document.querySelector('#inboundTable tbody').innerHTML=html;
+    const data = d.data||[];
+    // 按分类分组，与菜单页顺序一致
+    const byCat = {};
+    data.forEach(x=>{
+      const c = x.category || 'other';
+      (byCat[c] = byCat[c]||[]).push(x);
+    });
+    let html = '';
+    for(const cat of ING_CAT_ORDER){
+      const items = byCat[cat];
+      if(!items || !items.length) continue;
+      const color = ING_CAT_COLOR[cat] || '#6b4f3a';
+      const label = ING_CAT_LABEL[cat] || cat;
+      html += `<tr><td colspan="5" style="background:${color};color:#fff;font-weight:700;padding:4px 8px;font-size:12px">${label} · ${items.length}项</td></tr>`;
+      for(const x of items){
+        html += `<tr class="inbound-row">
+          <td>${x.name}<span class="muted">(${x.unit})</span></td>
+          <td style="text-align:right">${x.stock}</td>
+          <td><input type="number" class="inbound-input" id="ib-qty-${x.id}" placeholder="0" step="0.1"></td>
+          <td><input type="number" class="inbound-input" id="ib-price-${x.id}" placeholder="¥" step="0.01" value="${x.cost||''}"></td>
+          <td><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:100px"></td>
+        </tr>`;
+      }
+    }
+    document.querySelector('#inboundTable tbody').innerHTML=html || '<tr><td colspan="5" class="muted" style="text-align:center;padding:12px">暂无食材</td></tr>';
   });
 }
 
@@ -307,7 +382,7 @@ function adjustStock(type,id){
 function toggleAdd(t){ document.getElementById(t=='ing'?'addIng':'addTool').style.display='block'; }
 function addIng(){
   fetch('/api/ingredients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    name:ingName.value,unit:ingUnit.value,stock:parseFloat(ingStock.value||0),threshold:parseFloat(ingThr.value||0),cost:parseFloat(ingCost.value||0)
+    name:ingName.value,category:ingCat.value,unit:ingUnit.value,stock:parseFloat(ingStock.value||0),threshold:parseFloat(ingThr.value||0),cost:parseFloat(ingCost.value||0)
   })}).then(r=>r.json()).then(()=>{loadIngs();['ingName','ingUnit','ingStock','ingThr','ingCost'].forEach(x=>document.getElementById(x).value='');});
 }
 function addTool(){

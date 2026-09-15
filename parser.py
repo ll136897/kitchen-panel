@@ -18,24 +18,60 @@ def _parse_amount(text):
 
 
 def _normalize_date(s):
-    """把各种日期格式归一化成 YYYY-MM-DD。
-    支持：9.14 / 9-14 / 09.14 / 9月14日 / 2026-09-14
-    缺少年份时用当前年份。
+    """从字符串中提取日期并归一化成 YYYY-MM-DD。
+    支持（可带后缀时间/文字）：
+      9.14 / 9-14 / 09.14 / 9月14日 / 9月14号 / 9.14号 / 2026-09-14
+    缺少年份时用当前年份。用 search 提取首个日期模式，容忍后面跟着的"12点/下午"等。
     """
     import datetime
     s = str(s).strip()
     if not s:
         return ""
-    # 已是 YYYY-MM-DD
-    m = re.match(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$", s)
+    # 完整 YYYY-MM-DD（可带后缀）
+    m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", s)
     if m:
         return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    # M.D 或 M-D
-    m = re.match(r"^(\d{1,2})[.\-/月](\d{1,2})日?$", s)
+    # M.D / M-D / M月D日 / M月D号 / M.D号（容忍"号/日"及后缀文字）
+    m = re.search(r"(\d{1,2})[.\-/月](\d{1,2})[号日]?", s)
     if m:
         year = datetime.date.today().year
         return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-    return s
+    return ""
+
+
+def _extract_time(s):
+    """从字符串中提取时间，归一化成 HH:MM。
+    支持：12.00 / 12:00 / 12点 / 12点30分 / 下午3点
+    """
+    s = str(s).strip()
+    if not s:
+        return ""
+    # HH:MM 或 HH.MM
+    m = re.search(r"(\d{1,2})[:.点](\d{1,2})", s)
+    if m:
+        return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
+    # 仅小时：12点 / 12点整
+    m = re.search(r"(\d{1,2})\s*点", s)
+    if m:
+        return f"{int(m.group(1)):02d}:00"
+    return ""
+
+
+def _build_time(hhmm_h, hhmm_m, h_only, h_only_m, pm_h):
+    """根据组合正则捕获组构造 HH:MM 时间字符串。
+    分别对应：HH:MM/HH.MM 的时分 / HH点 / HH点MM分 / 下午HH点
+    """
+    if hhmm_h:
+        return f"{int(hhmm_h):02d}:{int(hhmm_m or 0):02d}"
+    if h_only:
+        return f"{int(h_only):02d}:{int(h_only_m or 0):02d}"
+    if pm_h:
+        # 下午 HH 点 → 12+HH（13~23）
+        h = int(pm_h) + 12
+        if h >= 24:
+            h = int(pm_h)
+        return f"{h:02d}:00"
+    return ""
 
 
 def parse_order_text(raw_text):
@@ -95,12 +131,29 @@ def parse_order_text(raw_text):
     for key, value_lines in sections:
         value = " ".join(v for v in value_lines if v).strip()
         if key == "预约时间":
-            # 9.11 12.00 / 9月11日 12点 / 09-11 12:00
-            parts = re.split(r"[\s]+", value)
-            if parts:
-                result["booking_date"] = _normalize_date(parts[0])
-            if len(parts) > 1:
-                result["booking_time"] = parts[1]
+            # 容忍多种格式：9.11 12.00 / 9月11日12点 / 9.11号 12:00 / 9月11号下午
+            # 用组合正则一次性提取日期+时间，避免日期剥离误吃时间（"9.11"与"12.00"模式相同）
+            # 日期：YYYY-M-D / M.D / M-D / M月D[日号] / M.D号
+            # 时间（可选，跟在日期后）：HH:MM / HH.MM / HH点[MM分] / 下午HH点
+            import datetime as _dt
+            today = _dt.date.today()
+            # 1) 完整年月日 + 可选时间
+            m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[号日]?)?\s*(?:(\d{1,2})[:.点](\d{1,2})|(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?|下午(\d{1,2})\s*点)?", value)
+            if m and m.group(1) and len(m.group(1)) == 4:
+                result["booking_date"] = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+                result["booking_time"] = _build_time(m.group(4), m.group(5), m.group(6), m.group(7), m.group(8))
+            else:
+                # 2) 月日 + 可选时间
+                m = re.search(r"(\d{1,2})[.\-/月](\d{1,2})[号日]?\s*(?:(\d{1,2})[:.点](\d{1,2})|(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?|下午(\d{1,2})\s*点)?", value)
+                if m:
+                    result["booking_date"] = f"{today.year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+                    result["booking_time"] = _build_time(m.group(3), m.group(4), m.group(5), m.group(6), m.group(7))
+                else:
+                    # 3) 仅"11号"（省略月份）+ 可选时间
+                    m = re.search(r"(\d{1,2})\s*号\s*(?:(\d{1,2})[:.点](\d{1,2})|(\d{1,2})\s*点)?", value)
+                    if m:
+                        result["booking_date"] = f"{today.year}-{today.month:02d}-{int(m.group(1)):02d}"
+                        result["booking_time"] = _build_time(m.group(2), m.group(3), m.group(4), None, None)
         elif key == "预约项目":
             result["package_lines"] = value_lines
         elif key == "预约地址":
