@@ -343,9 +343,9 @@ def manage_packages():
     # 关联食材
     for ing in data.get("ingredients", []):
         cur.execute("""
-            INSERT INTO package_ingredients (package_id, ingredient_id, per_package)
-            VALUES (?,?,?)
-        """, (pid, ing["ingredient_id"], ing["per_package"]))
+            INSERT INTO package_ingredients (package_id, ingredient_id, per_package, portion_count)
+            VALUES (?,?,?,?)
+        """, (pid, ing["ingredient_id"], ing["per_package"], ing.get("portion_count", 1)))
     # 关联工具
     for t in data.get("tools", []):
         cur.execute("""

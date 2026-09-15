@@ -83,10 +83,15 @@ def init_db():
                 package_id INTEGER NOT NULL,
                 ingredient_id INTEGER NOT NULL,
                 per_package REAL NOT NULL,        -- 每套餐的食材总用量
+                portion_count REAL NOT NULL DEFAULT 1,  -- 份数(如100g×2=200g, portion_count=2)
                 FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE,
                 FOREIGN KEY (ingredient_id) REFERENCES ingredients(id)
             )
         """)
+        # 迁移：老库补 portion_count 字段
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(package_ingredients)").fetchall()]
+        if "portion_count" not in cols:
+            cur.execute("ALTER TABLE package_ingredients ADD COLUMN portion_count REAL NOT NULL DEFAULT 1")
 
         # 套餐→工具关联（每份套餐用量）
         cur.execute("""
