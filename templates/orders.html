@@ -7,63 +7,8 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="nav">  <a href="javascript:history.length>1?history.back():'/'" class="nav-back" title="返回" aria-label="返回">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-  </a>
-  <div class="nav-brand">
-    <div class="nb-badge"><svg viewBox="0 0 42 42" xmlns="http://www.w3.org/2000/svg">
-  <!-- 外圈：刺绣锁边感（双层黑线） -->
-  <circle cx="21" cy="21" r="20" fill="none" stroke="#1a0d06" stroke-width="1.5"/>
-  <circle cx="21" cy="21" r="18.5" fill="none" stroke="#1a0d06" stroke-width="0.5"/>
-  <!-- 内圈白色底（刺绣布面） -->
-  <circle cx="21" cy="21" r="17.5" fill="#fafafa" stroke="#c0392b" stroke-width="0.7"/>
-  <!-- 牛头身体（红色圆角矩形，类似刺绣色块） -->
-  <path d="M 13 14 Q 13 10 16 10 L 26 10 Q 29 10 29 14 L 29 22 Q 29 27 21 28 Q 13 27 13 22 Z"
-        fill="#c0392b" stroke="#1a0d06" stroke-width="0.6"/>
-  <!-- 左牛角 -->
-  <path d="M 14 10 Q 11 5 13 3 Q 15 5 16 10" fill="#c0392b" stroke="#1a0d06" stroke-width="0.5"/>
-  <!-- 右牛角 -->
-  <path d="M 28 10 Q 31 5 29 3 Q 27 5 26 10" fill="#c0392b" stroke="#1a0d06" stroke-width="0.5"/>
-  <!-- 眼睛 -->
-  <circle cx="17" cy="17" r="1.2" fill="#1a0d06"/>
-  <circle cx="25" cy="17" r="1.2" fill="#1a0d06"/>
-  <!-- 鼻子 -->
-  <ellipse cx="21" cy="21" rx="1.8" ry="1.1" fill="#1a0d06"/>
-  <circle cx="20.3" cy="21" r="0.4" fill="#fff"/>
-  <circle cx="21.7" cy="21" r="0.4" fill="#fff"/>
-  <!-- 嘴巴微笑线 -->
-  <path d="M 19 23 Q 21 24.5 23 23" stroke="#1a0d06" stroke-width="0.5" fill="none" stroke-linecap="round"/>
-  <!-- 烧烤叉（牛头右侧） -->
-  <g transform="translate(29,15) rotate(0)">
-    <path d="M 1.5 0 L 1.5 4" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
-    <path d="M 3.5 0 L 3.5 3.5" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
-    <path d="M 5.5 0 L 5.5 4" stroke="#1a0d06" stroke-width="0.8" stroke-linecap="round"/>
-    <line x1="0.5" y1="4" x2="6.5" y2="4" stroke="#1a0d06" stroke-width="0.9" stroke-linecap="round"/>
-    <line x1="3.5" y1="4" x2="3.5" y2="14" stroke="#1a0d06" stroke-width="0.9" stroke-linecap="round"/>
-  </g>
-  <!-- 底部缎带（迷你版） -->
-  <path d="M 7 30 L 35 30 L 33 35 L 21 37 L 9 35 Z" fill="#e67e22" stroke="#1a0d06" stroke-width="0.6"/>
-</svg></div>
-    <div class="nb-text">
-      <div class="nb-name">刘和牛备餐系统</div>
-      <div class="nb-sub">LIU &amp; WAGYU · KITCHEN</div>
-    </div>
-    <span class="nb-flame">🔥</span>
-  </div>
-<svg class="nb-fork" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 2 L14 10" stroke="#2a160d" stroke-width="2" stroke-linecap="round"/>
-      <path d="M10 2 L10 8" stroke="#2a160d" stroke-width="2" stroke-linecap="round"/>
-      <path d="M18 2 L18 10" stroke="#2a160d" stroke-width="2" stroke-linecap="round"/>
-      <path d="M9 12 L19 12" stroke="#2a160d" stroke-width="2" stroke-linecap="round"/>
-      <path d="M14 12 L14 18" stroke="#2a160d" stroke-width="2" stroke-linecap="round"/>
-    </svg>
-  </div>
-  <div class="nb-text">
-    <div class="nb-name">刘和牛备餐系统</div>
-    <div class="nb-sub">LIU &amp; WAGYU · KITCHEN</div>
-  </div>
-  <span class="nb-flame">🔥</span>
-</div>
+<nav class="nav">
+  <div class="nav-logo"><span class="nl-icon">🐂</span>刘和牛</div>
   <a href="/" class="nav-item">📊 面板</a>
   <a href="/orders" class="nav-item active">📋 订单</a>
   <a href="/prep" class="nav-item">🍱 备餐</a>
@@ -78,7 +23,7 @@
       <div class="title"><span class="fire">🔥</span>订单列表</div>
       <div class="sub">查看、跟踪和管理所有订单</div>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="loadOrders()">🔄 刷新</button>
+    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadOrders)"><span class="btn-icon">🔄</span> 刷新</button>
   </div>
 
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
@@ -245,6 +190,24 @@ function submitReturn(){
 }
 
 loadOrders();
+
+// ===== 刷新特效 =====
+function refreshWithFx(fn){
+  const btn = event.target.closest('.btn-refresh');
+  if(btn){ btn.classList.add('spinning'); setTimeout(()=>btn.classList.remove('spinning'), 800); }
+  if(typeof fn === 'function') fn();
+  showRefreshToast();
+}
+function showRefreshToast(){
+  let t = document.getElementById('refreshToast');
+  if(t) t.remove();
+  t = document.createElement('div');
+  t.id = 'refreshToast';
+  t.className = 'refresh-toast';
+  t.textContent = '✓ 已刷新';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2200);
+}
 </script>
 </body>
 </html>
