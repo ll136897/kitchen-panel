@@ -168,6 +168,20 @@ def calc_order_requirements(order_id):
                 tool_demand[tid]["per_package"] = qty
                 tool_demand[tid]["order_qty"] += 1
 
+        # 备注解析额外加菜（单点食材）
+        from parser import match_extra_ingredients_to_db
+        extra_ings = match_extra_ingredients_to_db(parsed.get("extra_ingredients", []))
+        for ei in extra_ings:
+            iid = ei.get("matched_id")
+            if not iid:
+                continue
+            amount = ei["total"]  # 已经算好的总克数
+            if iid not in ing_demand:
+                ing_demand[iid] = {"total": 0, "per_package": ei["per_package"], "order_qty": 0}
+            ing_demand[iid]["total"] += amount
+            ing_demand[iid]["per_package"] = ei["per_package"]
+            ing_demand[iid]["order_qty"] += ei["qty"]
+
     # 拉取详情
     ingredients_result = []
     with get_db() as conn:
@@ -487,6 +501,42 @@ def preview_parse(raw_text):
     parsed["preview_ingredients"] = ing_by_cat  # dict: {category: [items]}
     parsed["preview_tableware"] = tableware_list
     parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
+
+    # 备注里的额外加菜（单点食材）
+    from parser import match_extra_ingredients_to_db
+    extra_ings_matched = match_extra_ingredients_to_db(parsed.get("extra_ingredients", []))
+    # 把加菜合并到对应的分类里
+    for ei in extra_ings_matched:
+        if not ei.get("matched_id"):
+            continue
+        cat = _subcategorize_meat(ei.get("matched_name", ""), ei.get("category", "other"))
+        if cat in SAUCE_LIKE_CATS:
+            cat = "sauce"
+        if cat == TABLEWARE_CATEGORY:
+            # 餐具类加到 tableware_list
+            tableware_list.append({
+                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
+                "stock": ei["stock"], "threshold": ei["threshold"],
+                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
+                "warning": ei["stock"] <= ei["threshold"],
+                "per_package": ei["per_package"],
+                "total_packages": ei["qty"],
+                "category": cat,
+            })
+            tableware_list.sort(key=lambda x: -x["need"])
+        else:
+            ing_by_cat.setdefault(cat, [])
+            ing_by_cat[cat].append({
+                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
+                "stock": ei["stock"], "threshold": ei["threshold"],
+                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
+                "warning": ei["stock"] <= ei["threshold"],
+                "per_package": ei["per_package"],
+                "total_packages": ei["qty"],
+                "category": cat,
+            })
+            ing_by_cat[cat].sort(key=lambda x: -x["need"])
+    parsed["preview_extra_ingredients"] = extra_ings_matched
     return parsed
 
 

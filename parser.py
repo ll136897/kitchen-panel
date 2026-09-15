@@ -130,6 +130,9 @@ def parse_order_text(raw_text):
     # 从备注解析额外工具需求
     result["extra_tools"] = _parse_extra_tools(result["note"])
 
+    # 从备注解析额外加菜需求（单点食材）
+    result["extra_ingredients"] = _parse_extra_ingredients(result["note"])
+
     return result
 
 
@@ -270,6 +273,127 @@ def _parse_extra_tools(note):
                 tools[tname] = tools.get(tname, 0) + n
 
     return tools
+
+
+def _parse_extra_ingredients(note):
+    """从备注解析额外加菜需求，如 "加一份牛骰子，一份牛肋条"
+    返回 [{name: 食材名(备注原文), qty: 份数}]
+    识别模式：
+      - 加一份牛骰子 / 加2份牛肋条 / 加一份新牛骰子
+      - 一份牛骰子，一份牛肋条（加号/逗号/顿号分隔）
+      - 多加一份牛骰子
+    """
+    if not note:
+        return []
+    results = []
+    # 按加号/逗号/顿号/分号/空格切分
+    segments = re.split(r"[+，,。；;、\s]+", note)
+
+    for seg in segments:
+        # 匹配 "加一份XX" / "加2份XX" / "多加一份XX" / "一份XX"
+        m = re.search(r"(?:多加|加|再加)?\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*[份盘份盘]?\s*(.+)", seg)
+        if not m:
+            # 也匹配 "XX一份" 倒装
+            m2 = re.search(r"(.+?)\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*份", seg)
+            if m2:
+                n = _num_from_str(m2.group(2))
+                name = m2.group(1).strip()
+                # 去掉前面的"加""多加"等
+                name = re.sub(r"^(多加|加|再加|配|带|拿|加一份|加两份)", "", name).strip()
+                if name and len(name) >= 2 and n:
+                    results.append({"name": name, "qty": n})
+                continue
+            continue
+        n = _num_from_str(m.group(1))
+        name = m.group(2).strip()
+        # 去掉尾部"一份""两份"等残留
+        name = re.sub(r"(一份|两份|二份|三份|四份|五份|六份|七份|八份|九份|十份|1份|2份)$", "", name).strip()
+        # 去掉前缀动词
+        name = re.sub(r"^(新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|南美|沙葱|安格斯|谷饲|好|的|个|份|盘)$", "", name).strip()
+        # 排除工具类（卡式炉/烤盘/桌子/椅子等已由 _parse_extra_tools 处理）
+        tool_keywords = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "盘", "夹", "刷", "剪", "燃气", "气罐"]
+        if any(kw in name for kw in tool_keywords):
+            continue
+        # 排除纯数量/无意义词
+        if not name or len(name) < 2 or name in ("一份", "两份", "无", "没有", "地址", "时间"):
+            continue
+        if n:
+            results.append({"name": name, "qty": n})
+    return results
+
+
+def match_extra_ingredients_to_db(extra_ings):
+    """把备注解析出的加菜需求匹配到数据库 ingredients 表。
+    模糊匹配：备注"牛骰子" → 数据库"奶香牛骰子"。
+    返回 [{matched_id, matched_name, unit, qty(份数), per_package(每份克数), total(总克数)}]
+    """
+    if not extra_ings:
+        return []
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, unit, stock, threshold, category FROM ingredients")
+        all_ings = [dict(r) for r in cur.fetchall()]
+        # 查每个食材在 package_ingredients 里的典型 per_package（取最常见的）
+        cur.execute("""
+            SELECT ingredient_id, per_package, COUNT(*) as cnt
+            FROM package_ingredients
+            GROUP BY ingredient_id, per_package
+            ORDER BY ingredient_id, cnt DESC
+        """)
+        typical_per_pkg = {}  # ingredient_id → per_package
+        for r in cur.fetchall():
+            if r["ingredient_id"] not in typical_per_pkg:
+                typical_per_pkg[r["ingredient_id"]] = r["per_package"]
+
+    results = []
+    for ei in extra_ings:
+        name = ei["name"]
+        qty = ei["qty"]
+        matched = None
+        # 1. 精确匹配
+        for ing in all_ings:
+            if ing["name"] == name:
+                matched = ing
+                break
+        # 2. 包含匹配：备注名是食材名的一部分，或食材名包含备注名
+        if not matched:
+            for ing in all_ings:
+                if name in ing["name"] or ing["name"] in name:
+                    matched = ing
+                    break
+        if matched:
+            # 每份克数：优先用套餐里的典型 per_package，否则默认 150g（肉类）/200g（蔬菜）
+            per_pkg = typical_per_pkg.get(matched["id"])
+            if not per_pkg:
+                cat = matched["category"] or "other"
+                unit = matched["unit"] or ""
+                if unit == "g":
+                    per_pkg = 150 if cat in ("meat", "beef", "pork", "chicken") else 200
+                else:
+                    per_pkg = 1
+            total = per_pkg * qty
+            results.append({
+                "matched_id": matched["id"],
+                "matched_name": matched["name"],
+                "unit": matched["unit"],
+                "stock": matched["stock"],
+                "threshold": matched["threshold"],
+                "category": matched["category"],
+                "qty": qty,
+                "per_package": per_pkg,
+                "total": round(total, 2),
+            })
+        else:
+            results.append({
+                "matched_id": None,
+                "matched_name": None,
+                "unit": "份",
+                "qty": qty,
+                "per_package": 1,
+                "total": qty,
+                "raw_name": name,
+            })
+    return results
 
 
 def match_packages_in_db(parsed_packages):
