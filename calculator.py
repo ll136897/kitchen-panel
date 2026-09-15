@@ -1,8 +1,22 @@
 """备餐计算引擎：套餐/单点 → 食材+工具需求；库存缺口计算；可备份数"""
 import re
 import datetime
+from datetime import timezone, timedelta
 from models import get_db
 from parser import parse_order_text, match_packages_in_db
+
+# 北京时区（UTC+8）——服务器可能是 UTC，所有"今天/现在"判断统一用北京时间
+CST = timezone(timedelta(hours=8))
+
+
+def today_cst():
+    """返回北京时间当天的 date"""
+    return datetime.datetime.now(CST).date()
+
+
+def now_cst():
+    """返回北京时间的 aware datetime"""
+    return datetime.datetime.now(CST)
 
 
 def get_available_tool_stock():
@@ -55,8 +69,8 @@ def calc_prep_urgency(order):
     if not hhmm:
         return {"level": "normal", "minutes_to_prep": None, "label": "时间待定"}
 
-    now = datetime.datetime.now()
-    meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0)
+    now = now_cst()
+    meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0, tzinfo=None)
     prep_start = meal_dt - datetime.timedelta(hours=prep_lead)
     diff_min = int((prep_start - now).total_seconds() / 60)
 

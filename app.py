@@ -1413,7 +1413,8 @@ def prep_merged():
     if ids_param:
         order_ids = [int(x) for x in ids_param.split(",") if x.strip().isdigit()]
     else:
-        date = request.args.get("date") or datetime.date.today().isoformat()
+        from calculator import today_cst as _today_cst
+        date = request.args.get("date") or _today_cst().isoformat()
         cur.execute("""
             SELECT id FROM orders
             WHERE status IN ('pending','preparing') AND booking_date = ?
@@ -1427,7 +1428,7 @@ def prep_merged():
 @app.route("/api/prep/dates")
 def prep_dates():
     """列出所有有 pending/preparing 订单的日期，供前端做日期快捷切换"""
-    import datetime
+    from calculator import today_cst as _today_cst
     db = g.db
     cur = db.cursor()
     cur.execute("""
@@ -1437,7 +1438,7 @@ def prep_dates():
         GROUP BY booking_date
         ORDER BY booking_date
     """)
-    today = datetime.date.today().isoformat()
+    today = _today_cst().isoformat()
     dates = []
     for r in cur.fetchall():
         d = dict(r)

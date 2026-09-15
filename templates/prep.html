@@ -260,8 +260,10 @@ function getFixedIdx(name, cat){
 let prepData = null;
 let currentMode = 'merged';
 let prepDates = [];
+let todayOverride = null;  // 后端返回的"今天"（北京时间），覆盖浏览器时区
 
-document.getElementById('datePick').valueAsDate = new Date();
+// 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
+document.getElementById('datePick').value = new Date().toISOString().slice(0,10);
 
 function switchMode(mode){
   currentMode = mode;
@@ -303,6 +305,14 @@ function renderDateChips(todayStr){
     dates.unshift({booking_date: todayStr, cnt: 0, is_today: true, is_past: false});
   }
   const currentDate = document.getElementById('datePick').value;
+  // 纯字符串日期差计算（YYYY-MM-DD），不依赖浏览器时区
+  function dateDiff(d1, d2){
+    const a = new Date(d1 + 'T00:00:00Z');
+    const b = new Date(d2 + 'T00:00:00Z');
+    return Math.round((a - b) / 86400000);
+  }
+  // 从 YYYY-MM-DD 取 MM.DD
+  function md(s){ const p = s.split('-'); return `${parseInt(p[1],10)}.${parseInt(p[2],10)}`; }
   box.innerHTML = dates.map(d=>{
     const cls = [
       'date-chip',
@@ -310,16 +320,14 @@ function renderDateChips(todayStr){
       d.is_past ? 'past' : '',
       d.booking_date === currentDate ? 'active' : ''
     ].filter(Boolean).join(' ');
-    // 显示友好格式：MM-DD（今天/明天）
-    const dateObj = new Date(d.booking_date + 'T00:00:00');
-    const today = new Date(todayStr + 'T00:00:00');
-    const diffDays = Math.round((dateObj - today) / 86400000);
+    // 显示友好格式：用后端 is_today/is_past 判断，日期差用 UTC 字符串计算避免时区错位
+    const diffDays = dateDiff(d.booking_date, todayStr);
     let prefix = '';
-    if(diffDays === 0) prefix = '📍 今天';
+    if(d.is_today || diffDays === 0) prefix = '📍 今天';
     else if(diffDays === 1) prefix = '⏰ 明天';
     else if(diffDays === -1) prefix = '↩️ 昨天';
-    else if(diffDays > 1) prefix = `📅 ${dateObj.getMonth()+1}.${dateObj.getDate()}`;
-    else prefix = `📤 ${dateObj.getMonth()+1}.${dateObj.getDate()}`;
+    else if(diffDays > 1) prefix = `📅 ${md(d.booking_date)}`;
+    else prefix = `📤 ${md(d.booking_date)}`;
     return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">
       ${prefix} <span class="chip-cnt">${d.cnt}单</span>
     </button>`;
