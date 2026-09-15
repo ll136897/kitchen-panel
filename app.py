@@ -15,6 +15,23 @@ try:
 except Exception as _e:
     print(f"[init] seed_data skipped: {_e}")
 
+# 迁移：去掉"刷子"工具（用户要求菜单无刷子，兼容已有数据库）
+try:
+    _db = get_db()
+    _cur = _db.cursor()
+    _cur.execute("SELECT id FROM tools WHERE name = '刷子'")
+    _row = _cur.fetchone()
+    if _row:
+        _bid = _row["id"]
+        _cur.execute("DELETE FROM package_tools WHERE tool_id = ?", (_bid,))
+        _cur.execute("DELETE FROM tool_loans WHERE tool_id = ?", (_bid,))
+        _cur.execute("DELETE FROM tools WHERE id = ?", (_bid,))
+        _db.commit()
+        print(f"[migrate] 已删除刷子工具(id={_bid})及关联记录")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 删除刷子跳过: {_e}")
+
 
 @app.before_request
 def before():
@@ -400,8 +417,9 @@ def del_ingredient(iid):
 def manage_tools():
     db = g.db
     if request.method == "GET":
-        rows = db.execute("SELECT * FROM tools ORDER BY id").fetchall()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+        rows = db.execute("SELECT * FROM tools").fetchall()
+        from calculator import sort_tools
+        return jsonify({"ok": True, "data": sort_tools([dict(r) for r in rows], "stock")})
     data = request.get_json(force=True)
     db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
               (data["name"], data.get("stock", 0), data.get("threshold", 0), data.get("cost", 0)))
@@ -445,7 +463,8 @@ def manage_packages():
                 JOIN tools t ON pt.tool_id = t.id
                 WHERE pt.package_id = ?
             """, (p["id"],))
-            p["tools"] = [dict(r) for r in cur.fetchall()]
+            from calculator import sort_tools as _st
+            p["tools"] = _st([dict(r) for r in cur.fetchall()], "per_package", "tool_name")
         return jsonify({"ok": True, "data": pkgs})
 
     data = request.get_json(force=True)
@@ -575,7 +594,8 @@ def export_menu():
             JOIN tools t ON pt.tool_id = t.id
             WHERE pt.package_id = ?
         """, (p["id"],))
-        p["tools"] = [dict(r) for r in cur.fetchall()]
+        from calculator import sort_tools as _st
+        p["tools"] = _st([dict(r) for r in cur.fetchall()], "per_package", "tool")
 
     fname = f"menu_{pkgs[0]['name']}" if len(pkgs)==1 else "menu_all"
 
@@ -630,7 +650,8 @@ def export_menu_xlsx():
             JOIN tools t ON pt.tool_id = t.id
             WHERE pt.package_id = ?
         """, (p["id"],))
-        p["tools"] = [dict(r) for r in cur.fetchall()]
+        from calculator import sort_tools as _st
+        p["tools"] = _st([dict(r) for r in cur.fetchall()], "per_package", "tool")
 
     cat_colors = {
         'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
@@ -1038,11 +1059,9 @@ def print_menu():
                 tool_sum.setdefault(key, {"name": r["name"], "total": 0})
                 tool_sum[key]["total"] += r["per_package"] * pk["quantity"]
 
-    tools_sorted = sorted(tool_sum.values(), key=lambda x: -x["total"])
-
-    # 食材按分类分组，与备餐表顺序一致
     from calculator import CATEGORY_ORDER, CATEGORY_LABEL, PACKAGING_CATEGORY, \
-        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _get_fixed_sort_index
+        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _get_fixed_sort_index, sort_tools
+    tools_sorted = sort_tools(list(tool_sum.values()), "total")
     db2 = get_db()
     cur2 = db2.cursor()
     cur2.execute("SELECT id, category, name FROM ingredients")

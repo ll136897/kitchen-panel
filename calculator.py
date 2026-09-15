@@ -267,7 +267,7 @@ def calc_order_requirements(order_id):
                     "per_package": 0, "order_qty": 0,
                 })
 
-    return {"ingredients": ingredients_result, "tools": tools_result}
+    return {"ingredients": ingredients_result, "tools": sort_tools(tools_result, "need")}
 
 
 def calc_dashboard():
@@ -407,7 +407,7 @@ def calc_dashboard():
 
     return {
         "ingredients": ing_panel,
-        "tools": tool_panel,
+        "tools": sort_tools(tool_panel, "need"),
         "package_capacity": pkg_capacity,
         "pending_order_count": len(order_ids),
         "upcoming_orders": upcoming,
@@ -567,7 +567,7 @@ def preview_parse(raw_text):
     parsed["preview_ingredients"] = ing_by_cat  # dict: {category: [items]}
     parsed["preview_packaging"] = packaging_list
     parsed["preview_tableware"] = utensil_list
-    parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
+    parsed["preview_tools"] = sort_tools(tool_list, "need")
 
     # 备注额外加菜已在上方合并进 preview_ing（set 覆盖 / add 增量）
     parsed["preview_extra_ingredients"] = extra_ings_matched
@@ -670,6 +670,27 @@ def _get_fixed_sort_index(name, category):
         if cat == category and kw in n:
             return idx
     return 999
+
+
+# 工具固定排序顺序（用户指定，所有页面统一）：
+# 天幕、桌子(蛋卷桌)、椅子、卡式炉/烤盘、气罐(燃气罐)、夹子、剪刀
+TOOL_FIXED_ORDER = [
+    "天幕", "蛋卷桌", "椅子", "卡式炉/烤盘", "燃气罐", "夹子", "剪刀",
+]
+
+
+def _tool_sort_index(name):
+    """返回工具固定排序索引。不在列表里的返回 999（排最后）。"""
+    n = name or ""
+    for idx, kw in enumerate(TOOL_FIXED_ORDER):
+        if kw in n or n in kw:
+            return idx
+    return 999
+
+
+def sort_tools(items, key="need", name_field="name"):
+    """按固定顺序排序工具列表，相同顺序按用量降序。"""
+    return sorted(items, key=lambda x: (_tool_sort_index(x.get(name_field, "")), -x.get(key, 0)))
 
 
 def calc_merged_prep(order_ids):
@@ -822,7 +843,7 @@ def calc_merged_prep(order_ids):
     utensil = [v for v in ing_merge.values() if v["category"] == UTENSIL_CATEGORY]
     utensil = sorted(utensil, key=lambda x: -x["total"])
 
-    tools_list = sorted(tool_merge.values(), key=lambda x: -x["total"])
+    tools_list = sort_tools(list(tool_merge.values()), "total")
 
     return {
         "orders": orders,
