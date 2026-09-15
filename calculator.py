@@ -110,7 +110,7 @@ def calc_order_requirements(order_id):
                 SELECT pi.per_package, pi.portion_count, i.id, i.name, i.unit
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
+                WHERE pi.package_id = ? AND pi.cost_only = 0
             """, (pk["package_id"],))
             for r in cur.fetchall():
                 amount = r["per_package"] * pk["quantity"]
@@ -433,7 +433,7 @@ def preview_parse(raw_text):
                 SELECT pi.per_package, pi.portion_count, i.id, i.name, i.unit, i.stock, i.threshold, i.category
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
+                WHERE pi.package_id = ? AND pi.cost_only = 0
             """, (pk["package_id"],))
             for r in cur.fetchall():
                 amount = r["per_package"] * pk["quantity"]

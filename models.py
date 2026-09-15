@@ -84,14 +84,17 @@ def init_db():
                 ingredient_id INTEGER NOT NULL,
                 per_package REAL NOT NULL,        -- 每套餐的食材总用量
                 portion_count REAL NOT NULL DEFAULT 1,  -- 份数(如100g×2=200g, portion_count=2)
+                cost_only INTEGER NOT NULL DEFAULT 0,   -- 0=正常备餐项 1=仅成本损耗(如摆盘生菜不上备餐表)
                 FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE,
                 FOREIGN KEY (ingredient_id) REFERENCES ingredients(id)
             )
         """)
-        # 迁移：老库补 portion_count 字段
+        # 迁移：老库补 portion_count / cost_only 字段
         cols = [r[1] for r in cur.execute("PRAGMA table_info(package_ingredients)").fetchall()]
         if "portion_count" not in cols:
             cur.execute("ALTER TABLE package_ingredients ADD COLUMN portion_count REAL NOT NULL DEFAULT 1")
+        if "cost_only" not in cols:
+            cur.execute("ALTER TABLE package_ingredients ADD COLUMN cost_only INTEGER NOT NULL DEFAULT 0")
 
         # 套餐→工具关联（每份套餐用量）
         cur.execute("""
@@ -143,9 +146,17 @@ def init_db():
                 pickup_time TEXT,                 -- 收餐时间
                 note TEXT,                        -- 备注
                 status TEXT DEFAULT 'pending',    -- pending/preparing/done
+                payment_status TEXT DEFAULT 'unpaid',  -- unpaid/paid/partial 货款状态
+                deposit_status TEXT DEFAULT 'pending', -- pending/returned/forfeited 押金状态
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+        # 迁移：老库补 payment_status / deposit_status
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)").fetchall()]
+        if "payment_status" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'unpaid'")
+        if "deposit_status" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN deposit_status TEXT DEFAULT 'pending'")
 
         # 订单→套餐明细
         cur.execute("""

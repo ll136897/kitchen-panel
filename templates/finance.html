@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>财务分析 · 刘和牛备餐系统</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .fin-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:16px;margin:10px 0}
+  .fin-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .fin-kpi-item{background:linear-gradient(135deg,#f9f5ed,#f3ebe0);border-radius:10px;padding:10px;text-align:center}
+  .fin-kpi-item .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
+  .fin-kpi-item .val{font-size:18px;font-weight:800}
+  .fin-kpi-item .sub{font-size:10px;color:var(--muted);margin-top:2px}
+  .fin-kpi-item.positive .val{color:var(--green,#27ae60)}
+  .fin-kpi-item.negative .val{color:var(--primary)}
+  .fin-kpi-item.neutral .val{color:var(--accent)}
+  .fin-tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .fin-tbl th{background:#3a2416;color:#fff;padding:7px 6px;text-align:center;font-size:11px;position:sticky;top:0;z-index:1}
+  .fin-tbl td{padding:6px 5px;border-bottom:1px solid #f0ebe3;text-align:center}
+  .fin-tbl tr:hover{background:#faf5ed}
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600}
+  .badge-paid{background:#d4edda;color:#155724}
+  .badge-unpaid{background:#f8d7da;color:#721c24}
+  .badge-partial{background:#fff3cd;color:#856404}
+  .badge-pending{background:#e2e3e5;color:#383d41}
+  .badge-returned{background:#d1ecf1;color:#0c5460}
+  .badge-forfeited{background:#f8d7da;color:#721c24}
+  .select-mini{padding:3px 4px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:#fff}
+  .sec-title{font-size:15px;font-weight:700;margin:16px 0 8px;display:flex;align-items:center;gap:6px}
+  .sec-title .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  @media(max-width:600px){
+    .fin-kpi{grid-template-columns:repeat(2,1fr)}
+    .fin-kpi-item .val{font-size:16px}
+    .fin-tbl{font-size:11px}
+    .fin-tbl th,.fin-tbl td{padding:5px 3px}
+  }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="/" class="nav-item">📊 面板</a>
+  <a href="/orders" class="nav-item">📋 订单</a>
+  <a href="/prep" class="nav-item">🍱 备餐</a>
+  <a href="/finance" class="nav-item active">📈 财务</a>
+  <a href="/menu" class="nav-item">📜 菜单</a>
+  <a href="/config" class="nav-item">⚙️ 配置</a>
+</nav>
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="title">📈 财务分析</div>
+      <div class="sub">收入·成本·毛利·押金·应收账款</div>
+    </div>
+    <div class="toolbar" style="display:flex;gap:6px">
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon">🔄</span> 刷新</button>
+    </div>
+  </div>
+
+  <!-- KPI总览 -->
+  <div class="fin-card">
+    <div class="fin-kpi" id="kpiBox"></div>
+  </div>
+
+  <!-- 货款 + 押金 -->
+  <div class="fin-card">
+    <div class="fin-kpi" id="payBox"></div>
+  </div>
+
+  <!-- 订单财务明细 -->
+  <div class="fin-card">
+    <div class="sec-title"><span class="dot" style="background:#3a2416"></span>📋 订单财务明细</div>
+    <table class="fin-tbl" id="finTable">
+      <thead>
+        <tr>
+          <th>日期</th><th>客户</th><th>金额</th><th>食材成本</th><th>损耗</th>
+          <th>毛利</th><th>毛利率</th><th>货款</th><th>押金</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
+const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
+
+function loadAll(){
+  Promise.all([
+    fetch('/api/finance/summary').then(r=>r.json()),
+    fetch('/api/finance/orders').then(r=>r.json())
+  ]).then(([sumRes, ordRes])=>{
+    renderKpi(sumRes.data||{});
+    renderOrders(ordRes.data||[]);
+  });
+}
+
+function fmtY(n){
+  n = n || 0;
+  return '¥' + (Math.abs(n) < 100 ? n.toFixed(1) : Math.round(n).toLocaleString());
+}
+
+function renderKpi(s){
+  document.getElementById('kpiBox').innerHTML = `
+    <div class="fin-kpi-item positive">
+      <div class="lbl">💰 总收入</div>
+      <div class="val">${fmtY(s.total_revenue)}</div>
+      <div class="sub">${s.order_cnt||0}单</div>
+    </div>
+    <div class="fin-kpi-item negative">
+      <div class="lbl">🥬 食材成本</div>
+      <div class="val">${fmtY(s.food_cost)}</div>
+      <div class="sub">含摆盘损耗</div>
+    </div>
+    <div class="fin-kpi-item negative">
+      <div class="lbl">🔧 工具损耗</div>
+      <div class="val">${fmtY(s.tool_loss_cost)}</div>
+      <div class="sub">丢失/损坏</div>
+    </div>
+    <div class="fin-kpi-item positive">
+      <div class="lbl">📊 毛利</div>
+      <div class="val">${fmtY(s.gross_profit)}</div>
+      <div class="sub">毛利率 ${s.margin||0}%</div>
+    </div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">📦 库存价值</div>
+      <div class="val">${fmtY(s.stock_value)}</div>
+      <div class="sub">食材库存</div>
+    </div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">🚚 配送费收入</div>
+      <div class="val">${fmtY(s.delivery_revenue)}</div>
+      <div class="sub">含在总价内</div>
+    </div>
+  `;
+  document.getElementById('payBox').innerHTML = `
+    <div class="fin-kpi-item positive">
+      <div class="lbl">✅ 已收货款</div>
+      <div class="val">${fmtY(s.paid_amount)}</div>
+    </div>
+    <div class="fin-kpi-item negative">
+      <div class="lbl">❌ 未收货款</div>
+      <div class="val">${fmtY(s.unpaid_amount)}</div>
+      <div class="sub">应收账款</div>
+    </div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">⏳ 部分收款</div>
+      <div class="val">${fmtY(s.partial_amount)}</div>
+    </div>
+    <div class="fin-kpi-item negative">
+      <div class="lbl">🔒 待退押金</div>
+      <div class="val">${fmtY(s.deposit_pending)}</div>
+    </div>
+    <div class="fin-kpi-item positive">
+      <div class="lbl">✅ 已退押金</div>
+      <div class="val">${fmtY(s.deposit_returned)}</div>
+    </div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">⛔ 扣留押金</div>
+      <div class="val">${fmtY(s.deposit_forfeited)}</div>
+    </div>
+  `;
+}
+
+function renderOrders(orders){
+  const tb = document.querySelector('#finTable tbody');
+  if(!orders.length){
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">暂无订单数据</td></tr>';
+    return;
+  }
+  tb.innerHTML = orders.map(o=>{
+    const profitColor = o.profit > 0 ? 'var(--green,#27ae60)' : 'var(--primary)';
+    const payBadge = `<span class="badge badge-${o.payment_status}">${PAY_LABEL[o.payment_status]||o.payment_status}</span>`;
+    const depBadge = `<span class="badge badge-${o.deposit_status}">${DEP_LABEL[o.deposit_status]||o.deposit_status}</span>`;
+    return `<tr>
+      <td>${(o.booking_date||'').slice(5)}</td>
+      <td style="text-align:left">${o.contact_name||'-'}</td>
+      <td>${fmtY(o.amount)}</td>
+      <td>${fmtY(o.food_cost)}</td>
+      <td>${fmtY(o.tool_loss)}</td>
+      <td style="color:${profitColor};font-weight:700">${fmtY(o.profit)}</td>
+      <td style="font-weight:600">${o.margin_pct}%</td>
+      <td>
+        <select class="select-mini" onchange="setPay(${o.id}, this.value)">
+          <option value="unpaid" ${o.payment_status==='unpaid'?'selected':''}>未收</option>
+          <option value="partial" ${o.payment_status==='partial'?'selected':''}>部分</option>
+          <option value="paid" ${o.payment_status==='paid'?'selected':''}>已收</option>
+        </select>
+      </td>
+      <td>
+        <select class="select-mini" onchange="setDep(${o.id}, this.value)">
+          <option value="pending" ${o.deposit_status==='pending'?'selected':''}>待退</option>
+          <option value="returned" ${o.deposit_status==='returned'?'selected':''}>已退</option>
+          <option value="forfeited" ${o.deposit_status==='forfeited'?'selected':''}>扣留</option>
+        </select>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function setPay(oid, status){
+  fetch(`/api/finance/payment/${oid}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({payment_status: status})
+  }).then(()=>showRefreshToast());
+}
+function setDep(oid, status){
+  fetch(`/api/finance/deposit/${oid}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({deposit_status: status})
+  }).then(()=>showRefreshToast());
+}
+
+loadAll();
+
+// ===== 刷新特效 =====
+function refreshWithFx(fn){
+  const btn = event.target.closest('.btn-refresh');
+  if(btn){ btn.classList.add('spinning'); setTimeout(()=>btn.classList.remove('spinning'), 800); }
+  if(typeof fn === 'function') fn();
+  showRefreshToast();
+}
+function showRefreshToast(){
+  let t = document.getElementById('refreshToast');
+  if(t) t.remove();
+  t = document.createElement('div');
+  t.id = 'refreshToast';
+  t.className = 'refresh-toast';
+  t.textContent = '✓ 已刷新';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2200);
+}
+</script>
+</body>
+</html>

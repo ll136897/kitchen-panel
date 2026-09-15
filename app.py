@@ -50,8 +50,9 @@ def orders_page():
 
 
 @app.route("/history")
-def history_page():
-    return render_template("history.html")
+@app.route("/finance")
+def finance_page():
+    return render_template("finance.html")
 
 
 @app.route("/prep")
@@ -721,6 +722,113 @@ def api_history():
 
     return jsonify({"ok": True, "monthly": monthly, "weekly": weekly,
                     "packages_pop": packages_pop, "status_dist": status_dist, "overview": overview})
+
+
+# ===== 财务系统 =====
+@app.route("/api/finance/summary")
+def finance_summary():
+    """财务总览：收入、成本、毛利、押金、应收"""
+    db = g.db
+    cur = db.cursor()
+    # 收入（非取消订单）
+    r = cur.execute("""
+        SELECT COUNT(*) as order_cnt,
+               COALESCE(SUM(amount),0) as total_revenue,
+               COALESCE(SUM(deposit),0) as total_deposit,
+               COALESCE(SUM(CASE WHEN payment_status='paid' THEN amount ELSE 0 END),0) as paid_amount,
+               COALESCE(SUM(CASE WHEN payment_status='unpaid' THEN amount ELSE 0 END),0) as unpaid_amount,
+               COALESCE(SUM(CASE WHEN payment_status='partial' THEN amount ELSE 0 END),0) as partial_amount,
+               COALESCE(SUM(CASE WHEN deposit_status='pending' THEN deposit ELSE 0 END),0) as deposit_pending,
+               COALESCE(SUM(CASE WHEN deposit_status='returned' THEN deposit ELSE 0 END),0) as deposit_returned,
+               COALESCE(SUM(CASE WHEN deposit_status='forfeited' THEN deposit ELSE 0 END),0) as deposit_forfeited
+        FROM orders WHERE status != 'cancelled'
+    """).fetchone()
+    summary = dict(r)
+    # 成本计算：每单食材成本 = 各食材用量 × 单价
+    r = cur.execute("""
+        SELECT COALESCE(SUM(pi.per_package * op.quantity * i.cost),0) as food_cost
+        FROM order_packages op
+        JOIN orders o ON op.order_id = o.id
+        JOIN package_ingredients pi ON pi.package_id = op.package_id
+        JOIN ingredients i ON pi.ingredient_id = i.id
+        WHERE o.status != 'cancelled'
+    """).fetchone()
+    summary["food_cost"] = r["food_cost"] or 0
+    # 工具损耗成本（丢失的工具）
+    r = cur.execute("""
+        SELECT COALESCE(SUM(tl.lost_qty * 50),0) as tool_loss_cost
+        FROM tool_loans tl
+        JOIN orders o ON tl.order_id = o.id
+        WHERE o.status != 'cancelled'
+    """).fetchone()
+    summary["tool_loss_cost"] = r["tool_loss_cost"] or 0
+    # 配送费收入
+    r = cur.execute("""
+        SELECT COALESCE(SUM(CASE WHEN o.status!='cancelled'
+            THEN (o.amount - p.base_price * op.quantity)
+            ELSE 0 END),0) as delivery_revenue
+        FROM orders o
+        JOIN order_packages op ON op.order_id = o.id
+        JOIN packages p ON op.package_id = p.id
+    """).fetchone()
+    summary["delivery_revenue"] = r["delivery_revenue"] or 0
+    summary["total_cost"] = summary["food_cost"] + summary["tool_loss_cost"]
+    summary["gross_profit"] = summary["total_revenue"] - summary["total_cost"]
+    summary["margin"] = round(summary["gross_profit"] / max(1, summary["total_revenue"]) * 100, 1)
+    # 库存价值
+    r = cur.execute("SELECT COALESCE(SUM(stock * cost),0) as stock_value FROM ingredients").fetchone()
+    summary["stock_value"] = r["stock_value"] or 0
+    return jsonify({"ok": True, "data": summary})
+
+
+@app.route("/api/finance/orders")
+def finance_orders():
+    """订单财务明细列表"""
+    db = g.db
+    cur = db.cursor()
+    rows = cur.execute("""
+        SELECT o.id, o.booking_date, o.contact_name, o.contact_phone, o.address,
+               o.amount, o.deposit, o.payment_status, o.deposit_status, o.status,
+               o.created_at,
+               (SELECT COALESCE(SUM(pi.per_package * op.quantity * i.cost),0)
+                FROM order_packages op
+                JOIN package_ingredients pi ON pi.package_id = op.package_id
+                JOIN ingredients i ON pi.ingredient_id = i.id
+                WHERE op.order_id = o.id) as food_cost,
+               (SELECT COALESCE(SUM(tl.lost_qty * 50),0)
+                FROM tool_loans tl WHERE tl.order_id = o.id) as tool_loss
+        FROM orders o ORDER BY o.created_at DESC LIMIT 200
+    """).fetchall()
+    orders = []
+    for r in rows:
+        o = dict(r)
+        o["total_cost"] = (o["food_cost"] or 0) + (o["tool_loss"] or 0)
+        o["profit"] = (o["amount"] or 0) - o["total_cost"]
+        o["margin_pct"] = round(o["profit"] / max(1, o["amount"] or 1) * 100, 1)
+        orders.append(o)
+    return jsonify({"ok": True, "data": orders})
+
+
+@app.route("/api/finance/payment/<int:oid>", methods=["POST"])
+def update_payment(oid):
+    """更新订单货款状态"""
+    data = request.get_json(force=True)
+    status = data.get("payment_status", "unpaid")
+    db = g.db
+    db.execute("UPDATE orders SET payment_status=? WHERE id=?", (status, oid))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/finance/deposit/<int:oid>", methods=["POST"])
+def update_deposit(oid):
+    """更新押金状态"""
+    data = request.get_json(force=True)
+    status = data.get("deposit_status", "pending")
+    db = g.db
+    db.execute("UPDATE orders SET deposit_status=? WHERE id=?", (status, oid))
+    db.commit()
+    return jsonify({"ok": True})
 
 
 # ===== 打印备餐单（按食材汇总）=====

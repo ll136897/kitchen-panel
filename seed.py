@@ -117,7 +117,8 @@ def seed_data():
                     ("葱香小郡肝", 150, 1),
                     ("蒜香鸡腿肉", 150, 1),
                     # 素菜生菜(200g×1) + 餐具生菜(200g×2) = 200+400=600g
-                    ("生菜", 200, 3),
+                    ("生菜", 200, 1, 0),  # 素菜配菜 200g×1
+                    ("生菜", 200, 2, 1),  # 摆盘垫底 200g×2(仅成本)
                     ("洋葱", 120, 1),
                     ("厚切西葫芦", 200, 1),
                     ("土豆片", 200, 1),
@@ -180,7 +181,8 @@ def seed_data():
                     ("麻辣鸡尖", 150, 1),
                     ("蒜香鸡腿肉", 150, 1),
                     ("葱香小郡肝", 150, 1),
-                    ("生菜", 200, 3),  # 素菜200×1 + 餐具200×2
+                    ("生菜", 200, 1, 0),  # 素菜配菜 200g×1
+                    ("生菜", 200, 2, 1),  # 摆盘垫底 200g×2(仅成本不上备餐表)
                     ("洋葱", 120, 1),
                     ("厚切西葫芦", 200, 1),
                     ("土豆片", 200, 1),
@@ -243,7 +245,8 @@ def seed_data():
                     ("蒜香鸡腿肉", 150, 1),
                     ("葱香小郡肝", 150, 1),
                     ("奥尔良鸡翅根", 150, 2),
-                    ("生菜", 200, 4),  # 素菜200×2 + 餐具200×2
+                    ("生菜", 200, 2, 0),  # 素菜配菜 200g×2
+                    ("生菜", 200, 2, 1),  # 摆盘垫底 200g×2(仅成本)
                     ("洋葱", 120, 1),
                     ("厚切西葫芦", 200, 1),
                     ("包浆豆腐", 1, 1),
@@ -310,7 +313,8 @@ def seed_data():
                     ("葱香小郡肝", 150, 1),
                     ("奥尔良鸡翅根", 150, 1),
                     ("麻辣鸡脚筋", 120, 1),
-                    ("生菜", 200, 4),  # 素菜200×2 + 餐具200×2
+                    ("生菜", 200, 2, 0),  # 素菜配菜 200g×2
+                    ("生菜", 200, 2, 1),  # 摆盘垫底 200g×2(仅成本)
                     ("洋葱", 120, 1),
                     ("包浆豆腐", 1, 2),  # 半袋×2
                     ("厚切西葫芦", 200, 2),
@@ -378,7 +382,8 @@ def seed_data():
                     ("葱香小郡肝", 150, 1),
                     ("麻辣鸡尖", 150, 1),
                     ("蒜香鸡腿肉", 150, 2),
-                    ("生菜", 200, 5),  # 素菜200×3 + 餐具200×2
+                    ("生菜", 200, 3, 0),  # 素菜配菜 200g×3
+                    ("生菜", 200, 2, 1),  # 摆盘垫底 200g×2(仅成本)
                     ("洋葱", 120, 1),
                     ("包浆豆腐", 1, 1),
                     ("厚切西葫芦", 200, 2),
@@ -435,12 +440,14 @@ def seed_data():
                   pkg["base_price"], pkg["base_price"],  # 先写 base，price 等下统一加配送费
                   pkg["service_type"], pkg["is_team"]))
             pid = cur.lastrowid
-            for name, size, count in pkg["ingredients"]:
+            for item in pkg["ingredients"]:
+                name, size, count = item[0], item[1], item[2]
+                cost_only = item[3] if len(item) > 3 else 0
                 total = size * count
                 if name in ing_map:
                     db.execute(
-                        "INSERT INTO package_ingredients (package_id, ingredient_id, per_package, portion_count) VALUES (?,?,?,?)",
-                        (pid, ing_map[name], total, count))
+                        "INSERT INTO package_ingredients (package_id, ingredient_id, per_package, portion_count, cost_only) VALUES (?,?,?,?,?)",
+                        (pid, ing_map[name], total, count, cost_only))
                 else:
                     print(f"  [WARN] 食材未定义: {name}")
             for name, per_pkg in pkg["tools"]:
