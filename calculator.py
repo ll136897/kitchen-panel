@@ -396,7 +396,10 @@ def calc_dashboard():
 
 
 def preview_parse(raw_text):
-    """预览解析结果（不入库）"""
+    """预览解析结果（不入库）。
+    食材按分类分组返回（与备餐表顺序一致：牛肉→猪肉→鸡肉→蔬菜→小料），
+    餐具单独拎出到 preview_tableware。
+    """
     parsed = parse_order_text(raw_text)
     matched = match_packages_in_db(parsed["packages"])
 
@@ -408,7 +411,7 @@ def preview_parse(raw_text):
             if not pk["package_id"]:
                 continue
             cur.execute("""
-                SELECT pi.per_package, i.id, i.name, i.unit, i.stock, i.threshold
+                SELECT pi.per_package, i.id, i.name, i.unit, i.stock, i.threshold, i.category
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
                 WHERE pi.package_id = ?
@@ -417,9 +420,10 @@ def preview_parse(raw_text):
                 amount = r["per_package"] * pk["quantity"]
                 if r["id"] not in preview_ing:
                     preview_ing[r["id"]] = {
-                        "name": r["name"], "unit": r["unit"],
+                        "id": r["id"], "name": r["name"], "unit": r["unit"],
                         "stock": r["stock"], "threshold": r["threshold"],
-                        "need": 0,
+                        "need": 0, "category": r["category"] or "other",
+                        "per_package": r["per_package"],
                     }
                 preview_ing[r["id"]]["need"] += amount
 
@@ -435,6 +439,7 @@ def preview_parse(raw_text):
                     preview_tool[r["id"]] = {
                         "name": r["name"], "stock": r["stock"],
                         "threshold": r["threshold"], "need": 0,
+                        "per_package": r["per_package"],
                     }
                 preview_tool[r["id"]]["need"] += amount
 
@@ -447,23 +452,38 @@ def preview_parse(raw_text):
                     preview_tool[r["id"]] = {
                         "name": tname, "stock": r["stock"],
                         "threshold": r["threshold"], "need": 0,
+                        "per_package": qty,
                     }
                 preview_tool[r["id"]]["need"] += qty
 
-    ing_list = []
+    # 细分 meat → beef/pork/chicken，合并小料类，分离餐具
     for v in preview_ing.values():
+        v["category"] = _subcategorize_meat(v["name"], v["category"])
+        if v["category"] in SAUCE_LIKE_CATS:
+            v["category"] = "sauce"
         v["need"] = round(v["need"], 2)
         v["shortage"] = round(max(0, v["need"] - v["stock"]), 2)
         v["warning"] = v["stock"] <= v["threshold"]
-        ing_list.append(v)
+
     tool_list = []
     for v in preview_tool.values():
         v["shortage"] = max(0, v["need"] - v["stock"])
         v["warning"] = v["stock"] <= v["threshold"]
         tool_list.append(v)
 
+    # 食材按分类分组（主表顺序），餐具单独拎出
+    ing_by_cat = {}
+    tableware_list = []
+    for cat in CATEGORY_ORDER:
+        items = [v for v in preview_ing.values() if v["category"] == cat]
+        if items:
+            ing_by_cat[cat] = sorted(items, key=lambda x: -x["need"])
+    tableware_list = [v for v in preview_ing.values() if v["category"] == TABLEWARE_CATEGORY]
+    tableware_list = sorted(tableware_list, key=lambda x: -x["need"])
+
     parsed["matched_packages"] = matched
-    parsed["preview_ingredients"] = sorted(ing_list, key=lambda x: -x["need"])
+    parsed["preview_ingredients"] = ing_by_cat  # dict: {category: [items]}
+    parsed["preview_tableware"] = tableware_list
     parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
     return parsed
 
