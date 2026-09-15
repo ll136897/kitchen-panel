@@ -120,12 +120,13 @@ def parse_order_text(raw_text):
         elif key == "备注":
             result["note"] = value
 
-    # 匹配套餐行
+    # 匹配套餐行（超过10人餐自动拆分：20→10+10, 18→10+8, 16→10+6 等）
     result["packages"] = []
     for line in result["package_lines"]:
         info = _match_package_line(line)
         if info:
-            result["packages"].append(info)
+            for split_info in _split_large_package(info):
+                result["packages"].append(split_info)
 
     # 从备注解析额外工具需求
     result["extra_tools"] = _parse_extra_tools(result["note"])
@@ -175,6 +176,58 @@ def _match_package_line(line):
         "service_type": service,
         "quantity": q,
     }
+
+
+def _split_large_package(info):
+    """
+    人数超过10的套餐自动拆分。
+    规则：拆成 10人餐 + (n-10)人餐
+      20人餐 → 10人餐 + 10人餐  （两个9-10人餐）
+      18人餐 → 10人餐 + 8人餐   （9-10人餐 + 7-8人餐）
+      16人餐 → 10人餐 + 6人餐   （9-10人餐 + 5-6人餐）
+      14人餐 → 10人餐 + 4人餐   （9-10人餐 + 3-4人餐）
+      13人餐 → 10人餐 + 3人餐   （9-10人餐 + 2-3人餐）
+    10人餐部分对应数据库 9-10人餐套餐(min=9,max=10)。
+    返回拆分后的套餐列表，不超10则原样返回单元素列表。
+    """
+    max_p = info["max_people"]
+    qty = info["quantity"]
+    if max_p <= 10:
+        return [info]
+
+    service = info["service_type"]
+    raw = info["raw"]
+    remainder = max_p - 10
+
+    # 10人餐部分 → 9-10人餐
+    pkg_10 = {
+        "raw": f"10人餐(拆自「{raw}」)",
+        "min_people": 9,
+        "max_people": 10,
+        "service_type": service,
+        "quantity": qty,
+    }
+
+    # 余下部分：remainder=10 → 也是9-10人餐；否则按 remainder 匹配
+    if remainder >= 10:
+        # 20人餐 → 10+10，余下也是10人餐
+        pkg_rem = {
+            "raw": f"10人餐(拆自「{raw}」)",
+            "min_people": 9,
+            "max_people": 10,
+            "service_type": service,
+            "quantity": qty,
+        }
+    else:
+        pkg_rem = {
+            "raw": f"{remainder}人餐(拆自「{raw}」)",
+            "min_people": remainder,
+            "max_people": remainder,
+            "service_type": service,
+            "quantity": qty,
+        }
+
+    return [pkg_10, pkg_rem]
 
 
 # 工具简称别名（备注里常用简称 → 数据库标准名）
