@@ -91,9 +91,21 @@
   .cat-vegetable .prep-row{background:#e7f5e7}
   .cat-vegetable .prep-row:nth-child(odd){background:#def0de}
 
+  .cat-side     .cat-head{background:#5a8a3a}              /* 小菜·浅绿 */
+  .cat-side     .prep-row{background:#eef5e8}
+  .cat-side     .prep-row:nth-child(odd){background:#e4f0de}
+
   .cat-sauce    .cat-head{background:#7a5a3a}              /* 小料·棕 */
   .cat-sauce    .prep-row{background:#f3ecdf}
   .cat-sauce    .prep-row:nth-child(odd){background:#ede3d0}
+
+  .cat-drink    .cat-head{background:#666}                 /* 赠品·灰 */
+  .cat-drink    .prep-row{background:#eee}
+  .cat-drink    .prep-row:nth-child(odd){background:#e6e6e6}
+
+  .cat-staple   .cat-head{background:#888}                 /* 主食·深灰 */
+  .cat-staple   .prep-row{background:#f0f0f0}
+  .cat-staple   .prep-row:nth-child(odd){background:#e8e8e8}
 
   .cat-other    .cat-head{background:#666}                 /* 其他·灰 */
   .cat-other    .prep-row{background:#eee}
@@ -202,31 +214,13 @@
     <div id="ordersList"></div>
   </div>
 
-  <!-- 食材包装核对 -->
-  <div class="card" id="pkCard" style="display:none">
+  <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具） -->
+  <div class="card" id="prepCard" style="display:none">
     <div class="sec-toolbar">
-      <h3 style="margin:0"><span class="dot" style="background:#d35400"></span>📦 食材包装核对</h3>
-      <button class="check-all-btn" onclick="checkAll('pk',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
+      <h3 style="margin:0"><span class="dot" style="background:var(--primary)"></span>📋 备餐核对清单</h3>
+      <button class="check-all-btn" onclick="checkAll('all',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div>
-    <div id="pkList"></div>
-  </div>
-
-  <!-- 客户餐具/工具核对 -->
-  <div class="card" id="twCard" style="display:none">
-    <div class="sec-toolbar">
-      <h3 style="margin:0"><span class="dot" style="background:#8e44ad"></span>🍱 客户餐具/工具分拣</h3>
-      <button class="check-all-btn" onclick="checkAll('tw',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
-    </div>
-    <div id="twList"></div>
-  </div>
-
-  <!-- 装配师傅工具 -->
-  <div class="card" id="toolCard" style="display:none">
-    <div class="sec-toolbar">
-      <h3 style="margin:0"><span class="dot" style="background:#4a4a4a"></span>🔧 装配师傅 · 工具装备</h3>
-      <button class="check-all-btn" onclick="checkAll('tool',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
-    </div>
-    <div id="toolList"></div>
+    <div id="prepList"></div>
   </div>
 
   <!-- 按订单视图 -->
@@ -234,14 +228,15 @@
 </div>
 
 <script>
-// 主表分类顺序：牛肉、猪肉、鸡肉、素菜、小菜、小料、赠品、主食、其他
+// 备餐分类顺序（与菜单页 CAT_ORDER 一致）：
+// 牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具
 const CAT_LABEL = {
   beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
   vegetable:'🥬 素菜', side:'🥗 小菜', sauce:'🧂 小料', drink:'🎁 赠品',
-  staple:'🍚 主食', other:'📦 其他',
-  tableware:'🍱 客户餐具', packaging:'📦 食材包装', tool:'🔧 工具'
+  packaging:'📦 食材包装', tableware:'🍱 客户餐具',
+  staple:'🍚 主食', other:'📦 其他', tool:'🔧 工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','other'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','tableware','staple','other','tool'];
 // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
 const FIXED_ORDER = [
   ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
@@ -358,7 +353,7 @@ function render(){
   const orders = d.orders || [];
   if(!orders.length){
     document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:24px;text-align:center;font-size:16px">🍖 当天暂无待备订单</div>';
-    ['pkCard','twCard','toolCard'].forEach(id=>document.getElementById(id).style.display='none');
+    document.getElementById('prepCard').style.display='none';
     document.getElementById('orderView').style.display='none';
     return;
   }
@@ -377,7 +372,7 @@ function render(){
     document.getElementById('orderView').style.display='none';
     renderMerged();
   } else {
-    ['pkCard','twCard','toolCard'].forEach(id=>document.getElementById(id).style.display='none');
+    document.getElementById('prepCard').style.display='none';
     renderByOrder();
   }
 }
@@ -431,25 +426,31 @@ function catBlock(cat, items, type, checkedMap){
 function renderMerged(){
   const d = prepData;
   const cm = d.checked_map || {};
-  // 后厨食材汇总已移除（用户要求），只保留包装/餐具/工具核对清单
-  // 食材包装
+  const ingCats = d.ingredients || {};
   const pk = d.packaging || [];
-  document.getElementById('pkCard').style.display = pk.length?'':'none';
-  if(pk.length){
-    document.getElementById('pkList').innerHTML = catBlock('packaging', pk, 'ing', cm);
-  }
-  // 客户餐具/工具
   const tw = d.tableware || [];
-  document.getElementById('twCard').style.display = tw.length?'':'none';
-  if(tw.length){
-    document.getElementById('twList').innerHTML = catBlock('tableware', tw, 'ing', cm);
-  }
-  // 工具
   const tools = d.tools || [];
-  document.getElementById('toolCard').style.display = tools.length?'':'none';
-  if(tools.length){
-    document.getElementById('toolList').innerHTML = catBlock('tool', tools, 'tool', cm);
+
+  // 按菜单分类顺序统一渲染：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具
+  let html='';
+  for(const cat of CAT_ORDER){
+    let items = [];
+    let type = 'ing';
+    if(cat==='packaging'){
+      items = pk;
+    } else if(cat==='tableware'){
+      items = tw;
+    } else if(cat==='tool'){
+      items = tools; type='tool';
+    } else {
+      items = ingCats[cat]||[];
+    }
+    if(!items || !items.length) continue;
+    html += catBlock(cat, items, type, cm);
   }
+  const hasAny = html.length>0;
+  document.getElementById('prepCard').style.display = hasAny?'':'none';
+  document.getElementById('prepList').innerHTML = html;
 }
 
 function renderByOrder(){
@@ -467,36 +468,36 @@ function renderByOrder(){
       const container = document.querySelector('#ord-'+o.id+' .muted');
       if(!container) return;
       let html = '';
-      if(r.ingredients.length){
-        // 按分类分组
-        const byCat = {};
-        for(const it of r.ingredients){
-          const c = subcatFor(it.name, it.category||'other');
-          byCat[c] = byCat[c] || [];
-          byCat[c].push(it);
-        }
-        for(const cat of CAT_ORDER){
-          if(!byCat[cat]) continue;
-          // 固定顺序排序，不在列表的按用量降序
-          byCat[cat].sort((a,b)=>{
-            const ia = getFixedIdx(a.name, cat);
-            const ib = getFixedIdx(b.name, cat);
-            if(ia!==ib) return ia-ib;
-            return (b.need||0)-(a.need||0);
-          });
-          html += catBlock(cat, byCat[cat].map(it=>({
-            id:it.id, name:it.name, unit:it.unit, per_package:it.per_package,
-            total_packages:it.order_qty, order_count:1, total:it.need,
-            shortage:it.shortage, order_ids:[o.id]
-          })), 'ing', {});
-        }
+      // 按分类分组
+      const byCat = {};
+      for(const it of r.ingredients){
+        const c = subcatFor(it.name, it.category||'other');
+        byCat[c] = byCat[c] || [];
+        byCat[c].push(it);
       }
+      // 工具归入 byCat['tool']，由 CAT_ORDER 统一排序
       if(r.tools.length){
-        html += catBlock('tool', r.tools.map(it=>({
+        byCat['tool'] = r.tools.map(it=>({
           id:it.id, name:it.name, unit:'', per_package:it.per_package,
           total_packages:it.order_qty, order_count:1, total:it.need,
-          shortage:it.shortage, order_ids:[o.id]
-        })), 'tool', {});
+          shortage:it.shortage, order_ids:[o.id], isTool:true
+        }));
+      }
+      for(const cat of CAT_ORDER){
+        if(!byCat[cat]) continue;
+        // 固定顺序排序，不在列表的按用量降序
+        byCat[cat].sort((a,b)=>{
+          const ia = getFixedIdx(a.name, cat);
+          const ib = getFixedIdx(b.name, cat);
+          if(ia!==ib) return ia-ib;
+          return (b.need||0)-(a.need||0);
+        });
+        const type = (cat==='tool') ? 'tool' : 'ing';
+        html += catBlock(cat, byCat[cat].map(it=>({
+          id:it.id, name:it.name, unit:it.unit||'', per_package:it.per_package,
+          total_packages:it.total_packages||it.order_qty, order_count:1, total:it.total||it.need,
+          shortage:it.shortage, order_ids:it.order_ids||[o.id]
+        })), type, {});
       }
       container.outerHTML = html || '<div class="muted" style="padding:16px">无需求</div>';
     });
@@ -567,7 +568,15 @@ function checkCat(cat, type, checked){
 function checkAll(section, checked){
   const d = prepData;
   let ids = [];
-  if(section==='ing'){
+  if(section==='all'){
+    // 全选：所有食材分类 + 食材包装 + 客户餐具 + 工具
+    for(const cat of Object.values(d.ingredients||{})){
+      cat.forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    }
+    (d.packaging||[]).forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    (d.tableware||[]).forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    (d.tools||[]).forEach(it=>ids.push({type:'tool', id:it.id, order_ids:it.order_ids}));
+  } else if(section==='ing'){
     for(const cat of Object.values(d.ingredients||{})){
       cat.forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
     }
