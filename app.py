@@ -676,8 +676,13 @@ def export_menu_xlsx():
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
     except ImportError:
         return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
+    from calculator import (
+        CATEGORY_ORDER, CATEGORY_LABEL, _subcategorize_meat,
+        PACKAGING_CATEGORY, UTENSIL_CATEGORY, sort_tools, _get_fixed_sort_index
+    )
     pid = request.args.get("pid")
     cur = g.db.cursor()
     if pid:
@@ -691,7 +696,6 @@ def export_menu_xlsx():
             FROM package_ingredients pi
             JOIN ingredients i ON pi.ingredient_id = i.id
             WHERE pi.package_id = ?
-            ORDER BY i.category, i.name
         """, (p["id"],))
         p["ingredients"] = [dict(r) for r in cur.fetchall()]
         cur.execute("""
@@ -700,75 +704,138 @@ def export_menu_xlsx():
             JOIN tools t ON pt.tool_id = t.id
             WHERE pt.package_id = ?
         """, (p["id"],))
-        from calculator import sort_tools as _st
-        p["tools"] = _st([dict(r) for r in cur.fetchall()], "per_package", "tool")
+        p["tools"] = sort_tools([dict(r) for r in cur.fetchall()], "per_package", "tool")
 
+    # 与网页菜单完全一致的分类顺序与标签
+    # 食材分类顺序：beef→pork→chicken→vegetable→side→sauce→drink→staple→packaging→utensil→other
+    # 工具放最后
+    EXPORT_CAT_ORDER = [
+        "beef", "pork", "chicken", "vegetable", "side", "sauce", "drink",
+        "staple", "packaging", "utensil", "other", "tool"
+    ]
     cat_colors = {
         'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
-        'vegetable': '3A8A3A', 'sauce': '7A5A3A',
-        'packaging': 'D35400', 'utensil': '8E44AD', 'tableware': '8E44AD',
-        'staple': '666666', 'side': '666666', 'drink': '666666',
-        'other': '666666', 'tool': '4A4A4A'
+        'vegetable': '3A8A3A', 'side': '5A8A3A', 'sauce': '7A5A3A',
+        'drink': '666666', 'staple': '666666',
+        'packaging': 'D35400', 'utensil': '8E44AD', 'other': '666666',
+        'tool': '4A4A4A'
     }
     cat_labels = {
-        'beef': '牛肉', 'pork': '猪肉', 'chicken': '鸡肉',
-        'vegetable': '素菜', 'sauce': '小料',
-        'packaging': '食材包装', 'utensil': '客户餐具/工具', 'tableware': '餐具配套',
-        'staple': '主食', 'side': '小菜', 'drink': '赠品',
-        'other': '其他', 'tool': '工具'
+        'beef': '🥩 牛肉', 'pork': '🥓 猪肉', 'chicken': '🍗 鸡肉',
+        'vegetable': '🥬 素菜', 'side': '🥗 小菜', 'sauce': '🧂 小料',
+        'drink': '🎁 赠品', 'staple': '🍚 主食',
+        'packaging': '📦 食材包装', 'utensil': '🍱 客户餐具',
+        'other': '📦 其他', 'tool': '🔧 工具'
     }
+
+    # 食材内部固定排序（与网页 FIXED_ORDER 一致）
+    ing_fixed_order = [
+        ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
+        ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
+        ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],
+        ['chicken','掌中宝'],['chicken','鸡脚筋'],
+        ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],
+        ['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],
+        ['vegetable','杏鲍菇'],['vegetable','洋葱'],
+        ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
+        ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+        ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
+    ]
+    def ing_sort_idx(name, cat):
+        for i, (c, kw) in enumerate(ing_fixed_order):
+            if c == cat and kw in (name or ''):
+                return i
+        return 999
+
     wb = Workbook()
     ws = wb.active
     ws.title = "菜单" if len(pkgs) > 1 else pkgs[0]["name"]
-    headers = ["套餐", "人数", "分类", "食材/工具", "单位", "每份克数", "份数", "总量", "基价", "总价"]
+    # 与网页一致的表头
+    headers = ["名称", "单位", "每份数量", "份数", "总量", "保存", "删除"]
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF", size=11)
         cell.fill = PatternFill("solid", fgColor="3A2416")
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = Border(
+            left=Side(border_style="thin", color="FFFFFF"),
+            right=Side(border_style="thin", color="FFFFFF"),
+            top=Side(border_style="thin", color="FFFFFF"),
+            bottom=Side(border_style="thin", color="FFFFFF"),
+        )
     thin = Side(border_style="thin", color="CCCCCC")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center", indent=1)
+
     for p in pkgs:
-        people = f"{p['min_people']}-{p['max_people']}人"
-        # 按分类分组
+        # 套餐标题行（合并 7 列）
+        ws.append([f"{p['name']}  ·  {p['min_people']}-{p['max_people']}人  ·  基价¥{p['base_price']}  总价¥{p['price']}", "", "", "", "", "", ""])
+        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=7)
+        for cell in ws[ws.max_row]:
+            cell.fill = PatternFill("solid", fgColor="8E1E1A")
+            cell.font = Font(bold=True, color="FFFFFF", size=12)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # 食材按分类细分 + 固定排序
         by_cat = {}
         for ing in p["ingredients"]:
-            c = ing["category"] or "other"
-            by_cat.setdefault(c, []).append(ing)
-        for cat, items in by_cat.items():
+            raw_cat = ing["category"] or "other"
+            # meat 细分为 beef/pork/chicken（与网页 subcategorize 一致）
+            cat = _subcategorize_meat(ing["ingredient"], raw_cat)
+            by_cat.setdefault(cat, []).append(ing)
+        for cat in EXPORT_CAT_ORDER:
+            items = by_cat.get(cat, [])
+            if not items:
+                continue
+            # 分类内按固定顺序排序
+            items.sort(key=lambda x: (ing_sort_idx(x["ingredient"], cat), x["ingredient"]))
             color = cat_colors.get(cat, "666666")
             label = cat_labels.get(cat, cat)
-            # 分类标题行
-            ws.append([p["name"], people, label, f"{len(items)}项", "", "", "", "", "", ""])
+            # 分类标题行（与网页 cat-row 一致，本身是 7 列）
+            ws.append([f"{label} · {len(items)}项", "单位", "每份数量", "份数", "总量", "保存", "删除"])
             for cell in ws[ws.max_row]:
                 cell.fill = PatternFill("solid", fgColor=color)
                 cell.font = Font(bold=True, color="FFFFFF", size=10)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
+            # 食材行
             for ing in items:
                 size = ing["per_package"] / max(1, ing["portion_count"])
-                ws.append([p["name"], people, label, ing["ingredient"], ing["unit"],
-                          round(size, 2), ing["portion_count"], ing["per_package"],
-                          p["base_price"], p["price"]])
+                ws.append([
+                    ing["ingredient"], ing["unit"], round(size, 2),
+                    ing["portion_count"], ing["per_package"], "", ""
+                ])
                 for cell in ws[ws.max_row]:
                     cell.border = border
-                    cell.alignment = Alignment(horizontal="center")
-                ws.cell(ws.max_row, 4).alignment = Alignment(horizontal="left")
-        # 工具
+                    cell.alignment = center_align
+                ws.cell(ws.max_row, 1).alignment = left_align
+                ws.cell(ws.max_row, 5).font = Font(bold=True, color="8E1E1A")
+        # 工具分类
         if p["tools"]:
-            ws.append([p["name"], people, "工具", f"{len(p['tools'])}项", "", "", "", "", "", ""])
+            ws.append([f"🔧 工具 · {len(p['tools'])}项", "单位", "每份数量", "份数", "总量", "保存", "删除"])
             for cell in ws[ws.max_row]:
                 cell.fill = PatternFill("solid", fgColor="4A4A4A")
                 cell.font = Font(bold=True, color="FFFFFF", size=10)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
             for t in p["tools"]:
-                ws.append([p["name"], people, "工具", t["tool"], "个", "", "",
-                          t["per_package"], p["base_price"], p["price"]])
+                ws.append([
+                    t["tool"], "个", "", "", t["per_package"], "", ""
+                ])
                 for cell in ws[ws.max_row]:
                     cell.border = border
-                    cell.alignment = Alignment(horizontal="center")
-                ws.cell(ws.max_row, 4).alignment = Alignment(horizontal="left")
-    # 列宽
-    widths = [12, 10, 10, 18, 6, 10, 6, 10, 8, 8]
+                    cell.alignment = center_align
+                ws.cell(ws.max_row, 1).alignment = left_align
+                ws.cell(ws.max_row, 5).font = Font(bold=True, color="4A4A4A")
+        # 套餐间空行
+        ws.append([])
+    # 列宽（与网页列对齐）
+    widths = [22, 8, 12, 8, 12, 8, 8]
     for i, w in enumerate(widths, 1):
-        ws.column_dimensions[chr(64+i)].width = w
+        ws.column_dimensions[get_column_letter(i)].width = w
+    # 冻结表头
+    ws.freeze_panes = "A2"
     import io as _io
     buf = _io.BytesIO()
     wb.save(buf)
