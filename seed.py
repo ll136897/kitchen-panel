@@ -82,18 +82,19 @@ def seed_data():
                        (name, unit, stock, thr, cost, cat))
 
         # ========== 工具 ==========
+        # 格式：(name, 初始库存, 预警阈值, 单位成本)
         ALL_TOOLS = [
-            ("燃气罐", 30, 5),
-            ("卡式炉/烤盘", 15, 3),
-            ("夹子", 20, 5),
-            ("刷子", 10, 2),
-            ("剪刀", 10, 2),
-            ("天幕", 10, 3),
-            ("蛋卷桌", 10, 2),
-            ("椅子", 80, 15),
+            ("燃气罐", 30, 5, 65.0),
+            ("卡式炉/烤盘", 15, 3, 80.0),
+            ("夹子", 20, 5, 12.0),
+            ("刷子", 10, 2, 8.0),
+            ("剪刀", 10, 2, 15.0),
+            ("天幕", 10, 3, 280.0),
+            ("蛋卷桌", 10, 2, 150.0),
+            ("椅子", 80, 15, 45.0),
         ]
-        for name, stock, thr in ALL_TOOLS:
-            db.execute("INSERT INTO tools (name, stock, threshold) VALUES (?,?,?)", (name, stock, thr))
+        for name, stock, thr, cost in ALL_TOOLS:
+            db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)", (name, stock, thr, cost))
 
         # 取映射
         cur.execute("SELECT id, name FROM ingredients")

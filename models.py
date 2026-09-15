@@ -41,7 +41,27 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 stock REAL NOT NULL DEFAULT 0,
-                threshold REAL NOT NULL DEFAULT 0
+                threshold REAL NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0          -- 单位成本（用于损耗计算）
+            )
+        """)
+        # 迁移：老库补 cost 字段
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(tools)").fetchall()]
+        if "cost" not in cols:
+            cur.execute("ALTER TABLE tools ADD COLUMN cost REAL NOT NULL DEFAULT 0")
+
+        # 采购记录（进货入库带单价）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS purchases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_type TEXT NOT NULL,              -- ingredient/tool
+                item_id INTEGER NOT NULL,
+                quantity REAL NOT NULL,               -- 采购数量
+                unit_price REAL NOT NULL,             -- 采购单价
+                total_cost REAL NOT NULL,             -- 总金额 = quantity * unit_price
+                supplier TEXT,                        -- 供应商
+                note TEXT,
+                purchased_at TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
 

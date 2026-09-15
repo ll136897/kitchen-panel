@@ -74,11 +74,27 @@
       <thead>
         <tr>
           <th>日期</th><th>客户</th><th>金额</th><th>食材成本</th><th>损耗</th>
-          <th>毛利</th><th>毛利率</th><th>货款</th><th>押金</th>
+          <th>毛利</th><th>毛利率</th><th>货款</th><th>押金</th><th></th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
+  </div>
+
+  <!-- 成本明细弹窗 -->
+  <div id="costModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:16px">
+    <div class="fin-card" style="max-width:600px;width:100%;max-height:85vh;overflow:auto;margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="margin:0">🥩 订单 <span id="costOid"></span> 成本明细</h3>
+        <button class="btn btn-sm" onclick="closeCostModal()">✖</button>
+      </div>
+      <table class="fin-tbl" id="costTable">
+        <thead><tr><th>食材</th><th>用量</th><th>单价</th><th>成本</th><th>编辑单价</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div style="margin-top:8px;text-align:right;font-weight:700;font-size:14px" id="costTotal"></div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted)">修改单价会更新该食材的全局成本（影响所有后续订单）</div>
+    </div>
   </div>
 </div>
 
@@ -166,7 +182,7 @@ function renderKpi(s){
 function renderOrders(orders){
   const tb = document.querySelector('#finTable tbody');
   if(!orders.length){
-    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">暂无订单数据</td></tr>';
+    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:20px">暂无订单数据</td></tr>';
     return;
   }
   tb.innerHTML = orders.map(o=>{
@@ -177,7 +193,7 @@ function renderOrders(orders){
       <td>${(o.booking_date||'').slice(5)}</td>
       <td style="text-align:left">${o.contact_name||'-'}</td>
       <td>${fmtY(o.amount)}</td>
-      <td>${fmtY(o.food_cost)}</td>
+      <td><a href="javascript:void(0)" onclick="showCostDetail(${o.id})" style="color:#c0392b;font-weight:600">${fmtY(o.food_cost)}</a></td>
       <td>${fmtY(o.tool_loss)}</td>
       <td style="color:${profitColor};font-weight:700">${fmtY(o.profit)}</td>
       <td style="font-weight:600">${o.margin_pct}%</td>
@@ -195,6 +211,7 @@ function renderOrders(orders){
           <option value="forfeited" ${o.deposit_status==='forfeited'?'selected':''}>扣留</option>
         </select>
       </td>
+      <td><button class="btn btn-sm" onclick="showCostDetail(${o.id})" style="font-size:10px;padding:2px 6px">明细</button></td>
     </tr>`;
   }).join('');
 }
@@ -210,6 +227,44 @@ function setDep(oid, status){
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({deposit_status: status})
   }).then(()=>showRefreshToast());
+}
+
+// ===== 成本明细弹窗 =====
+function showCostDetail(oid){
+  document.getElementById('costOid').textContent = '#' + oid;
+  const modal = document.getElementById('costModal');
+  modal.style.display = 'flex';
+  fetch(`/api/finance/order/${oid}/cost-detail`).then(r=>r.json()).then(d=>{
+    const items = d.data||[];
+    let total = 0;
+    const html = items.map(i=>{
+      total += i.total_cost;
+      return `<tr>
+        <td style="text-align:left">${i.name}</td>
+        <td>${i.total_amount}${i.unit}</td>
+        <td>¥${i.unit_cost}</td>
+        <td style="font-weight:700;color:#c0392b">¥${i.total_cost.toFixed(2)}</td>
+        <td>
+          <input type="number" class="select-mini" style="width:70px" value="${i.unit_cost}" step="0.01"
+            onchange="editIngCost(${i.ingredient_id}, this.value)" id="edit-cost-${i.ingredient_id}">
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="muted" style="text-align:center">无成本数据</td></tr>';
+    document.querySelector('#costTable tbody').innerHTML = html;
+    document.getElementById('costTotal').innerHTML = `食材成本合计: <span style="color:#c0392b">¥${total.toFixed(2)}</span>`;
+  });
+}
+
+function closeCostModal(){
+  document.getElementById('costModal').style.display = 'none';
+}
+
+function editIngCost(iid, val){
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cost:parseFloat(val||0),item_type:'ingredient'})})
+    .then(r=>r.json()).then(()=>{
+      showRefreshToast();
+    });
 }
 
 loadAll();

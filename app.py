@@ -240,7 +240,9 @@ def api_stock_parse():
 
 @app.route("/api/stock/inbound", methods=["POST"])
 def api_stock_inbound():
-    """确认入库：接收 [{item_type, item_id, qty, reason}] 列表"""
+    """确认入库：接收 [{item_type, item_id, qty, unit_price, supplier, note}] 列表
+    unit_price 有值时按加权平均更新 cost，并记 purchases 采购记录。
+    """
     data = request.get_json(force=True)
     items = data.get("items", [])
     reason = data.get("reason", "进货入库")
@@ -252,17 +254,71 @@ def api_stock_inbound():
         iid = it.get("item_id")
         itype = it.get("item_type", "ingredient")
         qty = float(it.get("qty", 0))
+        unit_price = float(it.get("unit_price", 0) or 0)
+        supplier = it.get("supplier", "")
+        note = it.get("note", "") or reason
         if not iid or qty <= 0:
             continue
         table = "ingredients" if itype == "ingredient" else "tools"
-        db.execute(f"UPDATE {table} SET stock = stock + ? WHERE id = ?", (qty, iid))
+        # 加权平均更新成本：new_cost = (旧库存*旧成本 + 新采购量*采购单价) / (旧库存+新采购量)
+        if unit_price > 0:
+            row = db.execute(f"SELECT stock, cost FROM {table} WHERE id = ?", (iid,)).fetchone()
+            if row:
+                old_stock = row["stock"] or 0
+                old_cost = row["cost"] or 0
+                new_stock = old_stock + qty
+                if new_stock > 0:
+                    new_cost = round((old_stock * old_cost + qty * unit_price) / new_stock, 4)
+                    db.execute(f"UPDATE {table} SET stock = stock + ?, cost = ? WHERE id = ?", (qty, new_cost, iid))
+                else:
+                    db.execute(f"UPDATE {table} SET stock = stock + ? WHERE id = ?", (qty, iid))
+            else:
+                db.execute(f"UPDATE {table} SET stock = stock + ? WHERE id = ?", (qty, iid))
+        else:
+            db.execute(f"UPDATE {table} SET stock = stock + ? WHERE id = ?", (qty, iid))
+        # 库存日志
         db.execute("""
             INSERT INTO stock_logs (item_type, item_id, delta, reason)
             VALUES (?,?,?,?)
         """, (itype, iid, qty, reason))
+        # 采购记录（有单价才记）
+        if unit_price > 0:
+            db.execute("""
+                INSERT INTO purchases (item_type, item_id, quantity, unit_price, total_cost, supplier, note)
+                VALUES (?,?,?,?,?,?,?)
+            """, (itype, iid, qty, unit_price, round(qty * unit_price, 2), supplier, note))
         done += 1
     db.commit()
     return jsonify({"ok": True, "done": done})
+
+
+@app.route("/api/purchases")
+def list_purchases():
+    """采购记录列表"""
+    db = g.db
+    rows = db.execute("""
+        SELECT p.*, CASE WHEN p.item_type='ingredient' THEN i.name ELSE t.name END as item_name,
+               CASE WHEN p.item_type='ingredient' THEN i.unit ELSE '个' END as item_unit
+        FROM purchases p
+        LEFT JOIN ingredients i ON p.item_id = i.id
+        LEFT JOIN tools t ON p.item_id = t.id
+        ORDER BY p.purchased_at DESC
+        LIMIT 200
+    """).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+
+@app.route("/api/ingredients/<int:iid>/cost", methods=["POST"])
+def update_ingredient_cost(iid):
+    """手动修改食材/工具成本单价"""
+    data = request.get_json(force=True)
+    cost = float(data.get("cost", 0))
+    itype = data.get("item_type", "ingredient")
+    table = "ingredients" if itype == "ingredient" else "tools"
+    db = g.db
+    db.execute(f"UPDATE {table} SET cost = ? WHERE id = ?", (cost, iid))
+    db.commit()
+    return jsonify({"ok": True})
 
 
 # ===== 配置管理 =====
@@ -310,8 +366,8 @@ def manage_tools():
         rows = db.execute("SELECT * FROM tools ORDER BY id").fetchall()
         return jsonify({"ok": True, "data": [dict(r) for r in rows]})
     data = request.get_json(force=True)
-    db.execute("INSERT INTO tools (name, stock, threshold) VALUES (?,?,?)",
-              (data["name"], data.get("stock", 0), data.get("threshold", 0)))
+    db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
+              (data["name"], data.get("stock", 0), data.get("threshold", 0), data.get("cost", 0)))
     db.commit()
     return jsonify({"ok": True})
 
@@ -777,11 +833,12 @@ def finance_summary():
         WHERE o.status != 'cancelled'
     """).fetchone()
     summary["food_cost"] = r["food_cost"] or 0
-    # 工具损耗成本（丢失的工具）
+    # 工具损耗成本（丢失的工具 × 真实成本）
     r = cur.execute("""
-        SELECT COALESCE(SUM(tl.lost_qty * 50),0) as tool_loss_cost
+        SELECT COALESCE(SUM(tl.lost_qty * t.cost),0) as tool_loss_cost
         FROM tool_loans tl
         JOIN orders o ON tl.order_id = o.id
+        JOIN tools t ON tl.tool_id = t.id
         WHERE o.status != 'cancelled'
     """).fetchone()
     summary["tool_loss_cost"] = r["tool_loss_cost"] or 0
@@ -798,9 +855,11 @@ def finance_summary():
     summary["total_cost"] = summary["food_cost"] + summary["tool_loss_cost"]
     summary["gross_profit"] = summary["total_revenue"] - summary["total_cost"]
     summary["margin"] = round(summary["gross_profit"] / max(1, summary["total_revenue"]) * 100, 1)
-    # 库存价值
+    # 库存价值（食材+工具）
     r = cur.execute("SELECT COALESCE(SUM(stock * cost),0) as stock_value FROM ingredients").fetchone()
     summary["stock_value"] = r["stock_value"] or 0
+    r = cur.execute("SELECT COALESCE(SUM(stock * cost),0) as tool_stock_value FROM tools").fetchone()
+    summary["tool_stock_value"] = r["tool_stock_value"] or 0
     return jsonify({"ok": True, "data": summary})
 
 
@@ -818,8 +877,9 @@ def finance_orders():
                 JOIN package_ingredients pi ON pi.package_id = op.package_id
                 JOIN ingredients i ON pi.ingredient_id = i.id
                 WHERE op.order_id = o.id) as food_cost,
-               (SELECT COALESCE(SUM(tl.lost_qty * 50),0)
-                FROM tool_loans tl WHERE tl.order_id = o.id) as tool_loss
+               (SELECT COALESCE(SUM(tl.lost_qty * t.cost),0)
+                FROM tool_loans tl JOIN tools t ON tl.tool_id = t.id
+                WHERE tl.order_id = o.id) as tool_loss
         FROM orders o ORDER BY o.created_at DESC LIMIT 200
     """).fetchall()
     orders = []
@@ -830,6 +890,40 @@ def finance_orders():
         o["margin_pct"] = round(o["profit"] / max(1, o["amount"] or 1) * 100, 1)
         orders.append(o)
     return jsonify({"ok": True, "data": orders})
+
+
+@app.route("/api/finance/order/<int:oid>/cost-detail")
+def finance_order_cost_detail(oid):
+    """单个订单的食材成本明细（用于财务页成本编辑）"""
+    db = g.db
+    cur = db.cursor()
+    rows = cur.execute("""
+        SELECT pi.per_package, pi.portion_count, pi.cost_only,
+               op.quantity as order_qty,
+               i.id as ingredient_id, i.name, i.unit, i.cost, i.category
+        FROM order_packages op
+        JOIN package_ingredients pi ON pi.package_id = op.package_id
+        JOIN ingredients i ON pi.ingredient_id = i.id
+        WHERE op.order_id = ?
+        ORDER BY i.category, i.name
+    """, (oid,)).fetchall()
+    items = []
+    for r in rows:
+        total_amount = r["per_package"] * r["order_qty"]
+        total_cost = total_amount * (r["cost"] or 0)
+        items.append({
+            "ingredient_id": r["ingredient_id"],
+            "name": r["name"], "unit": r["unit"],
+            "per_package": r["per_package"],
+            "portion_count": r["portion_count"],
+            "order_qty": r["order_qty"],
+            "cost_only": r["cost_only"],
+            "total_amount": round(total_amount, 2),
+            "unit_cost": r["cost"] or 0,
+            "total_cost": round(total_cost, 2),
+            "category": r["category"],
+        })
+    return jsonify({"ok": True, "data": items})
 
 
 @app.route("/api/finance/payment/<int:oid>", methods=["POST"])
