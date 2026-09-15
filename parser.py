@@ -135,15 +135,19 @@ def parse_order_text(raw_text):
 
 def _match_package_line(line):
     """
-    解析套餐行，如 "3-4人餐 （搭建）" 或 "9-10人餐 x2"
+    解析套餐行，如 "3-4人餐 （搭建）" / "9-10人餐 x2" / "4人餐 （不搭建）"
     返回 {raw, min, max, service_type, quantity}
     """
     line = line.strip()
-    # 人数范围
-    m = re.search(r"(\d+)\s*[-~]\s*(\d+)\s*人", line)
-    if not m:
-        return None
-    min_p, max_p = int(m.group(1)), int(m.group(2))
+    # 人数范围：优先 3-4人餐，其次单数 4人餐
+    m = re.search(r"(\d+)\s*[-~至到]\s*(\d+)\s*人", line)
+    if m:
+        min_p, max_p = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.search(r"(\d+)\s*人", line)
+        if not m:
+            return None
+        min_p = max_p = int(m.group(1))
 
     # 份数
     q = 1
@@ -151,12 +155,15 @@ def _match_package_line(line):
     if qm:
         q = int(qm.group(1))
 
-    # 服务类型
+    # 服务类型：先判"不搭建"避免误命中"搭建"
     service = "外送"
-    for kw in ["搭建", "自提", "外送"]:
-        if kw in line:
-            service = kw
-            break
+    if "不搭建" in line or "不自理" in line:
+        service = "外送"
+    else:
+        for kw in ["搭建", "自提", "外送"]:
+            if kw in line:
+                service = kw
+                break
 
     return {
         "raw": line,
@@ -182,42 +189,84 @@ TOOL_ALIASES = {
 }
 
 
+# 中文数字 → 阿拉伯数字（备注里常写"一套""两把"）
+CHINESE_NUM_MAP = {
+    "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+}
+
+
+def _num_from_str(s):
+    """把 '1' 或 '一' 转成数字，失败返回 None"""
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    return CHINESE_NUM_MAP.get(s)
+
+
 def _parse_extra_tools(note):
     """
-    从备注解析额外工具需求，如 "多拿1张桌子，1个椅子"
+    从备注解析额外工具需求，支持：
+      - 阿拉伯数字："多拿1张桌子，1个椅子"
+      - 中文数字："配一套卡式炉"
+      - 加号分隔："配一套新卡式炉+烤盘"
     返回 {工具名: 数量}（用数据库标准名）
     """
     if not note:
         return {}
     tools = {}
 
-    # 优先匹配别名（更宽松，能识别"桌子""椅子"等简称）
+    # 拆分成段：按 + ，,。；;、 空格 切分
+    segments = re.split(r"[+，,。；;、\s]+", note)
+
+    # 量词集合
+    quantifier = "[张个把条只套份台]?"
+
+    # 1. 先用别名匹配（能识别"桌子""椅子""烤盘"等简称）
     for alias, std_name in TOOL_ALIASES.items():
-        # 匹配 "1张桌子" "1个椅子" "桌子1张" "多拿1张桌子" 等
-        patterns = [
-            rf"(\d+)\s*[张个把条只]?\s*{re.escape(alias)}",
-            rf"{re.escape(alias)}\s*(\d+)\s*[张个把条只]?",
-        ]
-        for p in patterns:
-            for m in re.finditer(p, note):
-                n = int(m.group(1))
+        for seg in segments:
+            if alias not in seg:
+                continue
+            n = None
+            # 数字在前：1张桌子 / 一套卡式炉 / 一套新卡式炉
+            m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(alias)}", seg)
+            if m:
+                n = _num_from_str(m.group(1))
+            else:
+                # 别名在前：桌子1张 / 卡式炉一套
+                m = re.search(rf"{re.escape(alias)}\S{{0,4}}?(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}", seg)
+                if m:
+                    n = _num_from_str(m.group(1))
+            if n is None:
+                # 没数字但有"配/带/拿"+别名 → 默认1
+                if re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(alias)}", seg):
+                    n = 1
+            if n:
                 tools[std_name] = tools.get(std_name, 0) + n
 
-    # 再匹配数据库完整工具名（兜底）
+    # 2. 再用数据库完整工具名兜底匹配
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT name FROM tools")
         known_tools = [r["name"] for r in cur.fetchall()]
     for tname in known_tools:
-        if tname in tools:
+        if tname in [v for v in tools.values()] or tname in tools:
             continue
-        patterns = [
-            rf"(\d+)\s*[张个把条只]?\s*{re.escape(tname)}",
-            rf"{re.escape(tname)}\s*(\d+)\s*[张个把条只]?",
-        ]
-        for p in patterns:
-            for m in re.finditer(p, note):
-                n = int(m.group(1))
+        for seg in segments:
+            if tname not in seg:
+                continue
+            n = None
+            m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(tname)}", seg)
+            if m:
+                n = _num_from_str(m.group(1))
+            else:
+                m = re.search(rf"{re.escape(tname)}\S{{0,4}}?(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}", seg)
+                if m:
+                    n = _num_from_str(m.group(1))
+            if n is None and re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(tname)}", seg):
+                n = 1
+            if n:
                 tools[tname] = tools.get(tname, 0) + n
 
     return tools
