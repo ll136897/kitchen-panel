@@ -109,6 +109,22 @@
 
   .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
   .date-picker{padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:16px}
+  /* 日期快捷按钮条：列出所有有备餐订单的日期 */
+  .date-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .date-chip{
+    padding:8px 14px;border-radius:10px;font-size:14px;font-weight:700;
+    border:1px solid var(--border-l);background:#fff;color:#5a4a3a;cursor:pointer;
+    transition:all .12s;display:inline-flex;align-items:center;gap:5px;
+  }
+  .date-chip:hover{background:#faf5ed}
+  .date-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .date-chip.today{border-color:var(--green);color:var(--green)}
+  .date-chip.today.active{background:var(--green);color:#fff;border-color:var(--green)}
+  .date-chip.past{opacity:.7;border-style:dashed}
+  .date-chip .chip-cnt{
+    background:rgba(0,0,0,.1);padding:1px 7px;border-radius:8px;font-size:12px;
+  }
+  .date-chip.active .chip-cnt{background:rgba(255,255,255,.3)}
   .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:12px;gap:2px}
   .mode-tab button{padding:10px 18px;border:none;background:transparent;color:#8a7f75;border-radius:10px;font-weight:700;cursor:pointer;font-size:15px}
   .mode-tab button.active{background:var(--primary);color:#fff}
@@ -204,6 +220,9 @@
     </div>
   </div>
 
+  <!-- 有备餐订单的日期快捷切换条 -->
+  <div class="date-chips" id="dateChips"></div>
+
   <!-- 模式切换 -->
   <div class="mode-tab" style="margin-bottom:14px">
     <button id="tabMerged" class="active" onclick="switchMode('merged')">🔀 合并视图</button>
@@ -258,6 +277,7 @@ const CAT_LABEL = {
 const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','other'];
 let prepData = null;
 let currentMode = 'merged';
+let prepDates = [];
 
 document.getElementById('datePick').valueAsDate = new Date();
 
@@ -268,12 +288,65 @@ function switchMode(mode){
   render();
 }
 
+function loadPrepDates(){
+  fetch('/api/prep/dates').then(r=>r.json()).then(res=>{
+    if(!res.ok) return;
+    prepDates = res.dates || [];
+    renderDateChips(res.today);
+  });
+}
+
+function renderDateChips(todayStr){
+  const box = document.getElementById('dateChips');
+  if(!prepDates.length){
+    box.innerHTML = '<div class="muted" style="padding:6px;font-size:14px">📅 当前无待备订单</div>';
+    return;
+  }
+  // 确保"今天"在列表里（即使今天没订单也要显示）
+  const dates = [...prepDates];
+  if(!dates.find(d=>d.booking_date===todayStr)){
+    dates.unshift({booking_date: todayStr, cnt: 0, is_today: true, is_past: false});
+  }
+  const currentDate = document.getElementById('datePick').value;
+  box.innerHTML = dates.map(d=>{
+    const cls = [
+      'date-chip',
+      d.is_today ? 'today' : '',
+      d.is_past ? 'past' : '',
+      d.booking_date === currentDate ? 'active' : ''
+    ].filter(Boolean).join(' ');
+    // 显示友好格式：MM-DD（今天/明天）
+    const dateObj = new Date(d.booking_date + 'T00:00:00');
+    const today = new Date(todayStr + 'T00:00:00');
+    const diffDays = Math.round((dateObj - today) / 86400000);
+    let prefix = '';
+    if(diffDays === 0) prefix = '📍 今天';
+    else if(diffDays === 1) prefix = '⏰ 明天';
+    else if(diffDays === -1) prefix = '↩️ 昨天';
+    else if(diffDays > 1) prefix = `📅 ${dateObj.getMonth()+1}.${dateObj.getDate()}`;
+    else prefix = `📤 ${dateObj.getMonth()+1}.${dateObj.getDate()}`;
+    return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">
+      ${prefix} <span class="chip-cnt">${d.cnt}单</span>
+    </button>`;
+  }).join('');
+}
+
+function pickDate(dateStr){
+  document.getElementById('datePick').value = dateStr;
+  loadPrep();
+  // 更新按钮高亮（不全量重渲染 date chips 避免列表跳动）
+  document.querySelectorAll('.date-chip').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('onclick').includes(`'${dateStr}'`));
+  });
+}
+
 function loadPrep(){
   const d = document.getElementById('datePick').value;
   fetch('/api/prep/merged?date='+d).then(r=>r.json()).then(d2=>{
     if(!d2.ok){ alert('加载失败'); return; }
     prepData = d2.data;
     render();
+    renderDateChips(d);  // 重新渲染 chips 以更新 active 状态
   });
 }
 
@@ -525,6 +598,7 @@ function checkAllOrder(oid, checked){
 
 function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
 
+loadPrepDates();
 loadPrep();
 setInterval(()=>{ if(currentMode==='merged') loadPrep(); }, 60000);
 </script>

@@ -720,6 +720,29 @@ def prep_merged():
     return jsonify({"ok": True, "data": data, "order_ids": order_ids})
 
 
+@app.route("/api/prep/dates")
+def prep_dates():
+    """列出所有有 pending/preparing 订单的日期，供前端做日期快捷切换"""
+    import datetime
+    db = g.db
+    cur = db.cursor()
+    cur.execute("""
+        SELECT booking_date, COUNT(*) as cnt
+        FROM orders
+        WHERE status IN ('pending','preparing') AND booking_date IS NOT NULL AND booking_date != ''
+        GROUP BY booking_date
+        ORDER BY booking_date
+    """)
+    today = datetime.date.today().isoformat()
+    dates = []
+    for r in cur.fetchall():
+        d = dict(r)
+        d["is_today"] = (r["booking_date"] == today)
+        d["is_past"] = (r["booking_date"] < today)
+        dates.append(d)
+    return jsonify({"ok": True, "dates": dates, "today": today})
+
+
 # ===== 备餐勾选 =====
 @app.route("/api/prep/check", methods=["POST"])
 def prep_check():
