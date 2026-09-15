@@ -35,10 +35,10 @@
   }
   .cat-head .check-all-btn:hover{background:rgba(255,255,255,.3)}
 
-  /* 5列网格：勾选 | 名字 | 份数 | 克数 | 总份数 | 总克数 */
+  /* 6列网格：勾选 | 名字 | 份数 | 克数 | 总份数 | 总克数 | 单位 */
   .prep-row{
     display:grid;
-    grid-template-columns:28px 1fr 60px 70px 60px 78px;
+    grid-template-columns:28px 1fr 60px 70px 60px 78px 50px;
     gap:6px;
     align-items:center;
     padding:11px 12px;
@@ -53,7 +53,7 @@
   /* 表头行 */
   .prep-header{
     display:grid;
-    grid-template-columns:28px 1fr 60px 70px 60px 78px;
+    grid-template-columns:28px 1fr 60px 70px 60px 78px 50px;
     gap:6px;
     padding:8px 12px;
     font-size:12px;font-weight:700;color:#666;
@@ -372,7 +372,7 @@ function render(){
   }
 }
 
-// 备餐行：5列（份数/克数/总份数/总克数）+ 勾选 + 名字
+// 备餐行：6列（份数/克数/总份数/总克数）+ 勾选 + 名字 + 单位
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
@@ -390,9 +390,10 @@ function itemRow(it, type, checkedMap){
     <div class="pr-per">${perPkg}${unit}/份</div>
     <div class="pr-totpkg">${totPkg}份</div>
     <div>
-      <div class="pr-total">${total}${unit}</div>
+      <div class="pr-total">${total}</div>
       <div class="pr-short ${shortCls}">${shortTxt}</div>
     </div>
+    <div class="pr-unit">${unit}</div>
   </div>`;
 }
 
@@ -405,6 +406,7 @@ function headerRow(){
     <div>克数</div>
     <div>总份数</div>
     <div style="text-align:right">总克数</div>
+    <div>单位</div>
   </div>`;
 }
 

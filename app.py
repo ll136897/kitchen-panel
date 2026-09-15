@@ -750,8 +750,8 @@ def export_menu_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "菜单" if len(pkgs) > 1 else pkgs[0]["name"]
-    # 与网页一致的表头
-    headers = ["名称", "单位", "每份数量", "份数", "总量", "保存", "删除"]
+    # 与网页一致的表头（名称→份数→每份数量→总量→单位→保存→删除）
+    headers = ["名称", "份数", "每份数量", "总量", "单位", "保存", "删除"]
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF", size=11)
@@ -793,27 +793,27 @@ def export_menu_xlsx():
             color = cat_colors.get(cat, "666666")
             label = cat_labels.get(cat, cat)
             # 分类标题行（与网页 cat-row 一致，本身是 7 列）
-            ws.append([f"{label} · {len(items)}项", "单位", "每份数量", "份数", "总量", "保存", "删除"])
+            ws.append([f"{label} · {len(items)}项", "份数", "每份数量", "总量", "单位", "保存", "删除"])
             for cell in ws[ws.max_row]:
                 cell.fill = PatternFill("solid", fgColor=color)
                 cell.font = Font(bold=True, color="FFFFFF", size=10)
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
-            # 食材行
+            # 食材行（列序：名称→份数→每份数量→总量→单位→空→空）
             for ing in items:
                 size = ing["per_package"] / max(1, ing["portion_count"])
                 ws.append([
-                    ing["ingredient"], ing["unit"], round(size, 2),
-                    ing["portion_count"], ing["per_package"], "", ""
+                    ing["ingredient"], ing["portion_count"], round(size, 2),
+                    ing["per_package"], ing["unit"], "", ""
                 ])
                 for cell in ws[ws.max_row]:
                     cell.border = border
                     cell.alignment = center_align
                 ws.cell(ws.max_row, 1).alignment = left_align
-                ws.cell(ws.max_row, 5).font = Font(bold=True, color="8E1E1A")
+                ws.cell(ws.max_row, 4).font = Font(bold=True, color="8E1E1A")
         # 工具分类
         if p["tools"]:
-            ws.append([f"🔧 工具 · {len(p['tools'])}项", "单位", "每份数量", "份数", "总量", "保存", "删除"])
+            ws.append([f"🔧 工具 · {len(p['tools'])}项", "份数", "每份数量", "总量", "单位", "保存", "删除"])
             for cell in ws[ws.max_row]:
                 cell.fill = PatternFill("solid", fgColor="4A4A4A")
                 cell.font = Font(bold=True, color="FFFFFF", size=10)
@@ -821,17 +821,17 @@ def export_menu_xlsx():
             ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
             for t in p["tools"]:
                 ws.append([
-                    t["tool"], "个", "", "", t["per_package"], "", ""
+                    t["tool"], 1, t["per_package"], t["per_package"], "个", "", ""
                 ])
                 for cell in ws[ws.max_row]:
                     cell.border = border
                     cell.alignment = center_align
                 ws.cell(ws.max_row, 1).alignment = left_align
-                ws.cell(ws.max_row, 5).font = Font(bold=True, color="4A4A4A")
+                ws.cell(ws.max_row, 4).font = Font(bold=True, color="4A4A4A")
         # 套餐间空行
         ws.append([])
     # 列宽（与网页列对齐）
-    widths = [22, 8, 12, 8, 12, 8, 8]
+    widths = [22, 8, 12, 10, 8, 8, 8]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     # 冻结表头
