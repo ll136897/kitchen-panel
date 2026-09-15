@@ -110,7 +110,6 @@ const FIXED_ORDER = [
   ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
   ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
   ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
-  ['sauce','海带丝'],['sauce','辣椒段'],['sauce','辣白菜'],['sauce','蒜片'],
 ];
 function getFixedIdx(name, cat){
   for(let i=0;i<FIXED_ORDER.length;i++){
@@ -183,8 +182,11 @@ function renderPkg(p, idx){
       return (b.per_package||0)-(a.per_package||0);
     });
     const label = CAT_LABEL[cat] || cat;
+    // 食材包装/客户餐具：去掉每份数量列头（只保留份数+单位）
+    const isSimpleCat = ['packaging','utensil'].includes(cat);
+    const perHead = isSimpleCat ? '<td></td>' : '<td>每份数量</td>';
     bodyHtml += `<tr class="cat-row cat-${cat}">
-      <td>${label} · ${items.length}项</td><td>份数</td><td>每份数量</td><td>单位</td><td>总量</td><td>保存</td><td>删除</td>
+      <td>${label} · ${items.length}项</td><td>份数</td>${perHead}<td>单位</td><td>总量</td><td>保存</td><td>删除</td>
     </tr>`;
     items.forEach(ing=>{
       const size = ing.per_package / Math.max(1, ing.portion_count||1);
@@ -193,7 +195,7 @@ function renderPkg(p, idx){
   }
   if(tools.length){
     bodyHtml += `<tr class="cat-row cat-tool">
-      <td>🔧 工具装备 · ${tools.length}项</td><td>份数</td><td>每份数量</td><td>单位</td><td>总量</td><td>保存</td><td>删除</td>
+      <td>🔧 工具装备 · ${tools.length}项</td><td>份数</td><td></td><td>单位</td><td>总量</td><td>保存</td><td>删除</td>
     </tr>`;
     tools.forEach(t=>{
       bodyHtml += renderToolRow(t, p.id);
@@ -236,6 +238,19 @@ function catEmoji(cat){
 function renderIngRow(ing, size, pid){
   const rowId = `ing_${ing.id}`;
   const c = subcategorize(ing.ing_name, ing.category);
+  // 食材包装/客户餐具：去掉每份数量列，份数为编辑框（每份数量隐含=1，总量=份数）
+  if(['packaging','utensil'].includes(c)){
+    const cnt = Math.round((ing.per_package||0)*100)/100;
+    return `<tr id="${rowId}">
+      <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
+      <td><input type="number" value="${cnt}" step="1" id="cnt_${ing.id}"></td>
+      <td class="muted" style="font-size:11px">—</td>
+      <td>${ing.unit}</td>
+      <td class="total-cell" id="tot_${ing.id}">${cnt}</td>
+      <td><button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button></td>
+      <td><button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button></td>
+    </tr>`;
+  }
   return `<tr id="${rowId}">
     <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
     <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
@@ -249,10 +264,11 @@ function renderIngRow(ing, size, pid){
 
 function renderToolRow(t, pid){
   const rowId = `tool_${t.id}`;
+  // 工具：去掉每份数量列，份数为编辑框（总量=份数）
   return `<tr id="${rowId}">
     <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">${catEmoji('tool')}</span></td>
-    <td>1</td>
     <td><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}"></td>
+    <td class="muted" style="font-size:11px">—</td>
     <td>个</td>
     <td class="total-cell" id="ttot_${t.id}">${t.per_package}</td>
     <td><button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button></td>
@@ -261,6 +277,7 @@ function renderToolRow(t, pid){
 }
 
 // 实时计算总量（列序：名称|份数|每份数量|单位|总量|保存|删除）
+// 注：食材包装/客户餐具无 每份数量(sz_) 输入框，总量=份数×1
 document.addEventListener('input', e=>{
   if(e.target.id && e.target.id.startsWith('sz_')){
     const id = e.target.id.split('_')[1];
@@ -272,7 +289,8 @@ document.addEventListener('input', e=>{
   }
   if(e.target.id && e.target.id.startsWith('cnt_')){
     const id = e.target.id.split('_')[1];
-    const sz = parseFloat(document.getElementById('sz_'+id).value)||0;
+    const szEl = document.getElementById('sz_'+id);
+    const sz = szEl ? (parseFloat(szEl.value)||0) : 1;  // 包装/餐具无 sz_，隐含=1
     const cnt = parseFloat(e.target.value)||1;
     const row = document.getElementById('ing_'+id);
     const unit = row.querySelector('td:nth-child(4)').textContent;
@@ -294,8 +312,11 @@ function expandAll(){ packages.forEach(p=>document.getElementById('pkg_'+p.id)?.
 function collapseAll(){ packages.forEach(p=>document.getElementById('pkg_'+p.id)?.classList.remove('open')); }
 
 function saveIng(pid, ingId){
-  const sz = parseFloat(document.getElementById('sz_'+ingId).value)||0;
-  const cnt = parseFloat(document.getElementById('cnt_'+ingId).value)||1;
+  const cntEl = document.getElementById('cnt_'+ingId);
+  const szEl = document.getElementById('sz_'+ingId);
+  const cnt = parseFloat(cntEl.value)||1;
+  // 食材包装/客户餐具无 sz_ 输入框，每份数量隐含=1
+  const sz = szEl ? (parseFloat(szEl.value)||0) : 1;
   fetch(`/api/packages/${pid}/ingredient/${ingId}`,{
     method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({portion_size:sz, portion_count:cnt})

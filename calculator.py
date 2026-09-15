@@ -593,8 +593,9 @@ PACKAGING_CATEGORY = "packaging"
 # 客户餐具/工具单独拎出
 UTENSIL_CATEGORY = "utensil"
 
-# 小料类：合并 staple主食 / side小菜 / sauce蘸料 / drink饮料水果
-SAUCE_LIKE_CATS = {"staple", "side", "sauce", "drink"}
+# 小料类：合并 staple主食 / sauce蘸料 / drink饮料水果
+# 注：side(小菜) 不再合并到 sauce，独立分类显示
+SAUCE_LIKE_CATS = {"staple", "sauce", "drink"}
 
 
 def _subcategorize_meat(name, current_cat):
@@ -654,10 +655,10 @@ INGREDIENT_FIXED_ORDER = [
     ("vegetable", "杏鲍菇"),
     ("vegetable", "洋葱"),
     # 小菜：海带丝、辣椒段、辣白菜、蒜片
-    ("sauce", "海带丝"),
-    ("sauce", "辣椒段"),
-    ("sauce", "辣白菜"),
-    ("sauce", "蒜片"),
+    ("side", "海带丝"),
+    ("side", "辣椒段"),
+    ("side", "辣白菜"),
+    ("side", "蒜片"),
     # 蘸料：川香料、五香料、酸辣汁
     ("sauce", "川香"),
     ("sauce", "五香"),
