@@ -68,6 +68,20 @@ try:
 except Exception as _e:
     print(f"[migrate] 拆分卡式炉/烤盘跳过: {_e}")
 
+# 迁移：重命名食材"应季水果三样" → "应季水果"（用户指定）
+try:
+    _db = get_db()
+    _cur = _db.cursor()
+    _cur.execute("SELECT id FROM ingredients WHERE name = '应季水果三样'")
+    _row = _cur.fetchone()
+    if _row:
+        _cur.execute("UPDATE ingredients SET name = '应季水果' WHERE id = ?", (_row["id"],))
+        _db.commit()
+        print(f"[migrate] 已重命名食材'应季水果三样'(id={_row['id']})为'应季水果'")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 重命名应季水果三样跳过: {_e}")
+
 
 @app.before_request
 def before():
@@ -698,9 +712,9 @@ def export_menu_xlsx():
     }
     cat_labels = {
         'beef': '牛肉', 'pork': '猪肉', 'chicken': '鸡肉',
-        'vegetable': '蔬菜', 'sauce': '小料',
+        'vegetable': '素菜', 'sauce': '小料',
         'packaging': '食材包装', 'utensil': '客户餐具/工具', 'tableware': '餐具配套',
-        'staple': '主食', 'side': '小菜', 'drink': '饮料',
+        'staple': '主食', 'side': '小菜', 'drink': '赠品',
         'other': '其他', 'tool': '工具'
     }
     wb = Workbook()
@@ -1142,7 +1156,8 @@ def print_menu():
     # 食材按分类渲染（与备餐表顺序一致）
     cat_colors = {
         "beef": "#8e1e1a", "pork": "#c75d3e", "chicken": "#c9962b",
-        "vegetable": "#3a8a3a", "sauce": "#7a5a3a", "other": "#6b4f3a",
+        "vegetable": "#3a8a3a", "side": "#5a8a3a", "sauce": "#7a5a3a",
+        "drink": "#666666", "other": "#6b4f3a",
     }
     ing_rows = ""
     for cat in CATEGORY_ORDER:

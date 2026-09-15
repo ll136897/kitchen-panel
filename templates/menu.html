@@ -52,10 +52,11 @@
   .cat-pork{background:#c75d3e}
   .cat-chicken{background:#c9962b}
   .cat-vegetable{background:#3a8a3a}
+  .cat-side{background:#5a8a3a}
   .cat-sauce{background:#7a5a3a}
   .cat-packaging{background:#d35400}
-  .cat-tableware{background:#8e44ad}
-  .cat-staple,.cat-side,.cat-drink,.cat-other{background:#666}
+  .cat-utensil,.cat-tableware{background:#8e44ad}
+  .cat-staple,.cat-drink,.cat-other{background:#666}
   .cat-tool{background:#4a4a4a}
   .badge-cat{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;color:#fff;margin-left:4px}
 </style>
@@ -92,11 +93,12 @@ let packages = [];
 let allIngredients = [];
 const CAT_LABEL = {
   beef:'🥩牛肉', pork:'🥓猪肉', chicken:'🍗鸡肉',
-  vegetable:'🥬蔬菜', sauce:'🧂小料', packaging:'📦食材包装',
-  tableware:'🍱客户餐具/工具',
-  staple:'主食', side:'小菜', drink:'饮料', other:'其他', tool:'🔧工具'
+  vegetable:'🥬素菜', side:'🥗小菜', sauce:'🧂小料', drink:'🎁赠品',
+  packaging:'📦食材包装',
+  utensil:'🍱客户餐具',
+  staple:'主食', other:'其他', tool:'🔧工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','packaging','tableware','staple','side','drink','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
 
 // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
 // 注：菜单页 side(小菜) 与 sauce(蘸料) 分开显示，故分别定义

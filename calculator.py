@@ -576,13 +576,15 @@ def preview_parse(raw_text):
 
 # 食材分类展示顺序与中文名（用户要求：牛肉、猪肉、鸡肉、蔬菜、小料）
 # 注：packaging/utensil 不在主表展示，单独拎出到包装核对区和餐具核对区
-CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "sauce", "other"]
+CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "side", "sauce", "drink", "other"]
 CATEGORY_LABEL = {
     "beef": "🥩 牛肉",
     "pork": "🥓 猪肉",
     "chicken": "🍗 鸡肉",
-    "vegetable": "🥬 蔬菜",
+    "vegetable": "🥬 素菜",
+    "side": "🥗 小菜",
     "sauce": "🧂 小料",
+    "drink": "🎁 赠品",
     "other": "📦 其他",
 }
 
