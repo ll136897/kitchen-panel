@@ -35,15 +35,16 @@
   }
   .cat-head .check-all-btn:hover{background:rgba(255,255,255,.3)}
 
-  /* 6列网格：勾选 | 名字 | 份数 | 单位 | 总量 | 状态 */
+  /* 7列网格：勾选 | 名字 | 份数 | 克数 | 单位 | 总量 | 状态 */
   .prep-row{
     display:grid;
-    grid-template-columns:32px 1fr 56px 44px 64px 76px;
-    gap:6px;
+    grid-template-columns:28px 1fr 46px 52px 40px 58px 72px;
+    gap:5px;
     align-items:center;
-    padding:11px 12px;
+    padding:10px 10px;
     border-bottom:1px solid rgba(0,0,0,.06);
     transition:background .12s;
+    min-width:0;
   }
   .prep-row:last-child{border-bottom:none}
   .prep-row:hover{filter:brightness(.97)}
@@ -53,24 +54,26 @@
   /* 表头行 */
   .prep-header{
     display:grid;
-    grid-template-columns:32px 1fr 56px 44px 64px 76px;
-    gap:6px;
-    padding:8px 12px;
+    grid-template-columns:28px 1fr 46px 52px 40px 58px 72px;
+    gap:5px;
+    padding:7px 10px;
     font-size:12px;font-weight:700;color:#666;
     background:rgba(0,0,0,.05);
     border-bottom:2px solid rgba(0,0,0,.08);
+    min-width:0;
   }
-  .prep-header > div{text-align:center}
+  .prep-header > div{text-align:center;min-width:0}
   .prep-header > div:nth-child(2){text-align:left}
 
   .prep-row input[type=checkbox]{
     width:22px;height:22px;accent-color:var(--green);cursor:pointer;
   }
-  .pr-name{font-size:16px;font-weight:700;line-height:1.3;word-break:break-all}
+  .pr-name{font-size:15px;font-weight:700;line-height:1.3;word-break:break-all;min-width:0}
   .pr-ord{font-size:14px;color:#555;text-align:center;font-weight:600}
+  .pr-per{font-size:13px;color:#444;text-align:center;font-weight:600}
   .pr-unit{font-size:13px;color:#666;text-align:center;font-weight:600}
-  .pr-total{font-size:17px;color:var(--primary);text-align:right;font-weight:800;font-family:"DIN","Helvetica Neue",sans-serif}
-  .pr-short{font-size:12px;text-align:right;font-weight:700}
+  .pr-total{font-size:16px;color:var(--primary);text-align:right;font-weight:800;font-family:"DIN","Helvetica Neue",sans-serif}
+  .pr-short{font-size:11px;text-align:right;font-weight:700;line-height:1.2}
   .pr-short.ok{color:var(--green)}
   .pr-short:not(.ok){color:var(--red)}
 
@@ -123,22 +126,23 @@
   .cat-tool     .prep-row{background:#ededed}
   .cat-tool     .prep-row:nth-child(odd){background:#e4e4e4}
 
-  /* 手机端：压缩列宽与字号，避免文字竖排/溢出 */
+  /* 手机端：7列压缩，确保不溢出、不需滑动 */
   @media(max-width:600px){
     .prep-row,.prep-header{
-      grid-template-columns:26px 1fr 44px 36px 52px 60px;
-      gap:4px;padding:9px 8px;
+      grid-template-columns:24px 1fr 32px 38px 28px 46px 56px;
+      gap:3px;padding:8px 6px;
     }
-    .prep-header{padding:6px 8px;font-size:11px}
-    .pr-name{font-size:14px;line-height:1.25}
+    .prep-header{padding:5px 6px;font-size:10px}
+    .pr-name{font-size:13px;line-height:1.2}
     .pr-ord{font-size:12px}
-    .pr-unit{font-size:11px}
-    .pr-total{font-size:15px}
-    .pr-short{font-size:11px}
+    .pr-per{font-size:11px}
+    .pr-unit{font-size:10px}
+    .pr-total{font-size:14px}
+    .pr-short{font-size:10px}
     .prep-row input[type=checkbox]{width:20px;height:20px}
-    .cat-head{padding:8px 10px;font-size:15px}
-    .cat-head .cat-count{font-size:11px;padding:1px 7px}
-    .cat-head .check-all-btn{font-size:11px;padding:3px 9px}
+    .cat-head{padding:7px 8px;font-size:14px}
+    .cat-head .cat-count{font-size:10px;padding:1px 6px}
+    .cat-head .check-all-btn{font-size:10px;padding:3px 7px}
   }
 
   .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
@@ -377,19 +381,21 @@ function render(){
   }
 }
 
-// 备餐行：6列（勾选|名字|份数|单位|总量|状态）· 去掉每份数量(克数)
+// 备餐行：7列（勾选|名字|份数|克数|单位|总量|状态）
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
   const unit = it.unit||'';
   const totPkg = round(it.total_portions||it.total_packages||0);
+  const perSize = round(it.portion_size||0);
   const total = round(it.total);
   const shortTxt = it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足';
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
     <div class="pr-name">${it.name}</div>
-    <div class="pr-ord">${totPkg}份</div>
+    <div class="pr-ord">${totPkg}</div>
+    <div class="pr-per">${perSize}</div>
     <div class="pr-unit">${unit}</div>
     <div class="pr-total">${total}</div>
     <div class="pr-short ${shortCls}">${shortTxt}</div>
@@ -402,6 +408,7 @@ function headerRow(){
     <div></div>
     <div>名字</div>
     <div>份数</div>
+    <div>克数</div>
     <div>单位</div>
     <div style="text-align:right">总量</div>
     <div style="text-align:right">状态</div>
@@ -413,10 +420,14 @@ function catBlock(cat, items, type, checkedMap){
   const label = CAT_LABEL[cat] || cat;
   const cls = 'cat-'+cat;
   const typeStr = type==='tool' ? 'tool' : 'ing';
+  // 判断该分类是否全部已勾选
+  const allChecked = items.every(it=>checkedMap[typeStr+'_'+it.id]);
+  const btnText = allChecked ? '❎ 取消全选' : '✅ 全选';
+  const btnAction = allChecked ? 'false' : 'true';
   return `<div class="cat-block ${cls}">
     <div class="cat-head">
       <span>${label} <span class="cat-count">${items.length} 项</span></span>
-      <button class="check-all-btn" onclick="checkCat('${cat}','${typeStr}',true)">✅ 全选</button>
+      <button class="check-all-btn" onclick="checkCat('${cat}','${typeStr}',${btnAction})">${btnText}</button>
     </div>
     ${headerRow()}
     ${items.map(it=>itemRow(it, type, checkedMap)).join('')}
@@ -451,6 +462,27 @@ function renderMerged(){
   const hasAny = html.length>0;
   document.getElementById('prepCard').style.display = hasAny?'':'none';
   document.getElementById('prepList').innerHTML = html;
+  // 更新主"全选"按钮为切换状态
+  updateMainCheckAllBtn(cm, ingCats, pk, tw, tools);
+}
+
+// 更新主"全选/取消全选"按钮文字和动作
+function updateMainCheckAllBtn(cm, ingCats, pk, tw, tools){
+  const btn = document.querySelector('#prepCard .check-all-btn');
+  if(!btn) return;
+  // 收集所有item的checked key
+  const allKeys = [];
+  for(const cat of Object.values(ingCats)){
+    cat.forEach(it=>allKeys.push('ing_'+it.id));
+  }
+  pk.forEach(it=>allKeys.push('ing_'+it.id));
+  tw.forEach(it=>allKeys.push('ing_'+it.id));
+  tools.forEach(it=>allKeys.push('tool_'+it.id));
+  if(!allKeys.length){ btn.style.display='none'; return; }
+  btn.style.display='';
+  const allChecked = allKeys.every(k=>cm[k]);
+  btn.textContent = allChecked ? '❎ 取消全选' : '✅ 全选';
+  btn.onclick = ()=>checkAll('all', !allChecked);
 }
 
 function renderByOrder(){
