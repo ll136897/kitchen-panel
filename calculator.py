@@ -70,7 +70,7 @@ def calc_prep_urgency(order):
         return {"level": "normal", "minutes_to_prep": None, "label": "时间待定"}
 
     now = now_cst()
-    meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0, tzinfo=None)
+    meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0)
     prep_start = meal_dt - datetime.timedelta(hours=prep_lead)
     diff_min = int((prep_start - now).total_seconds() / 60)
 
