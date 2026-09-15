@@ -348,6 +348,15 @@ function parseOrder(){
         vegetable:'#3a8a3a', sauce:'#7a5a3a', other:'#666'
       };
       const catOrder = ['beef','pork','chicken','vegetable','sauce','other'];
+      // 表头：食材 | 份数 | 克数/份 | 总克数 | 库存 | 缺口
+      const ingHeader = `<thead><tr>
+        <th style="min-width:80px">食材</th>
+        <th>份数</th>
+        <th>克数/份</th>
+        <th>总克数</th>
+        <th>库存</th>
+        <th>缺口</th>
+      </tr></thead>`;
       let ingHtml = '';
       for(const cat of catOrder){
         const items = ings[cat];
@@ -356,16 +365,34 @@ function parseOrder(){
         const label = catLabel[cat];
         const rows = items.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
-          return `<tr><td>${i.name}</td><td>${i.need}${i.unit||''}</td><td>${i.stock}${i.unit||''}</td><td class="${sc}">${i.shortage>0?i.shortage:'-'}</td></tr>`;
+          const pkg = i.total_packages||1;
+          const per = i.per_package||0;
+          return `<tr>
+            <td>${i.name}</td>
+            <td style="text-align:center;font-weight:700">${pkg}份</td>
+            <td style="text-align:center">${per}${i.unit||''}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}${i.unit||''}</td>
+            <td>${i.stock}${i.unit||''}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+          </tr>`;
         }).join('');
-        ingHtml += `<tr><td colspan="4" style="background:${color};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${label} · ${items.length}项</td></tr>${rows}`;
+        ingHtml += `<tr><td colspan="6" style="background:${color};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${label} · ${items.length}项</td></tr>${rows}`;
       }
       if(tableware.length){
         const rows = tableware.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
-          return `<tr><td>${i.name}</td><td>${i.need}${i.unit||''}</td><td>${i.stock}${i.unit||''}</td><td class="${sc}">${i.shortage>0?i.shortage:'-'}</td></tr>`;
+          const pkg = i.total_packages||1;
+          const per = i.per_package||0;
+          return `<tr>
+            <td>${i.name}</td>
+            <td style="text-align:center;font-weight:700">${pkg}份</td>
+            <td style="text-align:center">${per}${i.unit||''}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}${i.unit||''}</td>
+            <td>${i.stock}${i.unit||''}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+          </tr>`;
         }).join('');
-        ingHtml += `<tr><td colspan="4" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 餐具配套 · ${tableware.length}项</td></tr>${rows}`;
+        ingHtml += `<tr><td colspan="6" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 餐具配套 · ${tableware.length}项</td></tr>${rows}`;
       }
 
       document.getElementById('parsePreview').classList.add('show');
@@ -383,7 +410,7 @@ function parseOrder(){
           <div class="chips">${pkgs}${extraChips||'<span class="muted" style="font-size:12px">无额外工具</span>'}</div>
           ${data.note?`<div class="note-box"><b>📝 备注：</b>${data.note}</div>`:''}
           ${ingHtml?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🥩 食材需求预览</h4>
-          <table class="tbl"><thead><tr><th>食材</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${ingHtml}</tbody></table>`:''}
+          <table class="tbl">${ingHeader}<tbody>${ingHtml}</tbody></table>`:''}
           ${tools?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具需求预览</h4>
           <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${tools}</tbody></table>`:''}
           <div class="btn-row">

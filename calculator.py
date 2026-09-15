@@ -424,8 +424,10 @@ def preview_parse(raw_text):
                         "stock": r["stock"], "threshold": r["threshold"],
                         "need": 0, "category": r["category"] or "other",
                         "per_package": r["per_package"],
+                        "total_packages": 0,
                     }
                 preview_ing[r["id"]]["need"] += amount
+                preview_ing[r["id"]]["total_packages"] += pk["quantity"]
 
             cur.execute("""
                 SELECT pt.per_package, t.id, t.name, t.stock, t.threshold
