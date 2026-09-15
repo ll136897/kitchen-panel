@@ -46,7 +46,7 @@
   <div class="detail-card">
     <h3 style="margin:0 0 10px">🥩 备餐需求</h3>
     <table class="req-tbl" id="reqTable">
-      <thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>总克数</th><th>库存</th><th>缺口</th><th>单位</th></tr></thead>
+      <thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>总克数</th><th>库存</th><th>缺口</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -131,7 +131,7 @@ function loadDetail(){
         const ps = i.portion_size||i.per_package||0;
         const tp = i.total_portions||pc*(i.order_qty||1);
         const short = (i.shortage||0)>0 ? `<span style="color:#e74c3c">缺${i.shortage}</span>` : '<span style="color:#27ae60">✓</span>';
-        html += `<tr><td style="text-align:left">${i.name}</td><td>${tp}份</td><td>${ps}</td><td style="font-weight:700">${i.need||0}</td><td>${i.stock||0}</td><td>${short}</td><td>${i.unit||''}</td></tr>`;
+        html += `<tr><td style="text-align:left">${i.name}</td><td>${tp}份</td><td>${ps}</td><td>${i.unit||''}</td><td style="font-weight:700">${i.need||0}</td><td>${i.stock||0}</td><td>${short}</td></tr>`;
       }
     }
     document.querySelector('#reqTable tbody').innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">无备餐需求</td></tr>';

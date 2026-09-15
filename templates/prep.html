@@ -372,7 +372,7 @@ function render(){
   }
 }
 
-// 备餐行：6列（份数/克数/总份数/总克数）+ 勾选 + 名字 + 单位
+// 备餐行：6列（份数/克数/总份数/单位/总克数）+ 勾选 + 名字
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
@@ -387,13 +387,13 @@ function itemRow(it, type, checkedMap){
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
     <div class="pr-name">${it.name}</div>
     <div class="pr-ord">${ordCnt}单</div>
-    <div class="pr-per">${perPkg}${unit}/份</div>
+    <div class="pr-per">${perPkg}</div>
     <div class="pr-totpkg">${totPkg}份</div>
+    <div class="pr-unit">${unit}</div>
     <div>
       <div class="pr-total">${total}</div>
       <div class="pr-short ${shortCls}">${shortTxt}</div>
     </div>
-    <div class="pr-unit">${unit}</div>
   </div>`;
 }
 
@@ -405,8 +405,8 @@ function headerRow(){
     <div>份数</div>
     <div>克数</div>
     <div>总份数</div>
-    <div style="text-align:right">总克数</div>
     <div>单位</div>
+    <div style="text-align:right">总克数</div>
   </div>`;
 }
 

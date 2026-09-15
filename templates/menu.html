@@ -76,7 +76,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="title">📜 菜单原数据</div>
-      <div class="sub">查看/修改套餐食材配量 · 份数 × 每份数量 = 总量</div>
+      <div class="sub">查看/修改套餐食材配量 · 份数 × 每份数量(单位) = 总量</div>
     </div>
     <div class="toolbar">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>
@@ -170,7 +170,7 @@ function renderPkg(p, idx){
   ['vegetable','side'].forEach(c => vegCount += (byCat[c]||[]).length);
 
   let bodyHtml = '<table class="ing-tbl"><thead><tr>'+
-    '<th>名称</th><th>份数</th><th>每份数量</th><th>总量</th><th>单位</th><th>保存</th><th>删除</th>'+
+    '<th>名称</th><th>份数</th><th>每份数量</th><th>单位</th><th>总量</th><th>保存</th><th>删除</th>'+
     '</tr></thead><tbody>';
   for(const cat of CAT_ORDER){
     const items = byCat[cat];
@@ -184,7 +184,7 @@ function renderPkg(p, idx){
     });
     const label = CAT_LABEL[cat] || cat;
     bodyHtml += `<tr class="cat-row cat-${cat}">
-      <td>${label} · ${items.length}项</td><td>份数</td><td>每份数量</td><td>总量</td><td>单位</td><td>保存</td><td>删除</td>
+      <td>${label} · ${items.length}项</td><td>份数</td><td>每份数量</td><td>单位</td><td>总量</td><td>保存</td><td>删除</td>
     </tr>`;
     items.forEach(ing=>{
       const size = ing.per_package / Math.max(1, ing.portion_count||1);
@@ -193,7 +193,7 @@ function renderPkg(p, idx){
   }
   if(tools.length){
     bodyHtml += `<tr class="cat-row cat-tool">
-      <td>🔧 工具装备 · ${tools.length}项</td><td>份数</td><td>每份数量</td><td>总量</td><td>单位</td><td>保存</td><td>删除</td>
+      <td>🔧 工具装备 · ${tools.length}项</td><td>份数</td><td>每份数量</td><td>单位</td><td>总量</td><td>保存</td><td>删除</td>
     </tr>`;
     tools.forEach(t=>{
       bodyHtml += renderToolRow(t, p.id);
@@ -240,8 +240,8 @@ function renderIngRow(ing, size, pid){
     <td class="name-cell">${ing.ing_name}<span class="badge-cat cat-${c}">${catEmoji(c)}</span></td>
     <td><input type="number" value="${ing.portion_count||1}" step="1" id="cnt_${ing.id}"></td>
     <td><input type="number" value="${Math.round(size*100)/100}" step="0.1" id="sz_${ing.id}"></td>
-    <td class="total-cell" id="tot_${ing.id}">${ing.per_package}</td>
     <td>${ing.unit}</td>
+    <td class="total-cell" id="tot_${ing.id}">${ing.per_package}</td>
     <td><button class="btn-mini save" onclick="saveIng(${pid},${ing.id})">💾</button></td>
     <td><button class="btn-mini del" onclick="delIng(${pid},${ing.id})">🗑️</button></td>
   </tr>`;
@@ -253,21 +253,21 @@ function renderToolRow(t, pid){
     <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">${catEmoji('tool')}</span></td>
     <td>1</td>
     <td><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}"></td>
-    <td class="total-cell" id="ttot_${t.id}">${t.per_package}</td>
     <td>个</td>
+    <td class="total-cell" id="ttot_${t.id}">${t.per_package}</td>
     <td><button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button></td>
     <td><button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button></td>
   </tr>`;
 }
 
-// 实时计算总量（列序：名称|份数|每份数量|总量|单位|保存|删除）
+// 实时计算总量（列序：名称|份数|每份数量|单位|总量|保存|删除）
 document.addEventListener('input', e=>{
   if(e.target.id && e.target.id.startsWith('sz_')){
     const id = e.target.id.split('_')[1];
     const sz = parseFloat(e.target.value)||0;
     const cnt = parseFloat(document.getElementById('cnt_'+id).value)||1;
     const row = document.getElementById('ing_'+id);
-    const unit = row.querySelector('td:nth-child(5)').textContent;
+    const unit = row.querySelector('td:nth-child(4)').textContent;
     document.getElementById('tot_'+id).textContent = Math.round(sz*cnt*100)/100 + unit;
   }
   if(e.target.id && e.target.id.startsWith('cnt_')){
@@ -275,7 +275,7 @@ document.addEventListener('input', e=>{
     const sz = parseFloat(document.getElementById('sz_'+id).value)||0;
     const cnt = parseFloat(e.target.value)||1;
     const row = document.getElementById('ing_'+id);
-    const unit = row.querySelector('td:nth-child(5)').textContent;
+    const unit = row.querySelector('td:nth-child(4)').textContent;
     document.getElementById('tot_'+id).textContent = Math.round(sz*cnt*100)/100 + unit;
   }
   if(e.target.id && e.target.id.startsWith('tqty_')){
@@ -302,7 +302,7 @@ function saveIng(pid, ingId){
   }).then(r=>r.json()).then(res=>{
     if(res.ok){
       const row = document.getElementById('ing_'+ingId);
-      const unit = row.querySelector('td:nth-child(5)').textContent;
+      const unit = row.querySelector('td:nth-child(4)').textContent;
       document.getElementById('tot_'+ingId).textContent = Math.round(res.per_package*100)/100 + unit;
       row.style.background = '#e8f5e9';
       setTimeout(()=>row.style.background='', 800);
