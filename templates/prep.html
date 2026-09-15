@@ -215,7 +215,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <input type="date" id="datePick" class="date-picker">
-      <button class="btn btn-primary btn-sm" onclick="loadPrep()">🔄 刷新</button>
+      <button class="btn btn-primary btn-sm" onclick="loadPrepDates(false);loadPrep()">🔄 刷新</button>
       <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印</button>
     </div>
   </div>
@@ -288,11 +288,24 @@ function switchMode(mode){
   render();
 }
 
-function loadPrepDates(){
+function loadPrepDates(autoSwitch){
   fetch('/api/prep/dates').then(r=>r.json()).then(res=>{
     if(!res.ok) return;
     prepDates = res.dates || [];
     renderDateChips(res.today);
+    // 首次进入：自动选中第一个有订单的日期（避免默认今天0单看不到数据）
+    if(autoSwitch !== false && prepDates.length){
+      // 优先选今天/未来最近的，否则选最后一个过去日期
+      const todayStr = res.today;
+      let target = prepDates.find(d=>d.booking_date===todayStr && d.cnt>0)
+                || prepDates.find(d=>!d.is_past && d.cnt>0)
+                || prepDates.find(d=>d.is_today)
+                || prepDates[0];
+      if(target && target.cnt>0){
+        document.getElementById('datePick').value = target.booking_date;
+        loadPrep();
+      }
+    }
   });
 }
 
@@ -598,9 +611,8 @@ function checkAllOrder(oid, checked){
 
 function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
 
-loadPrepDates();
-loadPrep();
-setInterval(()=>{ if(currentMode==='merged') loadPrep(); }, 60000);
+loadPrepDates(true);   // 首次加载，自动切到有订单的日期
+setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged') loadPrep(); }, 60000);
 </script>
 </body>
 </html>
