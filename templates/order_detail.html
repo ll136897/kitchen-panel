@@ -86,7 +86,7 @@ function loadDetail(){
       <div class="cell" style="grid-column:1/-1"><div class="k">📝 备注</div><div class="v">${o.note||'-'}</div></div>
     `;
 
-    // 备餐需求（按分类分组，小肠排末位）
+    // 备餐需求（按分类分组，固定排序）
     const reqs = o.requirements||{};
     const ings = reqs.ingredients||[];
     const catOrder = ['beef','pork','chicken','vegetable','sauce','other'];
@@ -96,19 +96,33 @@ function loadDetail(){
     const byCat = {};
     ings.forEach(i=>{
       const c = i.category||'other';
-      byCat.setdefault = byCat.setdefault||{};
       byCat[c] = byCat[c]||[];
       byCat[c].push(i);
     });
+    // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
+    const FIXED_ORDER = [
+      ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
+      ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
+      ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],['chicken','掌中宝'],['chicken','鸡脚筋'],
+      ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
+      ['sauce','海带丝'],['sauce','辣椒段'],['sauce','辣白菜'],['sauce','蒜片'],
+      ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+    ];
+    function getFixedIdx(name, cat){
+      for(let i=0;i<FIXED_ORDER.length;i++){
+        if(FIXED_ORDER[i][0]===cat && (name||'').includes(FIXED_ORDER[i][1])) return i;
+      }
+      return 999;
+    }
     let html = '';
     for(const cat of catOrder){
       let items = byCat[cat]||[];
       if(!items.length) continue;
-      // 小肠排末位
+      // 固定顺序排序，不在列表的按用量降序
       items.sort((a,b)=>{
-        const sa = (a.name||'').includes('小肠')?1:0;
-        const sb = (b.name||'').includes('小肠')?1:0;
-        if(sa!==sb) return sa-sb;
+        const ia = getFixedIdx(a.name, cat);
+        const ib = getFixedIdx(b.name, cat);
+        if(ia!==ib) return ia-ib;
         return (b.need||0)-(a.need||0);
       });
       html += `<tr><td colspan="6" class="cat-row" style="background:${catColor[cat]}">${catLabel[cat]||cat}</td></tr>`;

@@ -233,6 +233,21 @@ const CAT_LABEL = {
   tableware:'🍱 客户餐具/工具', packaging:'📦 食材包装', tool:'🔧 工具装备'
 };
 const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','other'];
+// 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
+const FIXED_ORDER = [
+  ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
+  ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
+  ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],['chicken','掌中宝'],['chicken','鸡脚筋'],
+  ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
+  ['sauce','海带丝'],['sauce','辣椒段'],['sauce','辣白菜'],['sauce','蒜片'],
+  ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+];
+function getFixedIdx(name, cat){
+  for(let i=0;i<FIXED_ORDER.length;i++){
+    if(FIXED_ORDER[i][0]===cat && (name||'').includes(FIXED_ORDER[i][1])) return i;
+  }
+  return 999;
+}
 let prepData = null;
 let currentMode = 'merged';
 let prepDates = [];
@@ -480,6 +495,13 @@ function renderByOrder(){
         }
         for(const cat of CAT_ORDER){
           if(!byCat[cat]) continue;
+          // 固定顺序排序，不在列表的按用量降序
+          byCat[cat].sort((a,b)=>{
+            const ia = getFixedIdx(a.name, cat);
+            const ib = getFixedIdx(b.name, cat);
+            if(ia!==ib) return ia-ib;
+            return (b.need||0)-(a.need||0);
+          });
           html += catBlock(cat, byCat[cat].map(it=>({
             id:it.id, name:it.name, unit:it.unit, per_package:it.per_package,
             total_packages:it.order_qty, order_count:1, total:it.need,
@@ -501,14 +523,18 @@ function renderByOrder(){
 
 // 简单子分类（按订单视图用，按名字细分）
 function subcatFor(name, cat){
+  const n = name || '';
+  // 馒头归素菜（用户指定）
+  if(n.includes('馒头')) return 'vegetable';
   if(cat !== 'meat') {
     if(['staple','side','sauce','drink'].includes(cat)) return 'sauce';
     return cat;
   }
-  const n = name || '';
+  // 小肠优先归牛肉（爆汁烤小肠 = 牛肠）
+  if(n.includes('小肠')) return 'beef';
   if(n.includes('牛')) return 'beef';
   if(n.includes('鸡') || n.includes('掌中宝') || n.includes('脚筋') || n.includes('郡肝')) return 'chicken';
-  if(n.includes('猪') || n.includes('五花肉') || n.includes('松板肉') || n.includes('梅花肉') || n.includes('小肠') || n.includes('肠')) return 'pork';
+  if(n.includes('猪') || n.includes('五花肉') || n.includes('松板肉') || n.includes('梅花肉') || n.includes('肠')) return 'pork';
   return 'other';
 }
 

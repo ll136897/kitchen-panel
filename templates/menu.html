@@ -98,12 +98,35 @@ const CAT_LABEL = {
 };
 const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','packaging','tableware','staple','side','drink','other','tool'];
 
+// 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
+// 注：菜单页 side(小菜) 与 sauce(蘸料) 分开显示，故分别定义
+const FIXED_ORDER = [
+  ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
+  ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
+  ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],['chicken','掌中宝'],['chicken','鸡脚筋'],
+  ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
+  ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
+  ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+  ['sauce','海带丝'],['sauce','辣椒段'],['sauce','辣白菜'],['sauce','蒜片'],
+];
+function getFixedIdx(name, cat){
+  for(let i=0;i<FIXED_ORDER.length;i++){
+    if(FIXED_ORDER[i][0]===cat && (name||'').includes(FIXED_ORDER[i][1])) return i;
+  }
+  return 999;
+}
+
 // 细分 meat → beef/pork/chicken（与 calculator 一致）
 function subcategorize(name, cat){
+  const n = name || '';
+  // 馒头归素菜（用户指定）
+  if(/馒头/.test(n)) return 'vegetable';
   if(cat !== 'meat') return cat;
-  if(/牛|肥牛|牛肋|牛骰|安格斯/.test(name)) return 'beef';
-  if(/猪|五花|香猪|松板|梅花|肠/.test(name)) return 'pork';
-  if(/鸡|鸡翅|鸡腿|郡肝|掌中宝/.test(name)) return 'chicken';
+  // 小肠优先归牛肉（爆汁烤小肠 = 牛肠）
+  if(/小肠/.test(n)) return 'beef';
+  if(/牛|肥牛|牛肋|牛骰|安格斯/.test(n)) return 'beef';
+  if(/鸡|鸡翅|鸡腿|郡肝|掌中宝|脚筋/.test(n)) return 'chicken';
+  if(/猪|五花|香猪|松板|梅花|风味肠|肠/.test(n)) return 'pork';
   return 'beef';
 }
 
@@ -145,6 +168,13 @@ function renderPkg(p, idx){
   for(const cat of CAT_ORDER){
     const items = byCat[cat];
     if(!items || !items.length) continue;
+    // 固定顺序排序，不在列表的按每份用量降序
+    items.sort((a,b)=>{
+      const ia = getFixedIdx(a.ing_name, cat);
+      const ib = getFixedIdx(b.ing_name, cat);
+      if(ia!==ib) return ia-ib;
+      return (b.per_package||0)-(a.per_package||0);
+    });
     const label = CAT_LABEL[cat] || cat;
     bodyHtml += `<tr class="cat-row"><td colspan="6" class="cat-${cat}">${label} · ${items.length}项</td></tr>`;
     items.forEach(ing=>{

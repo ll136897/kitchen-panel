@@ -512,7 +512,7 @@ def preview_parse(raw_text):
     for cat in CATEGORY_ORDER:
         items = [v for v in preview_ing.values() if v["category"] == cat]
         if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["need"]))
+            ing_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["need"]))
     packaging_list = [v for v in preview_ing.values() if v["category"] == PACKAGING_CATEGORY]
     packaging_list = sorted(packaging_list, key=lambda x: -x["need"])
     utensil_list = [v for v in preview_ing.values() if v["category"] == UTENSIL_CATEGORY]
@@ -567,7 +567,7 @@ def preview_parse(raw_text):
                 "total_packages": ei["qty"],
                 "category": cat,
             })
-            ing_by_cat[cat].sort(key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["need"]))
+            ing_by_cat[cat].sort(key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["need"]))
     parsed["preview_extra_ingredients"] = extra_ings_matched
     return parsed
 
@@ -597,10 +597,14 @@ def _subcategorize_meat(name, current_cat):
     """把 meat 类按食材名细分成 beef / pork / chicken。
     韩式风味肠归 pork（市售多为猪肉肠）。
     爆汁烤小肠归 beef（实际是牛肠）。
+    奶香小馒头归 vegetable（用户指定素菜类）。
     """
+    n = name or ""
+    # 馒头归素菜（用户指定）
+    if "馒头" in n:
+        return "vegetable"
     if current_cat != "meat":
         return current_cat
-    n = name or ""
     # 小肠优先归牛肉（爆汁烤小肠 = 牛肠）
     if "小肠" in n:
         return "beef"
@@ -613,15 +617,57 @@ def _subcategorize_meat(name, current_cat):
     return "other"
 
 
-# 食材排序优先级（数字越大越靠后）
-# 小肠在牛肉类里排最末（用户要求）
-def _ing_sort_key(name, category):
-    """返回排序 key：(category_order_index, sub_priority)
-    sub_priority: 0=正常 1=小肠(放末位)
-    """
-    cat_idx = CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else len(CATEGORY_ORDER)
-    sub = 1 if "小肠" in (name or "") else 0
-    return (cat_idx, sub)
+# 食材固定排序顺序（用户指定，所有菜单/备餐/订单详情统一）
+# 每个条目：(分类, 关键词)，按列表顺序赋索引 0,1,2,...
+# 不在列表里的食材排在最后（索引 999），按用量降序
+INGREDIENT_FIXED_ORDER = [
+    # 牛肉：肥牛、拌牛肉、牛肋条、牛骰子、小肠
+    ("beef", "肥牛"),
+    ("beef", "拌牛肉"),
+    ("beef", "牛肋条"),
+    ("beef", "牛骰子"),
+    ("beef", "小肠"),
+    # 猪肉：五花肉、沙葱小香猪、松板肉、风味肠、梅花肉
+    ("pork", "五花肉"),
+    ("pork", "小香猪"),
+    ("pork", "松板肉"),
+    ("pork", "风味肠"),
+    ("pork", "梅花肉"),
+    # 鸡肉：鸡尖、郡肝、鸡腿肉、鸡翅根、掌中宝、鸡脚筋
+    ("chicken", "鸡尖"),
+    ("chicken", "郡肝"),
+    ("chicken", "鸡腿肉"),
+    ("chicken", "鸡翅根"),
+    ("chicken", "掌中宝"),
+    ("chicken", "鸡脚筋"),
+    # 素菜：生菜、豆腐、西葫芦、土豆、奶香馒头、韭菜、杏鲍菇、洋葱
+    ("vegetable", "生菜"),
+    ("vegetable", "豆腐"),
+    ("vegetable", "西葫芦"),
+    ("vegetable", "土豆"),
+    ("vegetable", "馒头"),
+    ("vegetable", "韭菜"),
+    ("vegetable", "杏鲍菇"),
+    ("vegetable", "洋葱"),
+    # 小菜：海带丝、辣椒段、辣白菜、蒜片
+    ("sauce", "海带丝"),
+    ("sauce", "辣椒段"),
+    ("sauce", "辣白菜"),
+    ("sauce", "蒜片"),
+    # 蘸料：川香料、五香料、酸辣汁
+    ("sauce", "川香"),
+    ("sauce", "五香"),
+    ("sauce", "酸辣"),
+]
+
+
+def _get_fixed_sort_index(name, category):
+    """返回固定排序索引（0-based）。不在列表里的返回 999（排最后）。"""
+    n = name or ""
+    for idx, (cat, kw) in enumerate(INGREDIENT_FIXED_ORDER):
+        if cat == category and kw in n:
+            return idx
+    return 999
 
 
 def calc_merged_prep(order_ids):
@@ -765,7 +811,7 @@ def calc_merged_prep(order_ids):
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_merge.values() if v["category"] == cat]
         if items:
-            ingredients_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["total"]))
+            ingredients_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["total"]))
 
     # 食材包装单独拎出（不在主表显示，给包装核对区）
     packaging = [v for v in ing_merge.values() if v["category"] == PACKAGING_CATEGORY]

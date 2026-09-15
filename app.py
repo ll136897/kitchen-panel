@@ -1042,7 +1042,7 @@ def print_menu():
 
     # 食材按分类分组，与备餐表顺序一致
     from calculator import CATEGORY_ORDER, CATEGORY_LABEL, PACKAGING_CATEGORY, \
-        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _ing_sort_key
+        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _get_fixed_sort_index
     db2 = get_db()
     cur2 = db2.cursor()
     cur2.execute("SELECT id, category, name FROM ingredients")
@@ -1066,7 +1066,7 @@ def print_menu():
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_sum.values() if v.get("category") == cat]
         if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: (_ing_sort_key(x["name"], cat)[1], -x["total"]))
+            ing_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["total"]))
     packaging_list = [v for v in ing_sum.values() if v.get("category") == PACKAGING_CATEGORY]
     packaging_list = sorted(packaging_list, key=lambda x: -x["total"])
     tableware_list = [v for v in ing_sum.values() if v.get("category") == UTENSIL_CATEGORY]
