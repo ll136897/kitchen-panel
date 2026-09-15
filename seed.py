@@ -13,7 +13,8 @@ def seed_data():
 
         # ========== 所有食材（含餐具配套里的一次性消耗品，含成本） ==========
         # 格式：(name, unit, 初始库存, 预警阈值, 单位成本, category)
-        # category: meat荤菜 / vegetable素菜 / staple主食 / side小菜 / sauce蘸料 / drink饮料 / tableware餐具
+        # category: meat荤菜 / vegetable素菜 / staple主食 / side小菜 / sauce蘸料 / drink饮料
+        #          packaging食材包装 / utensil客户餐具工具
         ALL_INGREDIENTS = [
             # 荤菜
             ("南美安格斯肥牛", "g", 5000, 2000, 0.075, "meat"),
@@ -57,24 +58,24 @@ def seed_data():
             ("应季水果三样", "g", 3000, 800, 0.010, "drink"),
             ("1.25L可乐雪碧任选", "瓶", 50, 10, 4.0, "drink"),
             # 餐具配套（都是消耗品，算库存）
-            ("烤肉盒子", "个", 200, 50, 3.30, "tableware"),
-            ("绑带", "个", 200, 50, 0.20, "tableware"),
-            ("金色打包盒", "个", 500, 100, 0.38, "tableware"),
-            ("圆形透明打包盒", "个", 500, 100, 0.24, "tableware"),
-            ("生菜水果打包盒", "个", 200, 50, 0.50, "tableware"),
-            ("一次性油壶", "个", 100, 20, 1.86, "tableware"),
-            ("三格底料盒", "个", 300, 80, 0.29, "tableware"),
-            ("托盘", "个", 100, 20, 0.18, "tableware"),
-            ("纸杯", "个", 500, 100, 0.17, "tableware"),
-            ("筷子", "双", 500, 100, 0.04, "tableware"),
-            ("勺子", "个", 300, 80, 0.20, "tableware"),
-            ("围裙", "个", 200, 50, 0.06, "tableware"),
-            ("纸巾", "包", 100, 20, 1.33, "tableware"),
-            ("一次性桌布", "张", 100, 20, 1.58, "tableware"),
-            ("桌布透明罩", "个", 100, 20, 0.10, "tableware"),
-            ("餐具打包袋", "个", 100, 20, 0.22, "tableware"),
-            ("杂物保温袋", "个", 50, 10, 1.60, "tableware"),
-            ("垃圾袋", "个", 500, 100, 0.10, "tableware"),
+            ("烤肉盒子", "个", 200, 50, 3.30, "packaging"),
+            ("绑带", "个", 200, 50, 0.20, "packaging"),
+            ("金色打包盒", "个", 500, 100, 0.38, "packaging"),
+            ("圆形透明打包盒", "个", 500, 100, 0.24, "packaging"),
+            ("生菜水果打包盒", "个", 200, 50, 0.50, "packaging"),
+            ("一次性油壶", "个", 100, 20, 1.86, "utensil"),
+            ("三格底料盒", "个", 300, 80, 0.29, "utensil"),
+            ("托盘", "个", 100, 20, 0.18, "utensil"),
+            ("纸杯", "个", 500, 100, 0.17, "utensil"),
+            ("筷子", "双", 500, 100, 0.04, "utensil"),
+            ("勺子", "个", 300, 80, 0.20, "utensil"),
+            ("围裙", "个", 200, 50, 0.06, "utensil"),
+            ("纸巾", "包", 100, 20, 1.33, "utensil"),
+            ("一次性桌布", "张", 100, 20, 1.58, "utensil"),
+            ("桌布透明罩", "个", 100, 20, 0.10, "utensil"),
+            ("餐具打包袋", "个", 100, 20, 0.22, "utensil"),
+            ("杂物保温袋", "个", 50, 10, 1.60, "utensil"),
+            ("垃圾袋", "个", 500, 100, 0.10, "utensil"),
         ]
         for name, unit, stock, thr, cost, cat in ALL_INGREDIENTS:
             db.execute("INSERT INTO ingredients (name,unit,stock,threshold,cost,category) VALUES (?,?,?,?,?,?)",

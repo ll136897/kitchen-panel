@@ -99,7 +99,11 @@
   .cat-other    .prep-row{background:#eee}
   .cat-other    .prep-row:nth-child(odd){background:#e6e6e6}
 
-  .cat-tableware .cat-head{background:#8e44ad}             /* 餐具·紫 */
+  .cat-packaging .cat-head{background:#d35400}             /* 食材包装·橙棕 */
+  .cat-packaging .prep-row{background:#fbeee5}
+  .cat-packaging .prep-row:nth-child(odd){background:#f5e0d2}
+
+  .cat-tableware .cat-head{background:#8e44ad}             /* 客户餐具/工具·紫 */
   .cat-tableware .prep-row{background:#f1e9f4}
   .cat-tableware .prep-row:nth-child(odd){background:#ebdff0}
 
@@ -190,10 +194,19 @@
     <div id="ingList"></div>
   </div>
 
-  <!-- 餐具配套核对 -->
+  <!-- 食材包装核对 -->
+  <div class="card" id="pkCard" style="display:none">
+    <div class="sec-toolbar">
+      <h3 style="margin:0"><span class="dot" style="background:#d35400"></span>📦 食材包装核对</h3>
+      <button class="check-all-btn" onclick="checkAll('pk',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
+    </div>
+    <div id="pkList"></div>
+  </div>
+
+  <!-- 客户餐具/工具核对 -->
   <div class="card" id="twCard" style="display:none">
     <div class="sec-toolbar">
-      <h3 style="margin:0"><span class="dot" style="background:#8e44ad"></span>🍱 餐具配套核对</h3>
+      <h3 style="margin:0"><span class="dot" style="background:#8e44ad"></span>🍱 客户餐具/工具分拣</h3>
       <button class="check-all-btn" onclick="checkAll('tw',true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div>
     <div id="twList"></div>
@@ -217,7 +230,7 @@
 const CAT_LABEL = {
   beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
   vegetable:'🥬 蔬菜', sauce:'🧂 小料', other:'📦 其他',
-  tableware:'🍱 餐具配套', tool:'🔧 工具装备'
+  tableware:'🍱 客户餐具/工具', packaging:'📦 食材包装', tool:'🔧 工具装备'
 };
 const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','other'];
 let prepData = null;
@@ -422,7 +435,13 @@ function renderMerged(){
     }
     document.getElementById('ingList').innerHTML = html;
   }
-  // 餐具
+  // 食材包装
+  const pk = d.packaging || [];
+  document.getElementById('pkCard').style.display = pk.length?'':'none';
+  if(pk.length){
+    document.getElementById('pkList').innerHTML = catBlock('packaging', pk, 'ing', cm);
+  }
+  // 客户餐具/工具
   const tw = d.tableware || [];
   document.getElementById('twCard').style.display = tw.length?'':'none';
   if(tw.length){
@@ -484,7 +503,6 @@ function renderByOrder(){
 function subcatFor(name, cat){
   if(cat !== 'meat') {
     if(['staple','side','sauce','drink'].includes(cat)) return 'sauce';
-    if(cat === 'tableware') return 'tableware';
     return cat;
   }
   const n = name || '';
@@ -501,6 +519,10 @@ function toggleItem(type, iid, checked){
     for(const cat of Object.values(d.ingredients||{})){
       const it = cat.find(x=>x.id===iid);
       if(it){ order_ids = it.order_ids; break; }
+    }
+    if(!order_ids.length){
+      const it = (d.packaging||[]).find(x=>x.id===iid);
+      if(it) order_ids = it.order_ids;
     }
     if(!order_ids.length){
       const it = (d.tableware||[]).find(x=>x.id===iid);
@@ -521,6 +543,8 @@ function checkCat(cat, type, checked){
   if(type==='ing'){
     if(cat==='tableware'){
       items = (d.tableware||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
+    } else if(cat==='packaging'){
+      items = (d.packaging||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
     } else {
       items = (d.ingredients[cat]||[]).map(it=>({type:'ingredient', id:it.id, order_ids:it.order_ids}));
     }
@@ -539,6 +563,8 @@ function checkAll(section, checked){
     for(const cat of Object.values(d.ingredients||{})){
       cat.forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
     }
+  } else if(section==='pk'){
+    (d.packaging||[]).forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
   } else if(section==='tw'){
     (d.tableware||[]).forEach(it=>ids.push({type:'ingredient', id:it.id, order_ids:it.order_ids}));
   } else {

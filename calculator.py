@@ -499,19 +499,23 @@ def preview_parse(raw_text):
         v["warning"] = v["stock"] <= v["threshold"]
         tool_list.append(v)
 
-    # 食材按分类分组（主表顺序），餐具单独拎出
+    # 食材按分类分组（主表顺序），包装/餐具单独拎出
     ing_by_cat = {}
-    tableware_list = []
+    packaging_list = []
+    utensil_list = []
     for cat in CATEGORY_ORDER:
         items = [v for v in preview_ing.values() if v["category"] == cat]
         if items:
             ing_by_cat[cat] = sorted(items, key=lambda x: -x["need"])
-    tableware_list = [v for v in preview_ing.values() if v["category"] == TABLEWARE_CATEGORY]
-    tableware_list = sorted(tableware_list, key=lambda x: -x["need"])
+    packaging_list = [v for v in preview_ing.values() if v["category"] == PACKAGING_CATEGORY]
+    packaging_list = sorted(packaging_list, key=lambda x: -x["need"])
+    utensil_list = [v for v in preview_ing.values() if v["category"] == UTENSIL_CATEGORY]
+    utensil_list = sorted(utensil_list, key=lambda x: -x["need"])
 
     parsed["matched_packages"] = matched
     parsed["preview_ingredients"] = ing_by_cat  # dict: {category: [items]}
-    parsed["preview_tableware"] = tableware_list
+    parsed["preview_packaging"] = packaging_list
+    parsed["preview_tableware"] = utensil_list
     parsed["preview_tools"] = sorted(tool_list, key=lambda x: -x["need"])
 
     # 备注里的额外加菜（单点食材）
@@ -524,9 +528,8 @@ def preview_parse(raw_text):
         cat = _subcategorize_meat(ei.get("matched_name", ""), ei.get("category", "other"))
         if cat in SAUCE_LIKE_CATS:
             cat = "sauce"
-        if cat == TABLEWARE_CATEGORY:
-            # 餐具类加到 tableware_list
-            tableware_list.append({
+        if cat == PACKAGING_CATEGORY:
+            packaging_list.append({
                 "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
                 "stock": ei["stock"], "threshold": ei["threshold"],
                 "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
@@ -535,7 +538,18 @@ def preview_parse(raw_text):
                 "total_packages": ei["qty"],
                 "category": cat,
             })
-            tableware_list.sort(key=lambda x: -x["need"])
+            packaging_list.sort(key=lambda x: -x["need"])
+        elif cat == UTENSIL_CATEGORY:
+            utensil_list.append({
+                "id": ei["matched_id"], "name": ei["matched_name"], "unit": ei["unit"],
+                "stock": ei["stock"], "threshold": ei["threshold"],
+                "need": ei["total"], "shortage": round(max(0, ei["total"] - ei["stock"]), 2),
+                "warning": ei["stock"] <= ei["threshold"],
+                "per_package": ei["per_package"],
+                "total_packages": ei["qty"],
+                "category": cat,
+            })
+            utensil_list.sort(key=lambda x: -x["need"])
         else:
             ing_by_cat.setdefault(cat, [])
             ing_by_cat[cat].append({
@@ -553,7 +567,7 @@ def preview_parse(raw_text):
 
 
 # 食材分类展示顺序与中文名（用户要求：牛肉、猪肉、鸡肉、蔬菜、小料）
-# 注：tableware 不在主表展示，单独拎出到餐具核对区
+# 注：packaging/utensil 不在主表展示，单独拎出到包装核对区和餐具核对区
 CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "sauce", "other"]
 CATEGORY_LABEL = {
     "beef": "🥩 牛肉",
@@ -564,8 +578,10 @@ CATEGORY_LABEL = {
     "other": "📦 其他",
 }
 
-# 餐具单独拎出
-TABLEWARE_CATEGORY = "tableware"
+# 食材包装单独拎出
+PACKAGING_CATEGORY = "packaging"
+# 客户餐具/工具单独拎出
+UTENSIL_CATEGORY = "utensil"
 
 # 小料类：合并 staple主食 / side小菜 / sauce蘸料 / drink饮料水果
 SAUCE_LIKE_CATS = {"staple", "side", "sauce", "drink"}
@@ -729,9 +745,12 @@ def calc_merged_prep(order_ids):
         if items:
             ingredients_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
 
-    # 餐具单独拎出（不在主表显示，给打包核对区）
-    tableware = [v for v in ing_merge.values() if v["category"] == TABLEWARE_CATEGORY]
-    tableware = sorted(tableware, key=lambda x: -x["total"])
+    # 食材包装单独拎出（不在主表显示，给包装核对区）
+    packaging = [v for v in ing_merge.values() if v["category"] == PACKAGING_CATEGORY]
+    packaging = sorted(packaging, key=lambda x: -x["total"])
+    # 客户餐具/工具单独拎出（给餐具分拣打包区）
+    utensil = [v for v in ing_merge.values() if v["category"] == UTENSIL_CATEGORY]
+    utensil = sorted(utensil, key=lambda x: -x["total"])
 
     tools_list = sorted(tool_merge.values(), key=lambda x: -x["total"])
 
@@ -739,6 +758,7 @@ def calc_merged_prep(order_ids):
         "orders": orders,
         "ingredients": ingredients_by_cat,
         "tools": tools_list,
-        "tableware": tableware,
+        "packaging": packaging,
+        "tableware": utensil,
         "checked_map": checked_map,
     }

@@ -541,13 +541,15 @@ def export_menu_xlsx():
 
     cat_colors = {
         'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
-        'vegetable': '3A8A3A', 'sauce': '7A5A3A', 'tableware': '8E44AD',
+        'vegetable': '3A8A3A', 'sauce': '7A5A3A',
+        'packaging': 'D35400', 'utensil': '8E44AD', 'tableware': '8E44AD',
         'staple': '666666', 'side': '666666', 'drink': '666666',
         'other': '666666', 'tool': '4A4A4A'
     }
     cat_labels = {
         'beef': '牛肉', 'pork': '猪肉', 'chicken': '鸡肉',
-        'vegetable': '蔬菜', 'sauce': '小料', 'tableware': '餐具配套',
+        'vegetable': '蔬菜', 'sauce': '小料',
+        'packaging': '食材包装', 'utensil': '客户餐具/工具', 'tableware': '餐具配套',
         'staple': '主食', 'side': '小菜', 'drink': '饮料',
         'other': '其他', 'tool': '工具'
     }
@@ -900,8 +902,8 @@ def print_menu():
     tools_sorted = sorted(tool_sum.values(), key=lambda x: -x["total"])
 
     # 食材按分类分组，与备餐表顺序一致
-    from calculator import CATEGORY_ORDER, CATEGORY_LABEL, TABLEWARE_CATEGORY, \
-        SAUCE_LIKE_CATS, _subcategorize_meat
+    from calculator import CATEGORY_ORDER, CATEGORY_LABEL, PACKAGING_CATEGORY, \
+        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat
     db2 = get_db()
     cur2 = db2.cursor()
     cur2.execute("SELECT id, category, name FROM ingredients")
@@ -916,12 +918,15 @@ def print_menu():
         v["category"] = sub_cat
 
     ing_by_cat = {}
+    packaging_list = []
     tableware_list = []
     for cat in CATEGORY_ORDER:
         items = [v for v in ing_sum.values() if v.get("category") == cat]
         if items:
             ing_by_cat[cat] = sorted(items, key=lambda x: -x["total"])
-    tableware_list = [v for v in ing_sum.values() if v.get("category") == TABLEWARE_CATEGORY]
+    packaging_list = [v for v in ing_sum.values() if v.get("category") == PACKAGING_CATEGORY]
+    packaging_list = sorted(packaging_list, key=lambda x: -x["total"])
+    tableware_list = [v for v in ing_sum.values() if v.get("category") == UTENSIL_CATEGORY]
     tableware_list = sorted(tableware_list, key=lambda x: -x["total"])
 
     # 渲染成一个可打印的 HTML（独立页面，无 nav，适合 A4 打印）
@@ -951,8 +956,12 @@ def print_menu():
         ing_rows += f'<tr><td colspan="2" style="background:{color};color:#fff;font-weight:700;padding:6px 8px;">{label}</td></tr>'
         for i in items:
             ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
+    if packaging_list:
+        ing_rows += '<tr><td colspan="2" style="background:#d35400;color:#fff;font-weight:700;padding:6px 8px;">📦 食材包装</td></tr>'
+        for i in packaging_list:
+            ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
     if tableware_list:
-        ing_rows += '<tr><td colspan="2" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 餐具配套</td></tr>'
+        ing_rows += '<tr><td colspan="2" style="background:#8e44ad;color:#fff;font-weight:700;padding:6px 8px;">🍱 客户餐具/工具</td></tr>'
         for i in tableware_list:
             ing_rows += f'<tr><td>{i["name"]}</td><td>{round(i["total"],2)}{i["unit"]}</td></tr>'
 

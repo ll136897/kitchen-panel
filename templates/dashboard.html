@@ -313,6 +313,7 @@ function parseOrder(){
       const extraChips = extraT.map(([k,v])=>`<span class="chip warn">${k} +${v}</span>`).join('');
       const ings = (data.preview_ingredients||{});
       const tableware = (data.preview_tableware||[]);
+      const packaging = (data.preview_packaging||[]);
       const tools = (data.preview_tools||[]).map(t=>{
         const sc = t.shortage>0?'txt-red':'';
         return `<tr><td>${t.name}</td><td>${t.need}</td><td>${t.stock}</td><td class="${sc}">${t.shortage>0?t.shortage:'-'}</td></tr>`;
@@ -358,6 +359,22 @@ function parseOrder(){
         }).join('');
         ingHtml += `<tr><td colspan="6" style="background:${color};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${label} · ${items.length}项</td></tr>${rows}`;
       }
+      if(packaging.length){
+        const rows = packaging.map(i=>{
+          const sc = i.shortage>0?'txt-red':'';
+          const pkg = i.total_portions||i.total_packages||1;
+          const per = i.portion_size||i.per_package||0;
+          return `<tr>
+            <td>${i.name}</td>
+            <td style="text-align:center;font-weight:700">${pkg}份</td>
+            <td style="text-align:center">${per}${i.unit||''}</td>
+            <td style="text-align:center;font-weight:800;color:var(--primary)">${i.need}${i.unit||''}</td>
+            <td>${i.stock}${i.unit||''}</td>
+            <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
+          </tr>`;
+        }).join('');
+        ingHtml += `<tr><td colspan="6" style="background:#d35400;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">📦 食材包装 · ${packaging.length}项</td></tr>${rows}`;
+      }
       if(tableware.length){
         const rows = tableware.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
@@ -372,7 +389,7 @@ function parseOrder(){
             <td class="${sc}">${i.shortage>0?i.shortage:'-'}</td>
           </tr>`;
         }).join('');
-        ingHtml += `<tr><td colspan="6" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 餐具配套 · ${tableware.length}项</td></tr>${rows}`;
+        ingHtml += `<tr><td colspan="6" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 客户餐具/工具 · ${tableware.length}项</td></tr>${rows}`;
       }
 
       document.getElementById('parsePreview').classList.add('show');

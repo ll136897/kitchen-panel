@@ -53,6 +53,7 @@
   .cat-chicken{background:#c9962b}
   .cat-vegetable{background:#3a8a3a}
   .cat-sauce{background:#7a5a3a}
+  .cat-packaging{background:#d35400}
   .cat-tableware{background:#8e44ad}
   .cat-staple,.cat-side,.cat-drink,.cat-other{background:#666}
   .cat-tool{background:#4a4a4a}
@@ -91,10 +92,11 @@ let packages = [];
 let allIngredients = [];
 const CAT_LABEL = {
   beef:'🥩牛肉', pork:'🥓猪肉', chicken:'🍗鸡肉',
-  vegetable:'🥬蔬菜', sauce:'🧂小料', tableware:'🍱餐具配套',
+  vegetable:'🥬蔬菜', sauce:'🧂小料', packaging:'📦食材包装',
+  tableware:'🍱客户餐具/工具',
   staple:'主食', side:'小菜', drink:'饮料', other:'其他', tool:'🔧工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','staple','side','drink','tableware','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','sauce','packaging','tableware','staple','side','drink','other','tool'];
 
 // 细分 meat → beef/pork/chicken（与 calculator 一致）
 function subcategorize(name, cat){
