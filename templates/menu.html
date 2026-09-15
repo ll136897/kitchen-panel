@@ -234,12 +234,13 @@ function renderIngRow(ing, size, pid){
 }
 
 function renderToolRow(t, pid){
-  return `<tr>
+  const rowId = `tool_${t.id}`;
+  return `<tr id="${rowId}">
     <td class="name-cell">${t.tool_name}<span class="badge-cat cat-tool">工具</span></td>
     <td>个</td>
     <td>-</td>
     <td>-</td>
-    <td class="total-cell">${t.per_package}</td>
+    <td class="total-cell"><input type="number" value="${t.per_package}" step="1" id="tqty_${t.id}" style="width:60px;text-align:center"></td>
     <td class="edit-actions">
       <button class="btn-mini save" onclick="saveTool(${pid},${t.id})">💾</button>
       <button class="btn-mini del" onclick="delTool(${pid},${t.id})">🗑️</button>
@@ -299,13 +300,17 @@ function delIng(pid, ingId){
 }
 
 function saveTool(pid, ptId){
-  // 工具暂只支持改总量，弹出输入
-  const v = prompt('输入工具数量:');
-  if(v===null) return;
+  const v = parseFloat(document.getElementById('tqty_'+ptId).value)||1;
   fetch(`/api/packages/${pid}/tool/${ptId}`,{
     method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({per_package:parseFloat(v)||1})
-  }).then(r=>r.json()).then(res=>{ if(res.ok) loadMenu(); });
+    body:JSON.stringify({per_package:v})
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok){
+      const row = document.getElementById('tool_'+ptId);
+      row.style.background = '#e8f5e9';
+      setTimeout(()=>row.style.background='', 800);
+    }
+  });
 }
 
 function delTool(pid, ptId){
