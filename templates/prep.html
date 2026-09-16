@@ -417,8 +417,9 @@ function render(){
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
-  // 判断是否为简单分类（无克数）
-  const isSimple = ['packaging','utensil','tool'].includes(it._cat);
+  // 判断是否为简单分类（无克数）：包装/餐具/工具 + 可乐雪碧饮料
+  const isSimple = ['packaging','utensil','tool'].includes(it._cat)
+    || (it._cat==='drink' && /可乐|雪碧/.test(it.name||''));
   let unit = it.unit||'';
   if(type==='tool' && !unit){ unit = '个'; }
   const totPkg = round(it.total_portions||it.total_packages||0);

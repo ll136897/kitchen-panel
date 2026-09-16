@@ -356,7 +356,8 @@ function parseOrder(){
         const rows = items.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
           const pkg = i.total_portions||i.total_packages||1;
-          const per = i.portion_size||i.per_package||0;
+          const isSimple = (cat==='drink' && /可乐|雪碧/.test(i.name||''));
+          const per = isSimple ? '' : (i.portion_size||i.per_package||0);
           const unit = i.unit||'';
           const needStr = (i.need||0) + unit;
           return `<tr>

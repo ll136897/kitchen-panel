@@ -240,12 +240,21 @@ function catEmoji(cat){
   return lbl.replace(/[\u4e00-\u9fa5\w\s]/g,'').trim();
 }
 
+// 判断是否为"简单分类"（无每份数量）：食材包装/客户餐具/工具 + 可乐雪碧饮料
+// 注：应季水果有克数，仍显示每份数量；可乐/雪碧按瓶计，只保留份数
+function isSimpleCat(name, cat){
+  if(['packaging','utensil','tool'].includes(cat)) return true;
+  // 饮料中仅可乐/雪碧按份数计（每份数量=1瓶），应季水果仍按克数
+  if(cat==='drink' && /可乐|雪碧/.test(name||'')) return true;
+  return false;
+}
+
 function renderIngRow(ing, size, pid){
   const rowId = `ing_${ing.id}`;
   const c = subcategorize(ing.ing_name, ing.category);
-  // 食材包装/客户餐具：去掉每份数量列，份数为编辑框（每份数量隐含=1，总量=份数）
+  // 简单分类（食材包装/客户餐具/可乐雪碧）：去掉每份数量列，份数为编辑框（每份数量隐含=1，总量=份数）
   // 总量列统一为"数字+单位"格式（如 600克、8个）
-  if(['packaging','utensil'].includes(c)){
+  if(isSimpleCat(ing.ing_name, c)){
     const cnt = Math.round((ing.per_package||0)*100)/100;
     const unit = ing.unit||'';
     return `<tr id="${rowId}">
