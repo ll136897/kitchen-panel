@@ -17,6 +17,32 @@ def _parse_amount(text):
     return float(m.group(1)) if m else 0.0
 
 
+def _clean_meal_time(text):
+    """清洗用餐时间字段：
+    剥离备注（括号内的"超时一小时50"、"餐到后付"等）和"/"分隔的多选项，保留首个时间。
+    输入：'晚上6点前（超时一小时50）/晚上10点前（超时一小时50）'
+    输出：'晚上6点' （由 calculator.parse_time_str 进一步解析为 18:00）
+    输入：'12.00' / '12:00' → 原样返回
+    输入：'22点后加收每小时50元夜间服务费' → '22点'
+    """
+    if not text:
+        return ""
+    s = str(text).strip()
+    # 切掉 "/" 后的多选项（保留第一个）
+    if "/" in s:
+        s = s.split("/", 1)[0].strip()
+    # 删除全角/半角括号及括号内备注
+    s = re.sub(r"[（(][^）)]*[）)]", "", s)
+    # 删除"前/后"等修饰（"6点前"→"6点"，"22点后加收..."→"22点"）
+    # 找首个时间表达，截断到该时间后
+    m = re.search(r"(凌晨|早上|早晨|清晨|上午|中午|正午|下午|傍晚|晚上|晚间|夜里|夜晚)?\s*\d{1,2}\s*[.:：点时]\s*\d{0,2}\s*(点|半)?", s)
+    if m:
+        # 保留时段词 + 数字 + 单位
+        return m.group(0).strip()
+    # 退化：直接返回原文本去掉括号后的内容
+    return s.strip()
+
+
 def _normalize_date(s):
     """从字符串中提取日期并归一化成 YYYY-MM-DD。
     支持（可带后缀时间/文字）：
@@ -167,7 +193,7 @@ def parse_order_text(raw_text):
         elif key == "押金":
             result["deposit"] = _parse_amount(value)
         elif key == "用餐时间":
-            result["meal_time"] = value
+            result["meal_time"] = _clean_meal_time(value)
         elif key == "收餐时间":
             result["pickup_time"] = value
         elif key == "备注":

@@ -37,22 +37,70 @@ def get_available_tool_stock():
 
 
 def parse_time_str(t):
-    """把 '12.00' / '12:00' / '12点' 解析成 (hour, minute)，失败返回 None"""
+    """把 '12.00' / '12:00' / '12点' / '晚上6点' / '下午3点半' 解析成 (hour, minute)。
+    识别中文时段词：凌晨/早上/上午/中午/下午/晚上，自动做 12 小时制转换。
+    失败返回 None。
+    """
     if not t:
         return None
-    m = re.search(r"(\d{1,2})[.:：点时](\d{1,2})", str(t))
+    s = str(t)
+    # 时段词 → 是否 PM（下午/晚上 13~23 点，除 12 点外）
+    period = None  # None=未指定 / 'am' / 'pm'
+    for kw in ("凌晨", "早上", "早晨", "上午", "清晨"):
+        if kw in s:
+            period = "am"
+            break
+    if period is None:
+        for kw in ("中午", "正午"):
+            if kw in s:
+                period = "noon"
+                break
+    if period is None:
+        for kw in ("下午", "傍晚", "晚上", "晚间", "夜里", "夜晚"):
+            if kw in s:
+                period = "pm"
+                break
+
+    # 优先匹配 时:分 / 时.分 / 时点分 / 时分
+    m = re.search(r"(\d{1,2})\s*[.:：点时]\s*(\d{1,2})", s)
     if m:
-        return int(m.group(1)), int(m.group(2))
-    m = re.search(r"(\d{1,2})", str(t))
-    if m:
-        return int(m.group(1)), 0
-    return None
+        h, mi = int(m.group(1)), int(m.group(2))
+    else:
+        # "12点" / "12点半" / "6点"
+        m = re.search(r"(\d{1,2})\s*点(半)?", s)
+        if m:
+            h = int(m.group(1))
+            mi = 30 if m.group(2) == "半" else 0
+        else:
+            # 纯数字
+            m = re.search(r"(\d{1,2})", s)
+            if not m:
+                return None
+            h, mi = int(m.group(1)), 0
+
+    if h < 0 or h > 23 or mi < 0 or mi > 59:
+        return None
+
+    # 12 小时制转换
+    if period == "pm" and h != 12:
+        h += 12
+    elif period == "noon":
+        h = 12
+    elif period == "am" and h == 12:
+        h = 0
+
+    return h, mi
 
 
 def calc_prep_urgency(order):
-    """根据用餐时间计算备餐紧迫性。
-    返回 {level: 'normal'|'soon'|'overdue', minutes_to_prep: int, label: str}
-    level: normal=充裕, soon=1小时内该备餐, overdue=已过应备餐时间
+    """根据订单日期 + 用餐时间计算备餐紧迫性。
+    返回 {level: 'normal'|'soon'|'overdue'|'past'|'future', minutes_to_prep: int|None, label: str}
+    level:
+      - past:   订单日期在今天之前 → "已逾期 X 天"
+      - normal: 今天订单，充裕
+      - soon:   今天订单，1 小时内该备餐
+      - overdue:今天订单，已过应备餐时间
+      - future:订单日期在今天之后 → "X 天后备餐"
     """
     prep_lead = 2
     try:
@@ -64,12 +112,45 @@ def calc_prep_urgency(order):
     except Exception:
         pass
 
+    now = now_cst()
+    today_d = now.date()
+
+    booking_date = (order.get("booking_date") or "").strip()
     meal_t = order.get("meal_time") or order.get("booking_time")
     hhmm = parse_time_str(meal_t)
+
+    # 订单日期明确在过去
+    if booking_date and booking_date < today_d.isoformat():
+        try:
+            past_d = datetime.date.fromisoformat(booking_date)
+            days = (today_d - past_d).days
+            if days > 0:
+                label = f"⚠️ 已逾期 {days} 天"
+            else:
+                label = "⚠️ 已逾期"
+            return {"level": "past", "minutes_to_prep": None, "label": label,
+                    "days_overdue": days}
+        except Exception:
+            pass
+
+    # 订单日期明确在未来
+    if booking_date and booking_date > today_d.isoformat():
+        try:
+            fut_d = datetime.date.fromisoformat(booking_date)
+            days = (fut_d - today_d).days
+            if hhmm:
+                label = f"{days} 天后 · {hhmm[0]:02d}:{hhmm[1]:02d} 备餐"
+            else:
+                label = f"{days} 天后备餐"
+            return {"level": "future", "minutes_to_prep": None, "label": label,
+                    "days_until": days}
+        except Exception:
+            pass
+
+    # 今天订单（或无日期）：用时间算紧迫度
     if not hhmm:
         return {"level": "normal", "minutes_to_prep": None, "label": "时间待定"}
 
-    now = now_cst()
     meal_dt = now.replace(hour=hhmm[0], minute=hhmm[1], second=0, microsecond=0)
     prep_start = meal_dt - datetime.timedelta(hours=prep_lead)
     diff_min = int((prep_start - now).total_seconds() / 60)

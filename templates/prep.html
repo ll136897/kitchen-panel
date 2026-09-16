@@ -10,6 +10,8 @@
   .urg-overdue{color:#fff;background:var(--red);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
   .urg-soon{color:#fff;background:var(--orange);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
   .urg-normal{color:#fff;background:var(--green);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
+  .urg-past{color:#fff;background:#6b4f3a;padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
+  .urg-future{color:#fff;background:var(--blue);padding:3px 10px;border-radius:10px;font-size:13px;font-weight:700}
 
   /* 分类卡片：每个分类一个独立块，用不同背景色分隔 */
   .cat-block{
@@ -355,20 +357,37 @@ function loadPrep(){
 
 function urgBadge(u){
   if(!u) return '';
-  const cls = u.level==='overdue'?'urg-overdue':(u.level==='soon'?'urg-soon':'urg-normal');
+  const clsMap = {
+    overdue:'urg-overdue', soon:'urg-soon', normal:'urg-normal',
+    past:'urg-past', future:'urg-future'
+  };
+  const cls = clsMap[u.level] || 'urg-normal';
   return `<span class="${cls}">${u.label}</span>`;
 }
 
 function render(){
   if(!prepData) return;
   const d = prepData;
-  const orders = d.orders || [];
+  let orders = d.orders || [];
   if(!orders.length){
     document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:24px;text-align:center;font-size:16px">🍖 当天暂无待备订单</div>';
     document.getElementById('prepCard').style.display='none';
     document.getElementById('orderView').style.display='none';
     return;
   }
+  // 排序：已逾期 > 已到应备时间 > 即将 > 充裕 > 未来 > 待定
+  // 用 urgency.level 的优先级排序
+  const levelOrder = {'overdue':0,'soon':1,'past':2,'normal':3,'future':4};
+  orders = orders.slice().sort((a,b)=>{
+    const la = (a.urgency&&a.urgency.level) || 'normal';
+    const lb = (b.urgency&&b.urgency.level) || 'normal';
+    const ra = levelOrder[la]===undefined?99:levelOrder[la];
+    const rb = levelOrder[lb]===undefined?99:levelOrder[lb];
+    if(ra!==rb) return ra-rb;
+    // 同级别按日期+时间升序
+    return (a.booking_date||'')+(a.booking_time||'') > (b.booking_date||'')+(b.booking_time||'') ? 1 : -1;
+  });
+  d.orders = orders;
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
     const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
     // 显示预约日期+时间（与订单页一致），用餐时间单独标

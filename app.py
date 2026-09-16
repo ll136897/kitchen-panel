@@ -88,29 +88,44 @@ try:
     import re as _re
     _db = get_db()
     _cur = _db.cursor()
-    _cur.execute("SELECT id, raw_text, booking_date, booking_time FROM orders")
+    _cur.execute("SELECT id, raw_text, booking_date, booking_time, meal_time FROM orders")
     _fixed = 0
+    _fixed_mt = 0
     for _r in _cur.fetchall():
         _bd = _r["booking_date"] or ""
-        # 标准 YYYY-MM-DD 且不等于"待定"之类垃圾值则跳过
-        if _re.match(r"^\d{4}-\d{2}-\d{2}$", _bd):
-            continue
-        if not _r["raw_text"]:
-            continue
-        from parser import parse_order_text as _pot
-        _parsed = _pot(_r["raw_text"])
-        _new_bd = _parsed.get("booking_date", "")
-        _new_bt = _parsed.get("booking_time", "")
-        if _new_bd:
-            _cur.execute("UPDATE orders SET booking_date=?, booking_time=? WHERE id=?",
-                         (_new_bd, _new_bt or _r["booking_time"], _r["id"]))
+        _needs_update = False
+        _new_bd = _bd
+        _new_bt = _r["booking_time"] or ""
+        _new_mt = _r["meal_time"] or ""
+        # 标准 YYYY-MM-DD 且不等于"待定"之类垃圾值则跳过日期解析
+        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", _bd) and _r["raw_text"]:
+            from parser import parse_order_text as _pot
+            _parsed = _pot(_r["raw_text"])
+            _new_bd = _parsed.get("booking_date", "")
+            _new_bt = _parsed.get("booking_time", "") or _new_bt
+            _new_mt = _parsed.get("meal_time", "") or _new_mt
+            if _new_bd:
+                _needs_update = True
+        # 同时清洗历史脏 meal_time（即使日期正常）
+        if _r["raw_text"]:
+            from parser import parse_order_text as _pot, _clean_meal_time as _cmt
+            _parsed2 = _pot(_r["raw_text"])
+            _cleaned_mt = _parsed2.get("meal_time", "")
+            if _cleaned_mt and _cleaned_mt != _r["meal_time"]:
+                _new_mt = _cleaned_mt
+                _needs_update = True
+        if _needs_update:
+            _cur.execute("UPDATE orders SET booking_date=?, booking_time=?, meal_time=? WHERE id=?",
+                         (_new_bd, _new_bt, _new_mt, _r["id"]))
             _fixed += 1
+            if _new_mt != (_r["meal_time"] or ""):
+                _fixed_mt += 1
     if _fixed:
         _db.commit()
-        print(f"[migrate] 已修复 {_fixed} 个订单的 booking_date/booking_time")
+        print(f"[migrate] 已修复 {_fixed} 个订单（其中 {_fixed_mt} 个 meal_time 被清洗）")
     _db.close()
 except Exception as _e:
-    print(f"[migrate] 修复订单 booking_date 跳过: {_e}")
+    print(f"[migrate] 修复订单 booking_date/meal_time 跳过: {_e}")
 
 
 @app.before_request
