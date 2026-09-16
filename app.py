@@ -127,6 +127,30 @@ try:
 except Exception as _e:
     print(f"[migrate] 修复订单 booking_date/meal_time 跳过: {_e}")
 
+# 迁移：7-8人餐 把"韩式蘸酱"替换为"酸辣烤肉汁"，与其他套餐小料顺序一致
+try:
+    _db = get_db()
+    _cur = _db.cursor()
+    _cur.execute("SELECT id FROM ingredients WHERE name='韩式蘸酱'")
+    _hjj = _cur.fetchone()
+    _cur.execute("SELECT id FROM ingredients WHERE name='酸辣烤肉汁'")
+    _slj = _cur.fetchone()
+    if _hjj and _slj:
+        _hjj_id = _hjj["id"]
+        _slj_id = _slj["id"]
+        # 7-8人餐的韩式蘸酱关联改为酸辣烤肉汁（per_package 调整为50，与其他套餐一致）
+        _cur.execute("""UPDATE package_ingredients
+                        SET ingredient_id=?, per_package=50
+                        WHERE ingredient_id=? AND package_id IN (SELECT id FROM packages WHERE name='7-8人餐')""",
+                     (_slj_id, _hjj_id))
+        _affected = _cur.rowcount
+        if _affected:
+            _db.commit()
+            print(f"[migrate] 已把 7-8人餐 的韩式蘸酱({_affected}条)替换为酸辣烤肉汁")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 替换韩式蘸酱跳过: {_e}")
+
 
 @app.before_request
 def before():
