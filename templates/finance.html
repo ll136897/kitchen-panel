@@ -29,11 +29,26 @@
   .select-mini{padding:3px 4px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:#fff}
   .sec-title{font-size:15px;font-weight:700;margin:16px 0 8px;display:flex;align-items:center;gap:6px}
   .sec-title .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  /* 日期维度切换 */
+  .range-tabs{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:3px;gap:2px}
+  .range-tab{padding:6px 14px;border:none;background:transparent;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;color:#6b4f3a;transition:all .15s}
+  .range-tab.active{background:#3a2416;color:#fff;box-shadow:0 2px 4px rgba(0,0,0,.15)}
+  .range-date{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff}
+  /* 成本管理卡 */
+  .cost-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+  .cost-item{background:#faf6ef;border:1px solid #f0ebe3;border-radius:8px;padding:8px 10px}
+  .cost-item .nm{font-size:12px;font-weight:700;color:#3a2416;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cost-item .cat{font-size:10px;color:#999;margin-bottom:4px}
+  .cost-item .ref{font-size:10px;color:#27ae60;font-weight:600;margin-top:3px}
+  .cost-item input{width:100%;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:13px;text-align:right;font-weight:700;color:#c0392b;box-sizing:border-box}
+  .cost-item input:focus{border-color:#3a2416;outline:none}
+  .cost-item.saved{background:#e8f5e9;border-color:#a5d6a7}
   @media(max-width:600px){
     .fin-kpi{grid-template-columns:repeat(2,1fr)}
     .fin-kpi-item .val{font-size:16px}
     .fin-tbl{font-size:11px}
     .fin-tbl th,.fin-tbl td{padding:5px 3px}
+    .cost-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   }
 </style>
 </head>
@@ -52,7 +67,13 @@
       <div class="title">📈 财务分析</div>
       <div class="sub">收入·成本·毛利·押金·应收账款</div>
     </div>
-    <div class="toolbar" style="display:flex;gap:6px">
+    <div class="toolbar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="range-tabs">
+        <button class="range-tab active" data-range="day" onclick="setRange('day')">📅 日</button>
+        <button class="range-tab" data-range="week" onclick="setRange('week')">🗓️ 周</button>
+        <button class="range-tab" data-range="month" onclick="setRange('month')">📊 月</button>
+      </div>
+      <input type="date" id="rangeDate" class="range-date" onchange="onDateChange()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon">🔄</span> 刷新</button>
     </div>
   </div>
@@ -81,6 +102,18 @@
     </table>
   </div>
 
+  <!-- 食材成本管理（改价后全局同步到所有菜单/订单） -->
+  <div class="fin-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>💰 食材成本管理</div>
+      <div style="font-size:11px;color:#888">改价后自动同步到所有菜单/订单成本</div>
+    </div>
+    <div style="margin:8px 0">
+      <input type="text" id="costSearch" placeholder="🔍 搜索食材..." oninput="filterCostItems()" style="width:100%;max-width:240px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+    </div>
+    <div class="cost-grid" id="costGrid"></div>
+  </div>
+
   <!-- 成本明细弹窗 -->
   <div id="costModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:16px">
     <div class="fin-card" style="max-width:600px;width:100%;max-height:85vh;overflow:auto;margin:0">
@@ -101,15 +134,58 @@
 <script>
 const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
+const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',other:'其他'};
+
+let currentRange = 'day'; // day / week / month
+
+// ===== 日期范围计算 =====
+function fmtDate(d){
+  return d.toISOString().slice(0,10);
+}
+function getRangeDates(){
+  const picked = document.getElementById('rangeDate').value;
+  const base = picked ? new Date(picked) : new Date();
+  // 防止时区偏移
+  const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
+  if(currentRange === 'day'){
+    const day = new Date(y,m,d);
+    return {from: fmtDate(day), to: fmtDate(day)};
+  } else if(currentRange === 'week'){
+    // 周一到周日
+    const dow = base.getDay() || 7;
+    const monday = new Date(y,m,d - dow + 1);
+    const sunday = new Date(y,m,d - dow + 7);
+    return {from: fmtDate(monday), to: fmtDate(sunday)};
+  } else { // month
+    const first = new Date(y,m,1);
+    const last = new Date(y,m+1,0);
+    return {from: fmtDate(first), to: fmtDate(last)};
+  }
+}
+function setRange(r){
+  currentRange = r;
+  document.querySelectorAll('.range-tab').forEach(b=>{
+    b.classList.toggle('active', b.dataset.range === r);
+  });
+  loadAll();
+}
+function onDateChange(){
+  loadAll();
+}
+// 初始化日期为今天
+document.getElementById('rangeDate').value = fmtDate(new Date());
 
 function loadAll(){
+  const r = getRangeDates();
+  const qs = `date_from=${r.from}&date_to=${r.to}`;
   Promise.all([
-    fetch('/api/finance/summary').then(r=>r.json()),
-    fetch('/api/finance/orders').then(r=>r.json())
+    fetch('/api/finance/summary?'+qs).then(r=>r.json()),
+    fetch('/api/finance/orders?'+qs).then(r=>r.json())
   ]).then(([sumRes, ordRes])=>{
     renderKpi(sumRes.data||{});
     renderOrders(ordRes.data||[]);
   });
+  loadCostItems();
 }
 
 function fmtY(n){
@@ -264,6 +340,72 @@ function editIngCost(iid, val){
     body:JSON.stringify({cost:parseFloat(val||0),item_type:'ingredient'})})
     .then(r=>r.json()).then(()=>{
       showRefreshToast();
+      loadCostItems(); // 同步成本管理卡
+    });
+}
+
+// ===== 食材成本管理 =====
+let allCostItems = [];
+function loadCostItems(){
+  fetch('/api/ingredients').then(r=>r.json()).then(d=>{
+    allCostItems = (d.data||[]).filter(i=>i.category !== 'packaging' && i.category !== 'utensil');
+    const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
+    allCostItems.sort((a,b)=>{
+      const ia = order.indexOf(a.category), ib = order.indexOf(b.category);
+      if(ia!==ib) return ia-ib;
+      return a.name.localeCompare(b.name,'zh');
+    });
+    renderCostItems(allCostItems);
+  });
+}
+function renderCostItems(items){
+  const grid = document.getElementById('costGrid');
+  if(!items.length){
+    grid.innerHTML = '<div class="muted" style="padding:20px">暂无食材</div>';
+    return;
+  }
+  grid.innerHTML = items.map(i=>{
+    const ref = costRefText(i.cost, i.unit);
+    return `<div class="cost-item" id="costItem-${i.id}">
+      <div class="nm">${i.name}</div>
+      <div class="cat">${CAT_LABEL[i.category]||i.category} · ${i.unit}</div>
+      <input type="number" value="${i.cost||0}" step="0.001" min="0"
+        onchange="saveCost(${i.id}, this.value, '${i.unit}')"
+        oninput="liveRef(this, '${i.unit}', ${i.id})">
+      <div class="ref" id="costRef-${i.id}">${ref}</div>
+    </div>`;
+  }).join('');
+}
+function filterCostItems(){
+  const kw = document.getElementById('costSearch').value.trim().toLowerCase();
+  if(!kw){ renderCostItems(allCostItems); return; }
+  renderCostItems(allCostItems.filter(i=>i.name.toLowerCase().includes(kw)));
+}
+function costRefText(cost, unit){
+  const c = parseFloat(cost||0);
+  if(!c) return '';
+  if(unit==='g') return `≈ ¥${(c*1000).toFixed(c>=0.1?0:1)}/kg`;
+  if(unit==='ml') return `≈ ¥${(c*1000).toFixed(c>=0.01?0:1)}/L`;
+  if(unit==='份') return `≈ ¥${(c*2).toFixed(1)}/盒(2份)`;
+  if(unit==='个') return `≈ ¥${(c*60).toFixed(0)}/袋(60个)`;
+  return '';
+}
+function liveRef(input, unit, id){
+  const el = document.getElementById('costRef-'+id);
+  if(el) el.textContent = costRefText(input.value, unit);
+}
+function saveCost(iid, val, unit){
+  const c = parseFloat(val||0);
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cost:c,item_type:'ingredient'})})
+    .then(r=>r.json()).then(()=>{
+      const item = document.getElementById('costItem-'+iid);
+      if(item){ item.classList.add('saved'); setTimeout(()=>item.classList.remove('saved'), 1200); }
+      showRefreshToast();
+      // 刷新财务总览和订单（成本变化影响毛利）
+      const r = getRangeDates();
+      fetch('/api/finance/summary?date_from='+r.from+'&date_to='+r.to).then(x=>x.json()).then(d=>renderKpi(d.data||{}));
+      fetch('/api/finance/orders?date_from='+r.from+'&date_to='+r.to).then(x=>x.json()).then(d=>renderOrders(d.data||[]));
     });
 }
 
