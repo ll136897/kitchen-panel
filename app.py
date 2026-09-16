@@ -1139,14 +1139,14 @@ def finance_summary():
     cur = db.cursor()
     date_from = request.args.get("date_from")
     date_to = request.args.get("date_to")
-    # 构建日期过滤条件（用参数化）
-    date_clause = "status != 'cancelled'"
+    # 构建日期过滤条件（用参数化，带 o. 前缀避免 JOIN 歧义）
+    date_clause = "o.status != 'cancelled'"
     params = []
     if date_from:
-        date_clause += " AND booking_date >= ?"
+        date_clause += " AND o.booking_date >= ?"
         params.append(date_from)
     if date_to:
-        date_clause += " AND booking_date <= ?"
+        date_clause += " AND o.booking_date <= ?"
         params.append(date_to)
     # 收入（非取消订单）
     r = cur.execute(f"""
@@ -1159,7 +1159,7 @@ def finance_summary():
                COALESCE(SUM(CASE WHEN deposit_status='pending' THEN deposit ELSE 0 END),0) as deposit_pending,
                COALESCE(SUM(CASE WHEN deposit_status='returned' THEN deposit ELSE 0 END),0) as deposit_returned,
                COALESCE(SUM(CASE WHEN deposit_status='forfeited' THEN deposit ELSE 0 END),0) as deposit_forfeited
-        FROM orders WHERE {date_clause}
+        FROM orders o WHERE {date_clause}
     """, params).fetchone()
     summary = dict(r)
     # 成本计算：每单食材成本 = 各食材用量 × 单价
