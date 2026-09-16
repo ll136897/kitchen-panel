@@ -93,6 +93,11 @@ def init_db():
             cur.execute("ALTER TABLE packages ADD COLUMN base_price REAL NOT NULL DEFAULT 0")
             cur.execute("UPDATE packages SET base_price = price WHERE base_price = 0")
             cur.execute("UPDATE packages SET price = base_price + COALESCE((SELECT CAST(value AS REAL) FROM settings WHERE key='delivery_fee'), 0)")
+        # 迁移：加兼职人工成本字段（后厨+配送，每单固定）
+        if "kitchen_labor_cost" not in cols:
+            cur.execute("ALTER TABLE packages ADD COLUMN kitchen_labor_cost REAL NOT NULL DEFAULT 0")
+        if "delivery_labor_cost" not in cols:
+            cur.execute("ALTER TABLE packages ADD COLUMN delivery_labor_cost REAL NOT NULL DEFAULT 0")
         # 老库没有 settings 表已在上面建过
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('delivery_fee','100','基础配送费，总价=base_price+delivery_fee')")
 

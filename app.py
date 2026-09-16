@@ -644,15 +644,17 @@ def del_package(pid):
 # ===== 餐标配餐器 =====
 @app.route("/api/catering/suggest", methods=["POST"])
 def catering_suggest():
-    """餐标配餐器：输入人数+餐标，返回建议套餐方案"""
+    """餐标配餐器：输入人数+餐标+人工成本，返回建议套餐方案"""
     from calculator import catering_suggest as _cs
     data = request.get_json(force=True)
     people = int(data.get("people", 0))
     total = float(data.get("total_budget", 0))
     per_person = data.get("per_person")
+    kitchen_labor = float(data.get("kitchen_labor", 0))
+    delivery_labor = float(data.get("delivery_labor", 0))
     if per_person is not None:
         per_person = float(per_person)
-    result = _cs(people, total, per_person)
+    result = _cs(people, total, per_person, kitchen_labor, delivery_labor)
     return jsonify(result)
 
 
@@ -663,6 +665,8 @@ def catering_save():
     name = data.get("name", "").strip()
     people = int(data.get("people", 0))
     total = float(data.get("total_budget", 0))
+    kitchen_labor = float(data.get("kitchen_labor", 0))
+    delivery_labor = float(data.get("delivery_labor", 0))
     ings = data.get("ingredients", [])
     tools = data.get("tools", [])
     if not name or people <= 0:
@@ -676,9 +680,9 @@ def catering_save():
     base_price = max(0, total - df)
     total_price = base_price + df
     cur.execute("""
-        INSERT INTO packages (name, min_people, max_people, base_price, price, service_type, is_team)
-        VALUES (?,?,?,?,?,?,?)
-    """, (name, people, people, base_price, total_price, "搭建", 0))
+        INSERT INTO packages (name, min_people, max_people, base_price, price, service_type, is_team, kitchen_labor_cost, delivery_labor_cost)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (name, people, people, base_price, total_price, "搭建", 0, kitchen_labor, delivery_labor))
     pid = cur.lastrowid
     for ing in ings:
         cur.execute("""

@@ -992,11 +992,13 @@ def calc_merged_prep(order_ids):
 # 3. 成本校验（目标 38-45%）：超了减高价牛肉，不够加饱腹菜
 # 4. 工具按人数配：椅子=人数，炉子=ceil(人数/4)
 
-def catering_suggest(people, total_budget, per_person=None):
+def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, delivery_labor=0):
     """餐标配餐器：返回建议方案（食材列表+工具+成本摘要）
     people: 人数
     total_budget: 总餐标（元）
     per_person: 可选人均餐标，优先于 total_budget/people
+    kitchen_labor: 后厨兼职人工成本（每单固定）
+    delivery_labor: 配送兼职人工成本（每单固定）
     """
     import math
     if per_person is not None:
@@ -1086,10 +1088,13 @@ def catering_suggest(people, total_budget, per_person=None):
             it["per_package"] = round(it["per_package"], 1)
         it["sub_total"] = round(it["per_package"] * it["cost"], 2)
 
-    # 5. 成本校验：目标 38-45%
+    # 5. 成本校验：食材成本目标 28-35%（扣除人工后的合理区间）
+    # 人工成本（后厨+配送）固定，先扣出来再校验食材
+    labor_cost = round(float(kitchen_labor or 0) + float(delivery_labor or 0), 2)
     total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
-    target_low = total_budget * 0.38
-    target_high = total_budget * 0.45
+    # 食材目标区间 = 餐标 × [28%, 35%]（留出人工空间）
+    target_low = total_budget * 0.28
+    target_high = total_budget * 0.35
     warnings = []
 
     # 超预算：按高价到低价顺序减牛肉（每 50g 一档）
@@ -1175,6 +1180,9 @@ def catering_suggest(people, total_budget, per_person=None):
     meat_weight = sum(it["per_package"] for it in ing_map.values()
                       if it["category"] in ("meat", "beef", "pork", "chicken")
                       and it["unit"] == "g" and not it["cost_only"])
+    # 最终成本 = 食材 + 人工
+    final_cost = round(total_cost + labor_cost, 2)
+    final_margin = round(total_budget - final_cost, 2)
     return {
         "ok": True,
         "data": {
@@ -1187,9 +1195,13 @@ def catering_suggest(people, total_budget, per_person=None):
                 "people": people,
                 "budget": total_budget,
                 "per_person": round(total_budget / people, 2),
-                "total_cost": total_cost,
-                "margin": round(total_budget - total_cost, 2),
-                "margin_pct": round((total_budget - total_cost) / total_budget * 100, 1),
+                "food_cost": total_cost,              # 食材成本
+                "kitchen_labor": float(kitchen_labor or 0),  # 后厨人工
+                "delivery_labor": float(delivery_labor or 0),# 配送人工
+                "labor_cost": labor_cost,            # 人工合计
+                "total_cost": final_cost,            # 总成本=食材+人工
+                "margin": final_margin,              # 毛利=餐标-总成本
+                "margin_pct": round(final_margin / total_budget * 100, 1),
                 "meat_weight_per_person": round(meat_weight / people),
                 "target_cost_range": [round(target_low), round(target_high)],
                 "is_healthy": target_low <= total_cost <= target_high,

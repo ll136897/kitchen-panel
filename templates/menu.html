@@ -106,6 +106,13 @@
       <button class="btn btn-primary btn-sm" onclick="generateCatering()">🚀 生成方案</button>
     </div>
 
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:#fff3cd;border-radius:10px;border:1px solid #ffeaa7">
+      <span style="font-weight:700;color:#856404">👤 兼职人工成本（每单）</span>
+      <label>后厨 ¥ <input type="number" id="cat_kitchen_labor" value="200" min="0" step="50" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <label>配送 ¥ <input type="number" id="cat_delivery_labor" value="100" min="0" step="50" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <span style="font-size:12px;color:#856404">合计人工 ¥<b id="cat_labor_total" style="font-size:14px">300</b>/单</span>
+    </div>
+
     <div id="cateringResult"></div>
 
     <div id="cateringSaveBox" style="display:none;margin-top:16px;padding:12px;background:#e7f5e7;border-radius:10px">
@@ -444,6 +451,14 @@ const CAT_COLOR = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3
 
 function openCatering(){
   document.getElementById('cateringModal').style.display='block';
+  // 绑定人工成本实时合计
+  const updLabor = ()=>{
+    const k = parseFloat(document.getElementById('cat_kitchen_labor').value)||0;
+    const d = parseFloat(document.getElementById('cat_delivery_labor').value)||0;
+    document.getElementById('cat_labor_total').textContent = (k+d).toFixed(0);
+  };
+  document.getElementById('cat_kitchen_labor').oninput = updLabor;
+  document.getElementById('cat_delivery_labor').oninput = updLabor;
 }
 function closeCatering(){
   document.getElementById('cateringModal').style.display='none';
@@ -453,10 +468,13 @@ function generateCatering(){
   const people = parseInt(document.getElementById('cat_people').value)||0;
   const budget = parseFloat(document.getElementById('cat_budget').value)||0;
   const perPerson = parseFloat(document.getElementById('cat_perperson').value)||null;
+  const kitchenLabor = parseFloat(document.getElementById('cat_kitchen_labor').value)||0;
+  const deliveryLabor = parseFloat(document.getElementById('cat_delivery_labor').value)||0;
   if(people<=0){ alert('请输入人数'); return; }
   if(perPerson===null && budget<=0){ alert('请输入总餐标或人均'); return; }
 
-  const body = {people, total_budget: perPerson ? perPerson*people : budget};
+  const body = {people, total_budget: perPerson ? perPerson*people : budget,
+    kitchen_labor: kitchenLabor, delivery_labor: deliveryLabor};
   if(perPerson) body.per_person = perPerson;
 
   fetch('/api/catering/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -503,14 +521,22 @@ function renderCatering(d){
       <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
         <div style="font-size:12px;color:#888">餐标</div><b>¥${s.budget}</b> <span style="font-size:11px;color:#888">(人均¥${s.per_person})</span>
       </div>
-      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
-        <div style="font-size:12px;color:#888">食材成本</div><b style="color:#c0392b">¥${s.total_cost}</b>
+      <div style="background:#fff;border:1px solid #c0392b;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">食材成本</div><b style="color:#c0392b">¥${s.food_cost}</b>
       </div>
-      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+      <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#856404">人工成本</div>
+        <b style="color:#856404">¥${s.labor_cost}</b>
+        <span style="font-size:10px;color:#856404">(后厨¥${s.kitchen_labor}+配送¥${s.delivery_labor})</span>
+      </div>
+      <div style="background:#fff;border:1px solid #c0392b;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">总成本</div><b style="color:#c0392b">¥${s.total_cost}</b>
+      </div>
+      <div style="background:#fff;border:1px solid #27ae60;padding:8px 12px;border-radius:8px">
         <div style="font-size:12px;color:#888">毛利</div><b style="color:#27ae60">¥${s.margin} (${s.margin_pct}%)</b>
       </div>
       <div style="background:#fff;border:1px solid ${healthColor};padding:8px 12px;border-radius:8px">
-        <div style="font-size:12px;color:#888">成本区间</div>
+        <div style="font-size:12px;color:#888">食材成本区间</div>
         <b style="color:${healthColor}">¥${s.target_cost_range[0]}-${s.target_cost_range[1]} ${s.is_healthy?'✓':'✗'}</b>
       </div>
       <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
@@ -541,7 +567,6 @@ function renderCatering(d){
       <tbody>${toolRows}</tbody>
     </table>
   `;
-  // 默认套餐名
   document.getElementById('cat_pkgname').value = `定制${s.people}人¥${s.budget}`;
   document.getElementById('cateringSaveBox').style.display='block';
 }
@@ -556,6 +581,8 @@ function saveCatering(){
       name,
       people: s.people,
       total_budget: s.budget,
+      kitchen_labor: s.kitchen_labor,
+      delivery_labor: s.delivery_labor,
       ingredients: cateringData.ingredients,
       tools: cateringData.tools
     })})
