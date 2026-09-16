@@ -165,6 +165,7 @@
     background:rgba(0,0,0,.1);padding:1px 7px;border-radius:8px;font-size:12px;
   }
   .date-chip.active .chip-cnt{background:rgba(255,255,255,.3)}
+  .date-chip.active .muted{color:rgba(255,255,255,.85)}
   .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:12px;gap:2px}
   .mode-tab button{padding:10px 18px;border:none;background:transparent;color:#8a7f75;border-radius:10px;font-weight:700;cursor:pointer;font-size:15px}
   .mode-tab button.active{background:var(--primary);color:#fff}
@@ -216,7 +217,7 @@
 
   <!-- 今日订单概览 -->
   <div class="card" id="ordersCard">
-    <h3><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
+    <h3 id="ordersTitle"><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
     <div id="ordersList"></div>
   </div>
 
@@ -263,6 +264,11 @@ let prepData = null;
 let currentMode = 'merged';
 let prepDates = [];
 let todayOverride = null;  // 后端返回的"今天"（北京时间），覆盖浏览器时区
+let todayDateStr = '';      // 后端返回的今天日期，供各函数共用
+const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'];
+function weekdayOf(s){ return WEEKDAYS[new Date(s+'T00:00:00Z').getUTCDay()]; }
+function mdOf(s){ const p=s.split('-'); return `${parseInt(p[1],10)}.${parseInt(p[2],10)}`; }
+function dayDiff(a,b){ return Math.round((new Date(a+'T00:00:00Z')-new Date(b+'T00:00:00Z'))/86400000); }
 
 // 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
 document.getElementById('datePick').value = new Date().toISOString().slice(0,10);
@@ -278,19 +284,13 @@ function loadPrepDates(autoSwitch){
   fetch('/api/prep/dates').then(r=>r.json()).then(res=>{
     if(!res.ok) return;
     prepDates = res.dates || [];
-    renderDateChips(res.today);
-    // 首次进入：自动选中第一个有订单的日期（避免默认今天0单看不到数据）
-    if(autoSwitch !== false && prepDates.length){
-      // 优先选今天/未来最近的，否则选最后一个过去日期
-      const todayStr = res.today;
-      let target = prepDates.find(d=>d.booking_date===todayStr && d.cnt>0)
-                || prepDates.find(d=>!d.is_past && d.cnt>0)
-                || prepDates.find(d=>d.is_today)
-                || prepDates[0];
-      if(target && target.cnt>0){
-        document.getElementById('datePick').value = target.booking_date;
-        loadPrep();
-      }
+    const todayStr = res.today;
+    todayDateStr = todayStr;
+    renderDateChips(todayStr);
+    // 首次进入：始终以今天为默认日期（不自动跳到未来/过去，避免混淆）
+    if(autoSwitch !== false){
+      document.getElementById('datePick').value = todayStr;
+      loadPrep();
     }
   });
 }
@@ -307,14 +307,6 @@ function renderDateChips(todayStr){
     dates.unshift({booking_date: todayStr, cnt: 0, is_today: true, is_past: false});
   }
   const currentDate = document.getElementById('datePick').value;
-  // 纯字符串日期差计算（YYYY-MM-DD），不依赖浏览器时区
-  function dateDiff(d1, d2){
-    const a = new Date(d1 + 'T00:00:00Z');
-    const b = new Date(d2 + 'T00:00:00Z');
-    return Math.round((a - b) / 86400000);
-  }
-  // 从 YYYY-MM-DD 取 MM.DD
-  function md(s){ const p = s.split('-'); return `${parseInt(p[1],10)}.${parseInt(p[2],10)}`; }
   box.innerHTML = dates.map(d=>{
     const cls = [
       'date-chip',
@@ -322,16 +314,16 @@ function renderDateChips(todayStr){
       d.is_past ? 'past' : '',
       d.booking_date === currentDate ? 'active' : ''
     ].filter(Boolean).join(' ');
-    // 显示友好格式：用后端 is_today/is_past 判断，日期差用 UTC 字符串计算避免时区错位
-    const diffDays = dateDiff(d.booking_date, todayStr);
+    // 显示友好格式：今天/明天/昨天 用相对词，其他显示 MM.DD + 星期
+    const diffDays = dayDiff(d.booking_date, todayStr);
     let prefix = '';
     if(d.is_today || diffDays === 0) prefix = '📍 今天';
     else if(diffDays === 1) prefix = '⏰ 明天';
     else if(diffDays === -1) prefix = '↩️ 昨天';
-    else if(diffDays > 1) prefix = `📅 ${md(d.booking_date)}`;
-    else prefix = `📤 ${md(d.booking_date)}`;
+    else if(diffDays > 1) prefix = `📅 ${mdOf(d.booking_date)}`;
+    else prefix = `📤 ${mdOf(d.booking_date)}`;
     return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">
-      ${prefix} <span class="chip-cnt">${d.cnt}单</span>
+      ${prefix} <span class="muted" style="font-weight:400">${weekdayOf(d.booking_date)}</span> <span class="chip-cnt">${d.cnt}单</span>
     </button>`;
   }).join('');
 }
@@ -369,8 +361,25 @@ function render(){
   if(!prepData) return;
   const d = prepData;
   let orders = d.orders || [];
+
+  // 动态标题：根据选中日期显示，不再写死"今日"
+  const selDate = document.getElementById('datePick').value;
+  const todayStr = todayDateStr || selDate;
+  const diff = dayDiff(selDate, todayStr);
+  let titlePrefix = '';
+  if(diff===0) titlePrefix='📍 今天';
+  else if(diff===1) titlePrefix='⏰ 明天';
+  else if(diff===-1) titlePrefix='↩️ 昨天';
+  else if(diff>1) titlePrefix='📅';
+  else titlePrefix='📤';
+  const dateText = diff===0 ? '' : ` ${mdOf(selDate)}`;
+  const weekdayText = ` ${weekdayOf(selDate)}`;
+  document.getElementById('ordersTitle').innerHTML =
+    `<span class="dot" style="background:var(--accent)"></span>${titlePrefix}${dateText}<span class="muted" style="font-weight:400;font-size:14px">${weekdayText}</span> 待备订单`;
+
   if(!orders.length){
-    document.getElementById('ordersList').innerHTML = '<div class="muted" style="padding:24px;text-align:center;font-size:16px">🍖 当天暂无待备订单</div>';
+    const emptyHint = diff===0 ? '🍖 今天暂无待备订单' : `🍖 ${titlePrefix}${dateText}${weekdayText} 暂无待备订单`;
+    document.getElementById('ordersList').innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:16px">${emptyHint}</div>`;
     document.getElementById('prepCard').style.display='none';
     document.getElementById('orderView').style.display='none';
     return;
@@ -390,12 +399,26 @@ function render(){
   d.orders = orders;
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
     const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
-    // 显示预约日期+时间（与订单页一致），用餐时间单独标
-    const dtStr = [o.booking_date, o.booking_time].filter(Boolean).join(' ') || '待定';
+    // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
+    const oDate = o.booking_date || '';
+    const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
+    let dateLabel = '';
+    if(oDate){
+      if(oDiff===0) dateLabel = `今天 ${o.booking_time||''}`;
+      else if(oDiff===1) dateLabel = `明天 ${o.booking_time||''}`;
+      else if(oDiff===-1) dateLabel = `昨天 ${o.booking_time||''}`;
+      else dateLabel = `${mdOf(oDate)} ${weekdayOf(oDate)} ${o.booking_time||''}`;
+    } else {
+      dateLabel = o.booking_time || '待定';
+    }
     const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
+    // 非今天的订单日期用色块突出
+    const dateHighlight = (oDiff!==null && oDiff!==0)
+      ? `<span style="background:#fff3cd;color:#856404;padding:2px 8px;border-radius:6px;font-weight:700">${dateLabel}${mealStr}</span>`
+      : `📅 ${dateLabel}${mealStr}`;
     return `<div class="order-mini">
       <b>#${o.id}</b>
-      <span>📅 ${dtStr}${mealStr}</span>
+      <span>${dateHighlight}</span>
       <span class="muted">${o.address||''}</span>
       ${pkgs?`<span class="muted">🍱 ${pkgs}</span>`:''}
       ${urgBadge(o.urgency)}
@@ -528,11 +551,23 @@ function renderByOrder(){
   const d = prepData;
   const box = document.getElementById('orderView');
   box.style.display='';
+  const todayStr = todayDateStr || document.getElementById('datePick').value;
   box.innerHTML = d.orders.map(o=>{
-    const dtStr = [o.booking_date, o.booking_time].filter(Boolean).join(' ') || '待定';
+    // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
+    const oDate = o.booking_date || '';
+    const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
+    let dateLabel = '';
+    if(oDate){
+      if(oDiff===0) dateLabel = `今天 ${o.booking_time||''}`;
+      else if(oDiff===1) dateLabel = `明天 ${o.booking_time||''}`;
+      else if(oDiff===-1) dateLabel = `昨天 ${o.booking_time||''}`;
+      else dateLabel = `${mdOf(oDate)} ${weekdayOf(oDate)} ${o.booking_time||''}`;
+    } else {
+      dateLabel = o.booking_time || '待定';
+    }
     const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
-      <h3 style="margin:0">📋 订单 #${o.id} · 📅 ${dtStr}${mealStr} ${urgBadge(o.urgency)}</h3>
+      <h3 style="margin:0">📋 订单 #${o.id} · 📅 ${dateLabel}${mealStr} ${urgBadge(o.urgency)}</h3>
       <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
     </div><div class="muted" style="padding:16px">加载中...</div></div>`;
   }).join('');
