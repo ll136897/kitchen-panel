@@ -983,3 +983,217 @@ def calc_merged_prep(order_ids):
         "tableware": utensil,
         "checked_map": checked_map,
     }
+
+
+# ===== 餐标配餐器 =====
+# 思路：基于现有套餐的"人均配比"做线性扩展
+# 1. 按 per_person_budget 找最接近的现有套餐做基准
+# 2. 按人数比例缩放 package_ingredients
+# 3. 成本校验（目标 38-45%）：超了减高价牛肉，不够加饱腹菜
+# 4. 工具按人数配：椅子=人数，炉子=ceil(人数/4)
+
+def catering_suggest(people, total_budget, per_person=None):
+    """餐标配餐器：返回建议方案（食材列表+工具+成本摘要）
+    people: 人数
+    total_budget: 总餐标（元）
+    per_person: 可选人均餐标，优先于 total_budget/people
+    """
+    import math
+    if per_person is not None:
+        total_budget = per_person * people
+    if people <= 0 or total_budget <= 0:
+        return {"ok": False, "msg": "人数和餐标必须大于0"}
+
+    db = get_db()
+    cur = db.cursor()
+
+    # 1. 取所有套餐含食材+成本
+    cur.execute("""
+        SELECT p.id, p.name, p.min_people, p.max_people, p.base_price,
+               pi.per_package, pi.portion_count, pi.cost_only,
+               i.id as ing_id, i.name as ing_name, i.unit, i.cost, i.category
+        FROM packages p
+        LEFT JOIN package_ingredients pi ON pi.package_id = p.id
+        LEFT JOIN ingredients i ON i.id = pi.ingredient_id
+        ORDER BY p.min_people
+    """)
+    rows = cur.fetchall()
+
+    # 按套餐分组
+    packages = {}
+    for r in rows:
+        pid = r["id"]
+        if pid not in packages:
+            packages[pid] = {
+                "id": pid, "name": r["name"],
+                "min_people": r["min_people"], "max_people": r["max_people"],
+                "base_price": r["base_price"],
+                "ingredients": []
+            }
+        if r["ing_id"]:
+            packages[pid]["ingredients"].append({
+                "ing_id": r["ing_id"], "name": r["ing_name"],
+                "per_package": r["per_package"], "portion_count": r["portion_count"],
+                "cost_only": r["cost_only"], "unit": r["unit"],
+                "cost": r["cost"], "category": r["category"]
+            })
+
+    if not packages:
+        return {"ok": False, "msg": "无套餐数据"}
+
+    # 2. 找基准套餐：人均餐标最接近的
+    target_per = total_budget / people
+    # 排除含配送费的干扰，用 base_price / max_people 做比较
+    best_pkg = None
+    best_diff = float('inf')
+    for pid, pkg in packages.items():
+        if not pkg["ingredients"]:
+            continue
+        ref_per = pkg["base_price"] / pkg["max_people"]
+        diff = abs(ref_per - target_per)
+        if diff < best_diff:
+            best_diff = diff
+            best_pkg = pkg
+
+    if not best_pkg:
+        return {"ok": False, "msg": "无有效套餐可参考"}
+
+    # 3. 按人数比例缩放（按基准套餐的 max_people 缩放）
+    base_people = best_pkg["max_people"]
+    ratio = people / base_people
+
+    # 聚合同名食材（可能多次出现，如生菜有 cost_only=0 和 =1）
+    ing_map = {}
+    for ing in best_pkg["ingredients"]:
+        key = (ing["ing_id"], ing["cost_only"] or 0)
+        if key not in ing_map:
+            ing_map[key] = {
+                "ing_id": ing["ing_id"], "name": ing["name"],
+                "unit": ing["unit"], "cost": ing["cost"] or 0,
+                "category": ing["category"], "cost_only": ing["cost_only"] or 0,
+                "per_package": 0, "portion_count": 0
+            }
+        ing_map[key]["per_package"] += ing["per_package"] * ratio
+        ing_map[key]["portion_count"] += ing["portion_count"] * ratio
+
+    # 4. 数值取整：重量类保留 10g 精度，份数类向上取整
+    for key, it in ing_map.items():
+        if it["unit"] == "g":
+            it["per_package"] = round(it["per_package"] / 10) * 10
+        elif it["unit"] in ("份", "个", "瓶", "双", "张", "包"):
+            it["per_package"] = math.ceil(it["per_package"])
+        else:
+            it["per_package"] = round(it["per_package"], 1)
+        it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+
+    # 5. 成本校验：目标 38-45%
+    total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
+    target_low = total_budget * 0.38
+    target_high = total_budget * 0.45
+    warnings = []
+
+    # 超预算：按高价到低价顺序减牛肉（每 50g 一档）
+    def _adjust_beef(delta_g):
+        beef_items = sorted([it for it in ing_map.values()
+                              if it["category"] in ("meat", "beef")
+                              and "牛" in it["name"]
+                              and it["unit"] == "g"],
+                             key=lambda x: -x["cost"])
+        for it in beef_items:
+            if delta_g == 0:
+                break
+            change = min(delta_g, max(0, it["per_package"] - 50))
+            it["per_package"] -= change
+            it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+            delta_g -= change
+        return delta_g
+
+    # 不够预算：加饱腹菜（土豆/馒头）
+    def _add_filler(delta_budget):
+        fillers = sorted([it for it in ing_map.values()
+                          if "馒头" in it["name"] or "土豆" in it["name"]],
+                         key=lambda x: x["cost"])
+        for it in fillers:
+            if delta_budget <= 0:
+                break
+            if it["unit"] == "个":
+                add = min(math.ceil(delta_budget / it["cost"]), 5)
+                it["per_package"] += add
+                it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+                delta_budget -= add * it["cost"]
+            elif it["unit"] == "g":
+                add = min(int(delta_budget / it["cost"] / 50) * 50, 500)
+                if add > 0:
+                    it["per_package"] += add
+                    it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+                    delta_budget -= add * it["cost"]
+        return delta_budget
+
+    if total_cost > target_high:
+        excess = total_cost - target_high
+        # 按牛肉 cost 降序，减 50g 一档
+        delta_g = int(excess / 0.1)  # 粗算每 100g 牛肉约 10 元
+        remaining = _adjust_beef(delta_g)
+        total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
+        if total_cost > target_high:
+            warnings.append(f"成本 ¥{total_cost} 仍超上限 ¥{target_high:.0f}，建议手动减项")
+    elif total_cost < target_low:
+        shortage = target_low - total_cost
+        _add_filler(shortage)
+        total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
+        if total_cost < target_low:
+            warnings.append(f"成本 ¥{total_cost} 低于目标 ¥{target_low:.0f}，可加牛肉提档")
+
+    # 6. 工具按人数配
+    cur.execute("SELECT id, name, stock, threshold, cost FROM tools")
+    all_tools = [dict(r) for r in cur.fetchall()]
+    tool_list = []
+    for t in all_tools:
+        n = t["name"]
+        if n == "椅子":
+            qty = people
+        elif n == "卡式炉":
+            qty = math.ceil(people / 4)
+        elif n == "烤盘":
+            qty = math.ceil(people / 4)
+        elif n == "燃气罐":
+            qty = math.ceil(people / 4) + 1  # 多备一个
+        elif n == "天幕":
+            qty = 1 if people <= 10 else 2
+        elif n == "蛋卷桌":
+            qty = math.ceil(people / 5)
+        elif n in ("夹子", "剪刀"):
+            qty = math.ceil(people / 8)
+        else:
+            qty = 1
+        tool_list.append({
+            "id": t["id"], "name": n, "per_package": qty,
+            "stock": t["stock"], "shortage": max(0, qty - t["stock"])
+        })
+
+    # 7. 摘要
+    meat_weight = sum(it["per_package"] for it in ing_map.values()
+                      if it["category"] in ("meat", "beef", "pork", "chicken")
+                      and it["unit"] == "g" and not it["cost_only"])
+    return {
+        "ok": True,
+        "data": {
+            "base_package": best_pkg["name"],
+            "base_people": base_people,
+            "ratio": round(ratio, 2),
+            "ingredients": list(ing_map.values()),
+            "tools": tool_list,
+            "summary": {
+                "people": people,
+                "budget": total_budget,
+                "per_person": round(total_budget / people, 2),
+                "total_cost": total_cost,
+                "margin": round(total_budget - total_cost, 2),
+                "margin_pct": round((total_budget - total_cost) / total_budget * 100, 1),
+                "meat_weight_per_person": round(meat_weight / people),
+                "target_cost_range": [round(target_low), round(target_high)],
+                "is_healthy": target_low <= total_cost <= target_high,
+            },
+            "warnings": warnings,
+        }
+    }

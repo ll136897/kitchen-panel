@@ -641,6 +641,60 @@ def del_package(pid):
     return jsonify({"ok": True})
 
 
+# ===== 餐标配餐器 =====
+@app.route("/api/catering/suggest", methods=["POST"])
+def catering_suggest():
+    """餐标配餐器：输入人数+餐标，返回建议套餐方案"""
+    from calculator import catering_suggest as _cs
+    data = request.get_json(force=True)
+    people = int(data.get("people", 0))
+    total = float(data.get("total_budget", 0))
+    per_person = data.get("per_person")
+    if per_person is not None:
+        per_person = float(per_person)
+    result = _cs(people, total, per_person)
+    return jsonify(result)
+
+
+@app.route("/api/catering/save", methods=["POST"])
+def catering_save():
+    """把配餐方案保存为定制套餐"""
+    data = request.get_json(force=True)
+    name = data.get("name", "").strip()
+    people = int(data.get("people", 0))
+    total = float(data.get("total_budget", 0))
+    ings = data.get("ingredients", [])
+    tools = data.get("tools", [])
+    if not name or people <= 0:
+        return jsonify({"ok": False, "msg": "套餐名和人数必填"}), 400
+
+    db = g.db
+    cur = db.cursor()
+    # base_price = 餐标 - 配送费
+    df_row = db.execute("SELECT CAST(value AS REAL) as df FROM settings WHERE key='delivery_fee'").fetchone()
+    df = df_row["df"] if df_row else 0
+    base_price = max(0, total - df)
+    total_price = base_price + df
+    cur.execute("""
+        INSERT INTO packages (name, min_people, max_people, base_price, price, service_type, is_team)
+        VALUES (?,?,?,?,?,?,?)
+    """, (name, people, people, base_price, total_price, "搭建", 0))
+    pid = cur.lastrowid
+    for ing in ings:
+        cur.execute("""
+            INSERT INTO package_ingredients (package_id, ingredient_id, per_package, portion_count, cost_only)
+            VALUES (?,?,?,?,?)
+        """, (pid, ing["ing_id"], ing["per_package"],
+              ing.get("portion_count", 1), ing.get("cost_only", 0)))
+    for t in tools:
+        cur.execute("""
+            INSERT INTO package_tools (package_id, tool_id, per_package)
+            VALUES (?,?,?)
+        """, (pid, t["id"], t.get("per_package", 1)))
+    db.commit()
+    return jsonify({"ok": True, "id": pid})
+
+
 # 修改套餐里某食材的配量(每份克数 + 份数)
 @app.route("/api/packages/<int:pid>/ingredient/<int:pi_id>", methods=["PUT", "DELETE"])
 def update_pkg_ingredient(pid, pi_id):

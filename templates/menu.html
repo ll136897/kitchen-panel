@@ -80,6 +80,7 @@
     </div>
     <div class="toolbar">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-sm" style="background:#6b4f3a;color:#fff" onclick="openCatering()">🍱 餐标配餐器</button>
       <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
       <button class="btn btn-sm" onclick="collapseAll()">📦 全收起</button>
       <button class="btn btn-sm" onclick="exportAllXlsx()">📊 导出全部Excel</button>
@@ -87,6 +88,33 @@
   </div>
 
   <div id="menuList"></div>
+</div>
+
+<!-- ===== 餐标配餐器弹窗 ===== -->
+<div id="cateringModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;overflow:auto;padding:20px">
+  <div style="background:#fff;max-width:900px;margin:0 auto;border-radius:14px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0;color:var(--primary)">🍱 餐标配餐器</h2>
+      <button class="btn btn-sm" onclick="closeCatering()">✕ 关闭</button>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:#faf5ed;border-radius:10px">
+      <label>人数 <input type="number" id="cat_people" value="16" min="1" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <label>总餐标 ¥ <input type="number" id="cat_budget" value="1000" min="0" step="50" style="width:100px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <span style="color:#888">或</span>
+      <label>人均 ¥ <input type="number" id="cat_perperson" placeholder="如60" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <button class="btn btn-primary btn-sm" onclick="generateCatering()">🚀 生成方案</button>
+    </div>
+
+    <div id="cateringResult"></div>
+
+    <div id="cateringSaveBox" style="display:none;margin-top:16px;padding:12px;background:#e7f5e7;border-radius:10px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label>套餐名 <input type="text" id="cat_pkgname" placeholder="如：定制16人1000元" style="flex:1;min-width:200px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+        <button class="btn btn-primary" onclick="saveCatering()">💾 保存为定制套餐</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -407,6 +435,137 @@ function downloadFile(url){
 }
 
 loadMenu();
+
+// ===== 餐标配餐器 =====
+let cateringData = null;  // 当前生成的方案，供保存用
+const CAT_COLOR = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',
+  side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#888',other:'#666',
+  packaging:'#d35400',utensil:'#8e44ad',tool:'#4a4a4a',meat:'#8e1e1a'};
+
+function openCatering(){
+  document.getElementById('cateringModal').style.display='block';
+}
+function closeCatering(){
+  document.getElementById('cateringModal').style.display='none';
+}
+
+function generateCatering(){
+  const people = parseInt(document.getElementById('cat_people').value)||0;
+  const budget = parseFloat(document.getElementById('cat_budget').value)||0;
+  const perPerson = parseFloat(document.getElementById('cat_perperson').value)||null;
+  if(people<=0){ alert('请输入人数'); return; }
+  if(perPerson===null && budget<=0){ alert('请输入总餐标或人均'); return; }
+
+  const body = {people, total_budget: perPerson ? perPerson*people : budget};
+  if(perPerson) body.per_person = perPerson;
+
+  fetch('/api/catering/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)})
+    .then(r=>r.json()).then(res=>{
+      if(!res.ok){ alert(res.msg||'生成失败'); return; }
+      cateringData = res.data;
+      renderCatering(res.data);
+    });
+}
+
+function renderCatering(d){
+  const s = d.summary;
+  const ingRows = d.ingredients.map(it=>{
+    const color = CAT_COLOR[it.category] || '#666';
+    const catName = ({beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',
+      sauce:'小料',drink:'赠品',staple:'主食',other:'其他',packaging:'包装',
+      utensil:'餐具',meat:'肉类'})[it.category] || it.category;
+    return `<tr>
+      <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span>${catName}</td>
+      <td>${it.name}</td>
+      <td style="text-align:right">${it.per_package}${it.unit}</td>
+      <td style="text-align:right">¥${it.cost.toFixed(2)}</td>
+      <td style="text-align:right;font-weight:700;color:#c0392b">¥${it.sub_total.toFixed(2)}</td>
+      <td style="text-align:center">${it.cost_only?'损耗':'备餐'}</td>
+    </tr>`;
+  }).join('');
+  const toolRows = d.tools.map(t=>`<tr>
+    <td>${t.name}</td><td style="text-align:right">${t.per_package}</td>
+    <td style="text-align:right">${t.stock}</td>
+    <td style="text-align:right;color:${t.shortage>0?'#c0392b':'#27ae60'}">${t.shortage>0?'缺 '+t.shortage:'✓'}</td>
+  </tr>`).join('');
+
+  const healthColor = s.is_healthy ? '#27ae60' : '#c0392b';
+  const warnHtml = (d.warnings||[]).map(w=>`<div style="color:#c0392b;padding:4px 0">⚠️ ${w}</div>`).join('');
+  document.getElementById('cateringResult').innerHTML = `
+    <div style="background:#faf5ed;padding:10px;border-radius:8px;margin-bottom:12px;font-size:13px">
+      参考 <b>${d.base_package}</b>（${d.base_people}人）按 ${d.ratio}x 缩放
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">人数</div><b>${s.people}</b>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">餐标</div><b>¥${s.budget}</b> <span style="font-size:11px;color:#888">(人均¥${s.per_person})</span>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">食材成本</div><b style="color:#c0392b">¥${s.total_cost}</b>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">毛利</div><b style="color:#27ae60">¥${s.margin} (${s.margin_pct}%)</b>
+      </div>
+      <div style="background:#fff;border:1px solid ${healthColor};padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">成本区间</div>
+        <b style="color:${healthColor}">¥${s.target_cost_range[0]}-${s.target_cost_range[1]} ${s.is_healthy?'✓':'✗'}</b>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">人均肉类</div><b>${s.meat_weight_per_person}g</b>
+      </div>
+    </div>
+    ${warnHtml}
+    <h4 style="color:var(--primary);margin:14px 0 8px">📋 食材清单</h4>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f3efe8">
+        <th style="text-align:left;padding:6px">分类</th>
+        <th style="text-align:left;padding:6px">食材</th>
+        <th style="text-align:right;padding:6px">用量</th>
+        <th style="text-align:right;padding:6px">单价</th>
+        <th style="text-align:right;padding:6px">小计</th>
+        <th style="text-align:center;padding:6px">类型</th>
+      </tr></thead>
+      <tbody>${ingRows}</tbody>
+    </table>
+    <h4 style="color:var(--primary);margin:14px 0 8px">🔧 工具装备</h4>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#f3efe8">
+        <th style="text-align:left;padding:6px">工具</th>
+        <th style="text-align:right;padding:6px">需要</th>
+        <th style="text-align:right;padding:6px">库存</th>
+        <th style="text-align:right;padding:6px">状态</th>
+      </tr></thead>
+      <tbody>${toolRows}</tbody>
+    </table>
+  `;
+  // 默认套餐名
+  document.getElementById('cat_pkgname').value = `定制${s.people}人¥${s.budget}`;
+  document.getElementById('cateringSaveBox').style.display='block';
+}
+
+function saveCatering(){
+  if(!cateringData){ alert('请先生成方案'); return; }
+  const name = document.getElementById('cat_pkgname').value.trim();
+  if(!name){ alert('请输入套餐名'); return; }
+  const s = cateringData.summary;
+  fetch('/api/catering/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      name,
+      people: s.people,
+      total_budget: s.budget,
+      ingredients: cateringData.ingredients,
+      tools: cateringData.tools
+    })})
+    .then(r=>r.json()).then(res=>{
+      if(!res.ok){ alert(res.msg||'保存失败'); return; }
+      alert('✓ 已保存为定制套餐：'+name);
+      closeCatering();
+      loadMenu();  // 刷新套餐列表
+    });
+}
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){
