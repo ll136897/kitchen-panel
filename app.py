@@ -433,7 +433,9 @@ def api_stock_inbound():
         if not iid or qty <= 0:
             continue
         table = "ingredients" if itype == "ingredient" else "tools"
-        # 加权平均更新成本：new_cost = (旧库存*旧成本 + 新采购量*采购单价) / (旧库存+新采购量)
+        # 成本更新规则（用户定制）：
+        #   涨价（新单价 > 旧成本）→ 直接用新单价（保守，配餐不亏本）
+        #   跌价或持平（新单价 ≤ 旧成本）→ 加权平均（平滑波动）
         if unit_price > 0:
             row = db.execute(f"SELECT stock, cost FROM {table} WHERE id = ?", (iid,)).fetchone()
             if row:
@@ -441,7 +443,13 @@ def api_stock_inbound():
                 old_cost = row["cost"] or 0
                 new_stock = old_stock + qty
                 if new_stock > 0:
-                    new_cost = round((old_stock * old_cost + qty * unit_price) / new_stock, 4)
+                    # 加权平均（用于库存价值核算）
+                    weighted_cost = round((old_stock * old_cost + qty * unit_price) / new_stock, 4)
+                    # 涨价用新价，跌价/持平用加权
+                    if unit_price > old_cost and old_cost > 0:
+                        new_cost = round(unit_price, 4)  # 涨价→新价
+                    else:
+                        new_cost = weighted_cost        # 跌价/持平→加权
                     db.execute(f"UPDATE {table} SET stock = stock + ?, cost = ? WHERE id = ?", (qty, new_cost, iid))
                 else:
                     db.execute(f"UPDATE {table} SET stock = stock + ? WHERE id = ?", (qty, iid))
