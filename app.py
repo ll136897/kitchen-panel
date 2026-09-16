@@ -500,7 +500,11 @@ def manage_ingredients():
     db = g.db
     if request.method == "GET":
         rows = db.execute("SELECT * FROM ingredients ORDER BY id").fetchall()
-        return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+        items = [dict(r) for r in rows]
+        # meat 细分 + 固定排序（复用 calculator.sort_ingredients）
+        from calculator import sort_ingredients
+        items = sort_ingredients(items)
+        return jsonify({"ok": True, "data": items})
     data = request.get_json(force=True)
     db.execute("""
         INSERT INTO ingredients (name, unit, stock, threshold, cost, category)
@@ -551,7 +555,7 @@ def manage_tools():
     if request.method == "GET":
         rows = db.execute("SELECT * FROM tools").fetchall()
         from calculator import sort_tools
-        return jsonify({"ok": True, "data": sort_tools([dict(r) for r in rows], "stock")})
+        return jsonify({"ok": True, "data": sort_tools([dict(r) for r in rows])})
     data = request.get_json(force=True)
     db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
               (data["name"], data.get("stock", 0), data.get("threshold", 0), data.get("cost", 0)))

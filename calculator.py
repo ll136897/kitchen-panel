@@ -793,8 +793,34 @@ def _tool_sort_index(name):
 
 
 def sort_tools(items, key="need", name_field="name"):
-    """按固定顺序排序工具列表，相同顺序按用量降序。"""
+    """按固定顺序排序工具列表，相同顺序按 key 降序。"""
     return sorted(items, key=lambda x: (_tool_sort_index(x.get(name_field, "")), -x.get(key, 0)))
+
+
+def sort_ingredients(items, name_field="name", cat_field="category"):
+    """食材列表排序：先按 CATEGORY_ORDER 分类，组内按 INGREDIENT_FIXED_ORDER 固定顺序，
+    不在固定列表的按库存升序（低库存排前面）。
+    同时自动细分 meat 类 → beef/pork/chicken。
+    输入可以是 dict 列表，返回新的排好序的 dict 列表，且每个 dict 的 category 已被细分。
+    """
+    # 先细分 category
+    for x in items:
+        x[cat_field] = _subcategorize_meat(x.get(name_field, ""), x.get(cat_field, "other"))
+
+    # 按 CATEGORY_ORDER + 固定索引排序
+    cat_rank = {cat: i for i, cat in enumerate(CATEGORY_ORDER)}
+
+    def _sort_key(x):
+        cat = x.get(cat_field, "other")
+        cat_idx = cat_rank.get(cat, 999)
+        fixed_idx = _get_fixed_sort_index(x.get(name_field, ""), cat)
+        # 不在固定列表的（fixed_idx=999），按 stock 升序（低库存优先）
+        if fixed_idx >= 999:
+            stock = x.get("stock", 0) or 0
+            return (cat_idx, 999, stock)
+        return (cat_idx, fixed_idx, 0)
+
+    return sorted(items, key=_sort_key)
 
 
 def calc_merged_prep(order_ids):
