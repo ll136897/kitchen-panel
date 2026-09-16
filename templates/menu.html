@@ -163,10 +163,15 @@ function renderPkg(p, idx){
   });
   // 工具单独一组
   const tools = p.tools || [];
-  // 统计荤菜(牛猪鸡)/素菜(素菜+小菜)数量
+  // 统计荤菜(牛猪鸡)/素菜(素菜+小菜)数量：按 portion_count 累加
+  // 同菜品多份对客户感知是"多了一道菜"，不是去重计数
   let meatCount = 0, vegCount = 0;
-  ['beef','pork','chicken'].forEach(c => meatCount += (byCat[c]||[]).length);
-  ['vegetable','side'].forEach(c => vegCount += (byCat[c]||[]).length);
+  ['beef','pork','chicken'].forEach(c => {
+    (byCat[c]||[]).forEach(i => { meatCount += Math.round(i.portion_count||1); });
+  });
+  ['vegetable','side'].forEach(c => {
+    (byCat[c]||[]).forEach(i => { vegCount += Math.round(i.portion_count||1); });
+  });
 
   let bodyHtml = '<table class="ing-tbl"><thead><tr>'+
     '<th>名称</th><th>份数</th><th>每份数量</th><th>单位</th><th>总量</th><th>保存</th><th>删除</th>'+
