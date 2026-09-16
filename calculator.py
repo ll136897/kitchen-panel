@@ -1122,63 +1122,40 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
             delta_g -= change
         return delta_g
 
-    # 不够预算：优先加肉类（cost 高，快速拉高成本），最后补主食
+    # 不够预算：直接给所有肉类按 cost 比例增加克数，快速拉高成本
     def _add_filler(delta_budget):
         if delta_budget <= 0:
-            return delta_budget
-        # 优先级：牛肉 → 猪肉 → 鸡肉 → 蘸料 → 主食 → 蔬菜
-        def _add_by_category(cat_filter, name_filter=None, max_per_round=200):
-            nonlocal delta_budget
-            candidates = [it for it in ing_map.values()
-                         if it["unit"] == "g" and it["cost"] > 0
-                         and (cat_filter is None or it["category"] in cat_filter)
-                         and (name_filter is None or any(k in it["name"] for k in name_filter))]
-            # 按 cost 降序，贵的先来（拉高成本最快）
-            candidates.sort(key=lambda x: -x["cost"])
-            for it in candidates:
-                if delta_budget <= 0:
-                    break
-                # 每次加 100g 起步，最多 max_per_round
-                unit_cost = it["cost"]
-                g_per_yuan = 1 / unit_cost  # 每元能买多少g
-                max_add_g = min(int(delta_budget * g_per_yuan / 50) * 50, max_per_round * 50)
-                if max_add_g >= 50:
-                    it["per_package"] += max_add_g
-                    it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-                    delta_budget -= max_add_g * it["cost"]
-        
-        # 多轮补足：先牛肉，再猪肉、鸡肉、蘸料，最后主食
-        for _ in range(3):
-            if delta_budget <= 0: break
-            _add_by_category({"beef"}, max_per_round=300)
-        for _ in range(2):
-            if delta_budget <= 0: break
-            _add_by_category({"pork"}, max_per_round=200)
-        for _ in range(2):
-            if delta_budget <= 0: break
-            _add_by_category({"chicken"}, max_per_round=200)
-        # 蘸料小份加多一点也合理
-        _add_by_category({"sauce"}, max_per_round=100)
-        
-        # 最后才是土豆/馒头（凑数用）
+            return 0
+        # 所有按g计价的食材，按 cost 从高到低
+        all_g_items = sorted([it for it in ing_map.values()
+                              if it["unit"] == "g" and it["cost"] > 0],
+                             key=lambda x: -x["cost"])
+        # 贵的先来（牛肉>猪肉>鸡肉>蘸料>蔬菜）
+        for it in all_g_items:
+            if delta_budget <= 0:
+                break
+            # 计算这一元素最多能加多少，直到补完缺口或加 1000g 上限
+            max_g = min(int(delta_budget / it["cost"] / 50) * 50, 1000)
+            if max_g >= 50:
+                it["per_package"] += max_g
+                it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+                delta_budget -= max_g * it["cost"]
+        # 最后补主食（馒头/土豆）
         if delta_budget > 0:
-            fillers = sorted([it for it in ing_map.values()
-                              if ("馒头" in it["name"] or "土豆" in it["name"]) and it["cost"] > 0],
-                             key=lambda x: x["cost"])
-            for it in fillers:
-                if delta_budget <= 0:
-                    break
-                if it["unit"] == "个":
-                    add = min(math.ceil(delta_budget / it["cost"]), 20)
-                    it["per_package"] += add
-                    it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-                    delta_budget -= add * it["cost"]
-                elif it["unit"] == "g":
-                    add = min(int(delta_budget / it["cost"] / 50) * 50, 2000)
-                    if add >= 50:
+            for it in ing_map.values():
+                if delta_budget <= 0: break
+                if ("馒头" in it["name"] or "土豆" in it["name"]) and it["cost"] > 0:
+                    if it["unit"] == "个":
+                        add = min(math.ceil(delta_budget / it["cost"]), 20)
                         it["per_package"] += add
                         it["sub_total"] = round(it["per_package"] * it["cost"], 2)
                         delta_budget -= add * it["cost"]
+                    elif it["unit"] == "g":
+                        add = min(int(delta_budget / it["cost"] / 50) * 50, 2000)
+                        if add >= 50:
+                            it["per_package"] += add
+                            it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+                            delta_budget -= add * it["cost"]
         return delta_budget
 
     if total_cost > target_high:
