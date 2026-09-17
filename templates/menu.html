@@ -108,9 +108,9 @@
 
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:#fff3cd;border-radius:10px;border:1px solid #ffeaa7">
       <span style="font-weight:700;color:#856404">👤 兼职人工成本（每单）</span>
-      <label>后厨 ¥ <input type="number" id="cat_kitchen_labor" value="40" min="0" step="10" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
-      <label>配送 ¥ <input type="number" id="cat_delivery_labor" value="20" min="0" step="10" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
-      <span style="font-size:12px;color:#856404">合计人工 ¥<b id="cat_labor_total" style="font-size:14px">60</b>/单</span>
+      <label>后厨 ¥ <input type="number" id="cat_kitchen_labor" value="60" min="0" step="20" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <label>配送 ¥ <input type="number" id="cat_delivery_labor" value="100" min="0" step="50" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <span style="font-size:12px;color:#856404">合计人工 ¥<b id="cat_labor_total" style="font-size:14px">160</b>/单</span>
     </div>
 
     <div id="cateringResult"></div>
@@ -459,6 +459,19 @@ function openCatering(){
   };
   document.getElementById('cat_kitchen_labor').oninput = updLabor;
   document.getElementById('cat_delivery_labor').oninput = updLabor;
+  // 人数超过10自动配送翻倍（2单×100=200）
+  const autoDelivery = ()=>{
+    const p = parseInt(document.getElementById('cat_people').value)||0;
+    const dl = document.getElementById('cat_delivery_labor');
+    if(dl.dataset.touched !== '1'){
+      dl.value = p > 10 ? 200 : 100;
+    }
+    updLabor();
+  };
+  document.getElementById('cat_people').oninput = autoDelivery;
+  // 用户手动改过配送就不再自动
+  document.getElementById('cat_delivery_labor').onchange = function(){ this.dataset.touched='1'; };
+  autoDelivery();
 }
 function closeCatering(){
   document.getElementById('cateringModal').style.display='none';
