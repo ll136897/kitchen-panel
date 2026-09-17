@@ -1095,6 +1095,10 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
             it["per_package"] = math.ceil(it["per_package"])
         else:
             it["per_package"] = round(it["per_package"], 1)
+        # 份数取整（不能出现 3.2 份）
+        it["portion_count"] = math.ceil(it["portion_count"]) if it["portion_count"] > 0 else 0
+        # 克数 = 总量 ÷ 份数
+        it["portion_size"] = round(it["per_package"] / max(1, it["portion_count"]), 2) if it["portion_count"] else 0
         it["sub_total"] = round(it["per_package"] * it["cost"], 2)
 
     # 5. 成本校验：食材成本目标 28-35%（扣除人工后的合理区间）
