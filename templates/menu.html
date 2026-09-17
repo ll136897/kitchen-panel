@@ -506,11 +506,21 @@ function renderCatering(d){
     const catName = ({beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',
       sauce:'小料',drink:'赠品',staple:'主食',other:'其他',packaging:'包装',
       utensil:'餐具',meat:'肉类'})[it.category] || it.category;
+    const pc = it.portion_count||1;
+    const ps = it.portion_size||0;
+    const isG = it.unit==='g';
+    // 单价：g 类按 ¥/kg 显示更直观，其他按原单位
+    const priceStr = isG ? `¥${(it.cost*1000).toFixed(1)}/kg` : `¥${it.cost.toFixed(2)}/${it.unit}`;
+    // 份数+克数列：g 类显示，非 g 类显示—
+    const pcStr = isG ? pc : '—';
+    const psStr = isG ? `${ps}g` : '—';
     return `<tr>
       <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:6px"></span>${catName}</td>
       <td>${it.name}</td>
-      <td style="text-align:right">${it.per_package}${it.unit}</td>
-      <td style="text-align:right">¥${it.cost.toFixed(2)}</td>
+      <td style="text-align:center">${pcStr}</td>
+      <td style="text-align:right">${psStr}</td>
+      <td style="text-align:right;font-weight:600">${it.per_package}${it.unit}</td>
+      <td style="text-align:right">${priceStr}</td>
       <td style="text-align:right;font-weight:700;color:#c0392b">¥${it.sub_total.toFixed(2)}</td>
       <td style="text-align:center">${it.cost_only?'损耗':'备餐'}</td>
     </tr>`;
@@ -562,7 +572,9 @@ function renderCatering(d){
       <thead><tr style="background:#f3efe8">
         <th style="text-align:left;padding:6px">分类</th>
         <th style="text-align:left;padding:6px">食材</th>
-        <th style="text-align:right;padding:6px">用量</th>
+        <th style="text-align:center;padding:6px">份数</th>
+        <th style="text-align:right;padding:6px">克数</th>
+        <th style="text-align:right;padding:6px">总量</th>
         <th style="text-align:right;padding:6px">单价</th>
         <th style="text-align:right;padding:6px">小计</th>
         <th style="text-align:center;padding:6px">类型</th>
