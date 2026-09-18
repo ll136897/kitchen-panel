@@ -1327,15 +1327,9 @@ def print_menu():
         PACKAGING_CATEGORY, UTENSIL_CATEGORY, SAUCE_LIKE_CATS, \
         _subcategorize_meat, _get_fixed_sort_index, sort_tools
     merged = calc_merged_prep([o["id"] for o in orders])
-    ing_sum = {item["id"]: item for item in merged["ingredients"]}
+    # merged["ingredients"] 是按分类分组的 dict: {cat: [item, ...]}
+    ing_by_cat = merged["ingredients"]
     tools_sorted = merged["tools"]
-
-    # 统一按 CATEGORY_ORDER 分组（含 packaging/utensil，与备餐/菜单页一致）
-    ing_by_cat = {}
-    for cat in CATEGORY_ORDER:
-        items = [v for v in ing_sum.values() if v.get("category") == cat]
-        if items:
-            ing_by_cat[cat] = sorted(items, key=lambda x: (_get_fixed_sort_index(x["name"], cat), -x["total"] if x.get("total") else 0))
 
     # 渲染成一个可打印的 HTML（独立页面，无 nav，适合 A4 打印）
     import datetime
