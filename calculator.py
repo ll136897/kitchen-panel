@@ -211,11 +211,14 @@ def calc_order_requirements(order_id):
                 amount = r["per_package"] * pk["quantity"]
                 pc = r["portion_count"] or 1
                 if r["id"] not in ing_demand:
-                    ing_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0, "portion_count": pc}
+                    ing_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0, "portion_count": pc, "total_portions": 0}
                 ing_demand[r["id"]]["total"] += amount
-                ing_demand[r["id"]]["per_package"] = r["per_package"]
-                ing_demand[r["id"]]["portion_count"] = pc
+                # per_package/portion_count 取用量大的那个套餐作为代表
+                if amount > ing_demand[r["id"]]["per_package"] * ing_demand[r["id"]]["order_qty"]:
+                    ing_demand[r["id"]]["per_package"] = r["per_package"]
+                    ing_demand[r["id"]]["portion_count"] = pc
                 ing_demand[r["id"]]["order_qty"] += pk["quantity"]
+                ing_demand[r["id"]]["total_portions"] += pc * pk["quantity"]
 
         for d in dishes:
             cur.execute("""
@@ -314,7 +317,7 @@ def calc_order_requirements(order_id):
                     "order_qty": info["order_qty"],
                     "portion_count": info.get("portion_count", 1),
                     "portion_size": round(info["per_package"] / max(1, info.get("portion_count", 1)), 2),
-                    "total_portions": info.get("portion_count", 1) * info["order_qty"],
+                    "total_portions": info.get("total_portions", info.get("portion_count", 1) * info["order_qty"]),
                 })
 
         cur.execute("SELECT id, name, unit, stock, threshold FROM ingredients")
@@ -877,12 +880,14 @@ def calc_merged_prep(order_ids):
                     "per_package_samples": [],  # [(per_package, order_quantity), ...]
                     "portion_count_samples": [],  # [(portion_count, order_quantity), ...]
                     "total_packages": 0,
+                    "total_portions": 0,
                 }
             ing_merge[key]["total"] += ing["need"]
             ing_merge[key]["order_ids"].append(o["id"])
             ing_merge[key]["per_package_samples"].append((ing.get("per_package"), ing.get("order_qty", 1)))
             ing_merge[key]["portion_count_samples"].append((ing.get("portion_count", 1), ing.get("order_qty", 1)))
             ing_merge[key]["total_packages"] += ing.get("order_qty", 1)
+            ing_merge[key]["total_portions"] += ing.get("total_portions", 0)
             detail_keys.append((o["id"], "ingredient", ing["id"]))
         for tl in req["tools"]:
             key = tl["id"]
@@ -917,7 +922,7 @@ def calc_merged_prep(order_ids):
         # 取代表 portion_count（份数）：取所有样本里的最大值
         pc_samples = [p for p, _ in v.get("portion_count_samples", []) if p]
         v["portion_count"] = max(pc_samples) if pc_samples else 1
-        v["total_portions"] = v["portion_count"] * v["total_packages"]
+        v["total_portions"] = v.get("total_portions", v["portion_count"] * v["total_packages"])
         v["portion_size"] = round(v["per_package"] / max(1, v["portion_count"]), 2)
         v["order_count"] = len(v["order_ids"])
         v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
