@@ -1413,13 +1413,15 @@ def print_menu():
   tbody td.num-cell{{ text-align:center; color:#444; font-weight:600; }}
   tbody td.total-cell{{ text-align:right; color:#c0392b; font-weight:800; font-family:"DIN","Helvetica Neue",sans-serif; }}
   tbody tr.cat-row td{{ padding:7px 10px; }}
-  .print-btn{{ margin:12px 6px 12px 0; padding:8px 16px; background:#c0392b; color:#fff; border:none; border-radius:6px; font-size:14px; cursor:pointer; }}
-  .back-btn{{ margin:12px 0; padding:8px 16px; background:#fff; color:#2b1e14; border:1.5px solid #c0392b; border-radius:6px; font-size:14px; cursor:pointer; text-decoration:none; display:inline-block; }}
+  .print-btn{{ margin:12px 6px 12px 0; padding:10px 24px; background:#c0392b; color:#fff; border:none; border-radius:6px; font-size:15px; cursor:pointer; font-weight:700; }}
+  .export-btn{{ margin:12px 6px 12px 0; padding:10px 24px; background:#27ae60; color:#fff; border:none; border-radius:6px; font-size:15px; cursor:pointer; font-weight:700; }}
+  .back-btn{{ margin:12px 0; padding:10px 24px; background:#fff; color:#2b1e14; border:1.5px solid #c0392b; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block; }}
   .back-btn:hover{{ background:#fdecea; }}
-  @media print{{ .print-btn, .back-btn{{ display:none }} }}
-</style></head><body>
+  @media print{{ .print-btn, .export-btn, .back-btn{{ display:none }} }}
+
 <a class="back-btn" href="javascript:history.length>1?history.back():'/'">← 返回</a>
 <button class="print-btn" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
+<button class="export-btn" onclick="exportCSV()">📥 导出Excel(CSV)</button>
 <h1>🔥 刘和牛户外烤肉 · 备餐单</h1>
 <div class="meta">生成时间：{now} · 共 {len(orders)} 单待备 / 备餐中</div>
 
@@ -1432,6 +1434,27 @@ def print_menu():
   <th>名字</th><th class="num-col">份数</th><th class="num-col">克数</th><th class="num-col">总量</th><th>单位</th>
 </tr></thead>
 <tbody>{ing_rows or '<tr><td colspan=5 style="text-align:center;color:#aaa;padding:20px">—</td></tr>'}{tool_rows}</tbody></table>
+<script>
+function exportCSV(){{
+  var rows=[["分类","食材","份数","克数","总量","单位"]];
+  document.querySelectorAll("table tbody tr").forEach(function(tr){{
+    if(tr.classList.contains("cat-row")) return;
+    var cells=tr.querySelectorAll("td");
+    if(cells.length<5) return;
+    rows.push([tr.parentElement.previousElementSibling? "":"",
+      cells[0]?.textContent||"", cells[1]?.textContent||"",
+      cells[2]?.textContent||"", cells[3]?.textContent||"",
+      cells[4]?.textContent||""]);
+  }});
+  var csv="\\uFEFF";
+  rows.forEach(function(r){{ csv+=r.map(function(c){{ return '"'+(c||"").replace(/"/g,'""')+'"'; }}).join(",")+";"; }});
+  var blob=new Blob([csv],{{type:"text/csv;charset=utf-8;"}});
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="备餐单_"+new Date().toISOString().slice(0,10)+".csv";
+  a.click();
+}}
+</script>
 </body></html>"""
     return html
 
