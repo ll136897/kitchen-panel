@@ -1412,7 +1412,9 @@ def print_menu():
   .back-btn{{ margin:12px 0; padding:10px 24px; background:#fff; color:#2b1e14; border:1.5px solid #c0392b; border-radius:6px; font-size:15px; cursor:pointer; text-decoration:none; display:inline-block; }}
   .back-btn:hover{{ background:#fdecea; }}
   @media print{{ .print-btn, .export-btn, .back-btn{{ display:none }} }}
-
+</style>
+</head>
+<body>
 <a class="back-btn" href="javascript:history.length>1?history.back():'/'">← 返回</a>
 <button class="print-btn" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
 <button class="export-btn" onclick="exportCSV()">📥 导出Excel(CSV)</button>
