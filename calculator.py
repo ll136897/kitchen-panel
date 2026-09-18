@@ -313,7 +313,7 @@ def calc_order_requirements(order_id):
                     "per_package": info["per_package"],
                     "order_qty": info["order_qty"],
                     "portion_count": info.get("portion_count", 1),
-                    "portion_size": round(need / max(1, info.get("portion_count", 1) * info["order_qty"]), 2),
+                    "portion_size": round(need / max(1, info.get("portion_count", 1) * info["order_qty"]) / 5) * 5,
                     "total_portions": info.get("portion_count", 1) * info["order_qty"],
                 })
 
@@ -918,7 +918,7 @@ def calc_merged_prep(order_ids):
         pc_samples = [p for p, _ in v.get("portion_count_samples", []) if p]
         v["portion_count"] = max(pc_samples) if pc_samples else 1
         v["total_portions"] = v["portion_count"] * v["total_packages"]
-        v["portion_size"] = round(v["total"] / max(1, v["total_portions"]), 2) if v["total_portions"] else 0
+        v["portion_size"] = round(v["total"] / max(1, v["total_portions"]) / 5) * 5 if v["total_portions"] else 0
         v["order_count"] = len(v["order_ids"])
         v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
 
