@@ -1311,10 +1311,7 @@ def print_menu():
                 "FROM orders WHERE status IN ('pending','preparing') ORDER BY id")
     orders = [dict(r) for r in cur.fetchall()]
 
-    ing_sum = {}  # id -> {name, unit, total, per_package, total_portions, total_packages}
-    tool_sum = {}
     order_details = []
-
     for o in orders:
         cur.execute("""
             SELECT op.quantity, p.name, p.id
@@ -1325,53 +1322,13 @@ def print_menu():
         pkgs = [dict(r) for r in cur.fetchall()]
         order_details.append({**o, "packages": pkgs})
 
-        for pk in pkgs:
-            cur.execute("""
-                SELECT pi.per_package, pi.portion_count, i.name, i.unit, i.id
-                FROM package_ingredients pi JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ? AND pi.cost_only = 0
-            """, (pk["id"],))
-            for r in cur.fetchall():
-                key = r["id"]
-                ing_sum.setdefault(key, {
-                    "name": r["name"], "unit": r["unit"], "total": 0,
-                    "per_package": r["per_package"],
-                    "portion_count": r["portion_count"] or 1,
-                    "total_packages": 0,
-                })
-                ing_sum[key]["total"] += r["per_package"] * pk["quantity"]
-                ing_sum[key]["total_packages"] += pk["quantity"]
-                ing_sum[key]["per_package"] = r["per_package"]
-                ing_sum[key]["portion_count"] = r["portion_count"] or 1
-            cur.execute("""
-                SELECT pt.per_package, t.name, t.id
-                FROM package_tools pt JOIN tools t ON pt.tool_id = t.id
-                WHERE pt.package_id = ?
-            """, (pk["id"],))
-            for r in cur.fetchall():
-                key = r["id"]
-                tool_sum.setdefault(key, {"name": r["name"], "total": 0})
-                tool_sum[key]["total"] += r["per_package"] * pk["quantity"]
-
-    from calculator import CATEGORY_ORDER, CATEGORY_LABEL, PACKAGING_CATEGORY, \
-        UTENSIL_CATEGORY, SAUCE_LIKE_CATS, _subcategorize_meat, _get_fixed_sort_index, sort_tools
-    tools_sorted = sort_tools(list(tool_sum.values()), "total")
-    db2 = get_db()
-    cur2 = db2.cursor()
-    cur2.execute("SELECT id, category, name FROM ingredients")
-    cat_map = {r["id"]: (r["category"], r["name"]) for r in cur2.fetchall()}
-    db2.close()
-
-    for k, v in ing_sum.items():
-        raw_cat, name = cat_map.get(k, ("other", v["name"]))
-        sub_cat = _subcategorize_meat(name, raw_cat)
-        if sub_cat in SAUCE_LIKE_CATS:
-            sub_cat = "sauce"
-        v["category"] = sub_cat
-        # 计算份数列
-        pc = v.get("portion_count", 1) or 1
-        v["portion_size"] = round(v["per_package"] / max(1, pc), 2)
-        v["total_portions"] = pc * v.get("total_packages", 1)
+    # 直接调用 calc_merged_prep，与备餐页数据源一致
+    from calculator import calc_merged_prep, CATEGORY_ORDER, CATEGORY_LABEL, \
+        PACKAGING_CATEGORY, UTENSIL_CATEGORY, SAUCE_LIKE_CATS, \
+        _subcategorize_meat, _get_fixed_sort_index, sort_tools
+    merged = calc_merged_prep([o["id"] for o in orders])
+    ing_sum = {item["id"]: item for item in merged["ingredients"]}
+    tools_sorted = merged["tools"]
 
     # 统一按 CATEGORY_ORDER 分组（含 packaging/utensil，与备餐/菜单页一致）
     ing_by_cat = {}
