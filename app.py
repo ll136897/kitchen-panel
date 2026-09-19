@@ -9,11 +9,27 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
 init_db()
+
+# 尝试从 GitHub 恢复数据库（防止重新部署丢数据）
+try:
+    from db_backup import restore_from_github, backup_async, start_auto_backup
+    restored = restore_from_github()
+    if restored:
+        print("[init] 已从 GitHub 恢复数据库")
+except Exception as _e:
+    print(f"[init] restore_from_github skipped: {_e}")
+
 try:
     from seed import seed_data
     seed_data()
 except Exception as _e:
     print(f"[init] seed_data skipped: {_e}")
+
+# 启动定时备份（10分钟）
+try:
+    start_auto_backup(600)
+except Exception as _e:
+    print(f"[init] auto_backup skipped: {_e}")
 
 # 迁移：去掉"刷子"工具（用户要求菜单无刷子，兼容已有数据库）
 try:
@@ -162,6 +178,40 @@ def teardown(exc):
     db = getattr(g, "db", None)
     if db is not None:
         db.close()
+
+
+# 数据变更后自动备份到 GitHub（POST/PUT/DELETE 且非备份接口）
+@app.after_request
+def auto_backup(response):
+    if request.method in ("POST", "PUT", "DELETE") and "/api/backup" not in request.path:
+        try:
+            from db_backup import backup_async
+            backup_async()
+        except Exception:
+            pass
+    return response
+
+
+@app.route("/api/backup", methods=["POST"])
+def manual_backup():
+    """手动触发备份"""
+    from db_backup import backup_to_github
+    ok = backup_to_github()
+    if ok:
+        return jsonify({"ok": True, "msg": "备份成功"})
+    return jsonify({"ok": False, "msg": "备份失败（未配置 GITHUB_TOKEN 或网络错误）"})
+
+
+@app.route("/api/backup/status", methods=["GET"])
+def backup_status():
+    """查询备份配置状态"""
+    from db_backup import GITHUB_TOKEN, _last_backup
+    import time as _time
+    return jsonify({
+        "configured": bool(GITHUB_TOKEN),
+        "last_backup": _last_backup,
+        "last_backup_ago": f"{int(_time.time() - _last_backup)}s" if _last_backup else None,
+    })
 
 
 # ===== 页面 =====

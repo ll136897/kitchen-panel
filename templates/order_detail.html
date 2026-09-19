@@ -26,6 +26,7 @@
   <a href="/finance" class="nav-item">📈 财务</a>
   <a href="/menu" class="nav-item">📜 菜单</a>
   <a href="/config" class="nav-item">⚙️ 配置</a>
+  <button class="nav-item" onclick="doBackup()" style="border:none;background:none;cursor:pointer;font-size:14px;padding:6px 10px;border-radius:6px;" title="备份数据">💾 备份</button>
 </nav>
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
@@ -170,6 +171,7 @@ function showRefreshToast(){
   setTimeout(()=>t.remove(), 2200);
 }
 loadDetail();
+async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
 </body>
 </html>

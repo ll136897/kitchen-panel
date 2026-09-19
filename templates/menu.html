@@ -70,6 +70,7 @@
   <a href="/finance" class="nav-item">📈 财务</a>
   <a href="/menu" class="nav-item active">📜 菜单</a>
   <a href="/config" class="nav-item">⚙️ 配置</a>
+  <button class="nav-item" onclick="doBackup()" style="border:none;background:none;cursor:pointer;font-size:14px;padding:6px 10px;border-radius:6px;" title="备份数据">💾 备份</button>
 </nav>
 
 <div class="container">
@@ -84,11 +85,67 @@
       <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
       <button class="btn btn-sm" onclick="collapseAll()">📦 全收起</button>
       <button class="btn btn-sm" onclick="exportAllXlsx()">📊 导出全部Excel</button>
+      <button class="btn btn-sm" style="background:#e67e22;color:#fff" onclick="openPromoMenu()">📣 宣传菜单预览</button>
     </div>
   </div>
 
   <div id="menuList"></div>
 </div>
+
+<!-- ===== 宣传菜单弹窗 ===== -->
+<div id="promoModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;overflow:auto;padding:20px">
+  <div style="max-width:680px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0;color:#fff">📣 宣传菜单 · 预览</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="printPromo()" style="background:#27ae60;color:#fff">🖨️ 打印/导出PDF</button>
+        <button class="btn btn-sm" onclick="closePromoMenu()">✕ 关闭</button>
+      </div>
+    </div>
+    <div id="promoContent"></div>
+  </div>
+</div>
+
+<style>
+/* ===== 宣传菜单样式 ===== */
+.promo-menu{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.15);font-family:"PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif}
+.promo-hero{background:linear-gradient(135deg,#8e1e1a 0%,#c0392b 50%,#e74c3c 100%);color:#fff;padding:32px 28px;text-align:center;position:relative;overflow:hidden}
+.promo-hero::before{content:"";position:absolute;top:-40px;right:-40px;width:160px;height:160px;background:rgba(255,255,255,.08);border-radius:50%}
+.promo-hero::after{content:"";position:absolute;bottom:-60px;left:-30px;width:120px;height:120px;background:rgba(255,255,255,.06);border-radius:50%}
+.promo-hero h1{margin:0 0 6px;font-size:26px;letter-spacing:2px;position:relative;z-index:1}
+.promo-hero p{margin:0;opacity:.9;font-size:13px;letter-spacing:1px;position:relative;z-index:1}
+.promo-pkg{border-bottom:1px dashed #e8e0d5}
+.promo-pkg:last-child{border-bottom:none}
+.promo-pkg-head{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;background:#faf5ed;border-bottom:1px solid #eee5d8}
+.promo-pkg-name{font-size:17px;font-weight:700;color:#2c1810;display:flex;align-items:center;gap:10px}
+.promo-pkg-people{font-size:12px;color:#8b7355;background:#e8dcc8;padding:3px 10px;border-radius:12px;font-weight:normal}
+.promo-pkg-price{text-align:right}
+.promo-price-num{font-size:24px;font-weight:800;color:#c0392b}
+.promo-price-symbol{font-size:14px;font-weight:600;color:#c0392b}
+.promo-price-unit{font-size:11px;color:#999}
+.promo-pkg-body{padding:16px 24px 20px}
+.promo-cat{margin-bottom:14px}
+.promo-cat:last-child{margin-bottom:0}
+.promo-cat-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#6b4f3a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #f0e6d8}
+.promo-cat-icon{width:20px;height:20px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
+.promo-dishes{display:flex;flex-wrap:wrap;gap:6px 14px}
+.promo-dish{font-size:14px;color:#3d2817;padding:3px 0;position:relative}
+.promo-dish::after{content:"、";color:#ccc}
+.promo-dish:last-child::after{content:""}
+.promo-dish.highlight{color:#c0392b;font-weight:600}
+.promo-footer{background:#2c1810;color:#fff;padding:16px 24px;text-align:center;font-size:12px;opacity:.85}
+.promo-footer p{margin:3px 0}
+.promo-tip{background:#fff8e1;border:1px solid #ffeaa7;border-radius:8px;padding:10px 14px;margin:12px 24px;font-size:12px;color:#856404;line-height:1.8}
+
+/* 打印样式 */
+@media print{
+  body *{visibility:hidden}
+  #promoModal,#promoModal *{visibility:visible}
+  #promoModal{position:absolute;left:0;top:0;background:#fff;padding:0;overflow:visible}
+  .promo-menu{box-shadow:none;border-radius:0}
+  h2,.btn{display:none!important}
+}
+</style>
 
 <!-- ===== 餐标配餐器弹窗 ===== -->
 <div id="cateringModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;overflow:auto;padding:20px">
@@ -441,9 +498,122 @@ function downloadFile(url){
   f.src = url;
 }
 
-loadMenu();
+// ===== 宣传菜单预览 =====
+const PROMO_CAT = [
+  {key:'beef',    label:'牛肉',   icon:'🥩', color:'#8e1e1a'},
+  {key:'pork',    label:'猪肉',   icon:'🥓', color:'#c75d3e'},
+  {key:'chicken', label:'鸡肉',   icon:'🍗', color:'#c9962b'},
+  {key:'vegetable',label:'素菜',  icon:'🥬', color:'#3a8a3a'},
+  {key:'side',    label:'小菜',   icon:'🥗', color:'#5a8a3a'},
+  {key:'sauce',   label:'蘸料',   icon:'🧂', color:'#7a5a3a'},
+  {key:'drink',   label:'赠饮',   icon:'🎁', color:'#666'},
+];
 
-// ===== 餐标配餐器 =====
+function openPromoMenu(){
+  const modal = document.getElementById('promoModal');
+  modal.style.display = 'block';
+  renderPromoMenu();
+}
+function closePromoMenu(){
+  document.getElementById('promoModal').style.display = 'none';
+}
+function printPromo(){
+  window.print();
+}
+
+function renderPromoMenu(){
+  if(!packages.length){ loadMenu(); }
+  const content = document.getElementById('promoContent');
+  const pkgHtml = packages.map(p => renderPromoPkg(p)).join('');
+  content.innerHTML = `
+    <div class="promo-menu">
+      <div class="promo-hero">
+        <h1>刘和牛 · 精品烤肉套餐</h1>
+        <p>现切现送 · 新鲜直达</p>
+      </div>
+      ${pkgHtml}
+      <div class="promo-footer">
+        <p>🔥 下单即送精美餐具套装</p>
+        <p>🚗 支持全城配送 · 提前1天预订</p>
+      </div>
+    </div>`;
+}
+
+function renderPromoPkg(p){
+  const ings = (p.ingredients||[]).filter(i => {
+    const c = subcategorize(i.ing_name, i.category);
+    // 宣传菜单只展示：牛肉/猪肉/鸡肉/素菜/小菜/蘸料/赠饮
+    return ['beef','pork','chicken','vegetable','side','sauce','drink'].includes(c);
+  });
+
+  // 按分类分组
+  const byCat = {};
+  ings.forEach(ing => {
+    const c = subcategorize(ing.ing_name, ing.category);
+    if(!byCat[c]) byCat[c] = [];
+    byCat[c].push(ing);
+  });
+
+  // 构建每个分类的菜名列表（去重，同菜名多份只显示一次）
+  let catHtml = '';
+  for(const pc of PROMO_CAT){
+    const items = byCat[pc.key];
+    if(!items || !items.length) continue;
+    items.sort((a,b)=>{
+      const ia = getFixedIdx(a.ing_name, pc.key);
+      const ib = getFixedIdx(b.ing_name, pc.key);
+      if(ia!==ib) return ia-ib;
+      return (b.per_package||0)-(a.per_package||0);
+    });
+    // 去重：同名食材只显示一次
+    const seen = new Set();
+    const names = [];
+    items.forEach(i => {
+      if(!seen.has(i.ing_name)){
+        seen.add(i.ing_name);
+        names.push(i.ing_name);
+      }
+    });
+    const dishHtml = names.map((n, idx) =>
+      `<span class="promo-dish${idx===0?' highlight':''}">${n}</span>`
+    ).join('');
+    catHtml += `
+      <div class="promo-cat">
+        <div class="promo-cat-title">
+          <span class="promo-cat-icon" style="background:${pc.color}">${pc.icon}</span>
+          ${pc.label} · ${names.length}款
+        </div>
+        <div class="promo-dishes">${dishHtml}</div>
+      </div>`;
+  }
+
+  // 统计荤菜/素菜数量用于标签
+  let meatCount=0, vegCount=0;
+  ['beef','pork','chicken'].forEach(c => meatCount += (byCat[c]||[]).length);
+  ['vegetable','side'].forEach(c => vegCount += (byCat[c]||[]).length);
+
+  const price = p.base_price || p.price;
+
+  return `
+    <div class="promo-pkg">
+      <div class="promo-pkg-head">
+        <div class="promo-pkg-name">
+          ${p.name}
+          <span class="promo-pkg-people">${p.min_people}-${p.max_people}人餐</span>
+        </div>
+        <div class="promo-pkg-price">
+          <span class="promo-price-symbol">¥</span>
+          <span class="promo-price-num">${price}</span>
+          <span class="promo-price-unit"> / 套</span>
+        </div>
+      </div>
+      <div class="promo-pkg-body">
+        ${catHtml}
+      </div>
+    </div>`;
+}
+
+// ===== 刷新特效 =====
 let cateringData = null;  // 当前生成的方案，供保存用
 const CAT_COLOR = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',
   side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#888',other:'#666',
@@ -636,6 +806,7 @@ function showRefreshToast(){
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2200);
 }
+async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
 </body>
 </html>
