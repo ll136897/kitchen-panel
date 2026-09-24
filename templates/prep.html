@@ -569,7 +569,10 @@ function renderByOrder(){
     const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
       <h3 style="margin:0">📋 订单 #${o.id} · 📅 ${dateLabel}${mealStr} ${urgBadge(o.urgency)}</h3>
-      <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
+      <span>
+        <button class="check-all-btn" onclick="window.open('/orders/${o.id}/ticket','_blank')" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#27ae60;color:#fff;cursor:pointer;font-weight:700">🖨 出餐单</button>
+        <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
+      </span>
     </div><div class="muted" style="padding:16px">加载中...</div></div>`;
   }).join('');
   d.orders.forEach(o=>{
