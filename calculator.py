@@ -264,14 +264,17 @@ def calc_order_requirements(order_id):
             tr = cur.fetchone()
             if tr:
                 tid = tr["id"]
+                # 份数 = 本单套餐总份数（备注工具沿用同一份数，不额外 +1，
+                # 否则备餐页"份数"列会虚高、与合计对不上）
+                pkg_qty_sum = sum(int(pk.get("quantity") or 1) for pk in pkgs) or 1
                 if tid not in tool_demand:
-                    tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": 0}
+                    tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": pkg_qty_sum}
+                # 已在套餐里的工具：份数保持套餐份数，不重复累加
                 if mode == "set":
                     tool_demand[tid]["total"] = qty       # 覆盖：总数=qty
                 else:
                     tool_demand[tid]["total"] += qty      # 增量：套餐基础上 +qty
                 tool_demand[tid]["per_package"] = qty
-                tool_demand[tid]["order_qty"] += 1
 
         # 备注解析额外加菜（单点食材）
         from parser import match_extra_ingredients_to_db
