@@ -436,17 +436,22 @@ function render(){
 }
 
 // 备餐行：7列（勾选|名字|份数|克数|单位|总量|状态）
-// 注：packaging/utensil/tool 无"克数"列（显示—），工具单位默认"个"
+// 注：packaging/utensil/tool 无"克数"列（显示—）
+// 工具：份数列直接显示真实件数（如 椅子6、蛋卷桌2），不按"份"统计
 // 总量列统一为"数字+单位"格式（如 600克、8个）
+var TOOL_UNIT = {'椅子':'把','蛋卷桌':'张','桌子':'张','卡式炉':'套','天幕':'顶',
+                 '剪刀':'把','夹子':'把','烤盘':'个','燃气罐':'个'};
 function itemRow(it, type, checkedMap){
   const key = type+'_'+it.id;
   const checked = checkedMap[key];
   // 判断是否为简单分类（无克数）：包装/餐具/工具 + 可乐雪碧饮料
   const isSimple = ['packaging','utensil','tool'].includes(it._cat)
     || (it._cat==='drink' && /可乐|雪碧/.test(it.name||''));
+  const isTool = type==='tool';
   let unit = it.unit||'';
-  if(type==='tool' && !unit){ unit = '个'; }
-  const totPkg = round(it.total_portions||it.total_packages||0);
+  if(isTool && !unit){ unit = TOOL_UNIT[it.name] || '个'; }
+  // 工具：份数列=真实件数（3人餐/10人餐能直接看出数量差异）；其余按份数
+  const totPkg = isTool ? round(it.total||0) : round(it.total_portions||it.total_packages||0);
   const perSize = isSimple ? '' : round(it.portion_size||0);
   const total = round(it.total);
   const totalStr = total + unit;
