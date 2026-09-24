@@ -147,17 +147,43 @@
     .cat-head .check-all-btn{font-size:10px;padding:3px 7px}
   }
 
-  /* 订单行：一排展示（地点|日期|时间|套餐|联系人|备注） */
-  .orow-head,.orow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;white-space:nowrap}
-  .orow-head{margin:2px 0 6px;color:#8a7a68;font-size:12px;font-weight:700;background:#f4efe6}
-  .orow{background:#fff;border:1px solid var(--border-l);margin-bottom:8px;overflow-x:auto}
-  .orow-head>span,.orow>span{flex:0 0 auto;font-size:13.5px}
-  .c-addr{min-width:88px;font-weight:700;color:#2b1e14}
-  .c-date{min-width:78px;color:#6b5b4a}
-  .c-time{min-width:52px;font-weight:700;color:#c0392b}
-  .c-pkg{min-width:114px}
-  .c-name{min-width:76px}
-  .c-note{max-width:240px;overflow:hidden;text-overflow:ellipsis;color:#8a7a68}
+  /* ===== 订单卡 · 自适应换行版 =====
+     目标：任何手机宽度都完整显示，绝不横向溢出、无需左右滑动。
+     信息顺序：地点 → 日期 → 时间 → 套餐 → 联系人 → 备注（装不下就自动折到下一行） */
+  .orow{
+    display:flex;
+    flex-wrap:wrap;              /* 关键：装不下自动换行，而不是撑宽 */
+    align-items:center;
+    gap:3px 12px;
+    padding:9px 12px;
+    border-radius:10px;
+    border:1px solid var(--border-l);
+    border-left:4px solid var(--accent);   /* 左侧色条，视觉锚点 */
+    background:#fff;
+    margin-bottom:8px;
+    overflow:hidden;             /* 双保险：绝不出现横向滚动条 */
+  }
+  .orow>span{
+    font-size:13.5px;
+    line-height:1.5;
+    min-width:0;
+    max-width:100%;
+    white-space:normal;          /* 允许内部换行 */
+    overflow-wrap:anywhere;
+  }
+  .c-addr{font-weight:700;color:#2b1e14}
+  .c-date{color:#6b5b4a;white-space:nowrap}
+  .c-time{font-weight:800;font-size:15px;color:#c0392b;white-space:nowrap}
+  .c-pkg{color:#2b1e14}
+  .c-name{color:#2b1e14}
+  .c-note{
+    flex:1 1 100%;               /* 备注独占一行，完整显示不截断 */
+    margin-top:2px;
+    padding:3px 8px;
+    border-radius:6px;
+    background:#faf5ed;
+    color:#8a7a68;
+  }
   .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
   .date-picker{padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:16px}
   /* 日期快捷按钮条：列出所有有备餐订单的日期 */
@@ -442,19 +468,11 @@ function render(){
       <span class="c-time">${t}</span>
       <span class="c-pkg">🍱 ${pkgs||'—'}</span>
       <span class="c-name">👤 ${nm}</span>
-      <span class="c-note">${nt? '📝 '+nt : ''}</span>
+      ${nt ? `<span class="c-note">📝 ${nt}</span>` : ''}
     </div>`;
   }).join('');
-  // 表头（与数据列对齐）
-  document.getElementById('ordersList').innerHTML =
-    `<div class="orow-head">
-      <span class="c-addr">📍 地点</span>
-      <span class="c-date">日期</span>
-      <span class="c-time">时间</span>
-      <span class="c-pkg">🍱 套餐</span>
-      <span class="c-name">👤 联系人</span>
-      <span class="c-note">📝 备注</span>
-    </div>` + document.getElementById('ordersList').innerHTML;
+  // 说明：不再插入列对齐用的大表头——图标(📍📅⏰🍱👤📝)本身即标签，
+  // 去掉表头可避免"表头固定宽度"把整页撑宽、导致手机上要左右滑动。
 
   if(currentMode==='merged'){
     document.getElementById('orderView').style.display='none';
