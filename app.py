@@ -584,13 +584,21 @@ def list_orders():
     return jsonify({"ok": True, "data": orders})
 
 
-@app.route("/api/orders/<int:oid>", methods=["PATCH"])
+@app.route("/api/orders/<int:oid>", methods=["PATCH", "DELETE"])
 def update_order_status(oid):
+    db = g.db
+    # 删除订单（备餐勾选/工具借还/套餐关联均已设级联删除，会一并清掉）
+    if request.method == "DELETE":
+        cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
+        if not cur.fetchone():
+            return jsonify({"ok": False, "msg": "订单不存在"}), 404
+        db.execute("DELETE FROM orders WHERE id=?", (oid,))
+        db.commit()
+        return jsonify({"ok": True, "msg": "已删除"})
     data = request.get_json(force=True)
     status = data.get("status")
     if status not in ("pending", "preparing", "done", "cancelled"):
         return jsonify({"ok": False, "msg": "状态非法"}), 400
-    db = g.db
     db.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
     # 转备餐中 → 自动借出该订单所需工具
     if status == "preparing":

@@ -109,6 +109,7 @@ function loadOrders(){
           ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
           ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
           ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
+          ${(o.status==='done'||o.status==='cancelled') ? `<button class="btn btn-sm btn-danger" onclick="delOrder(${o.id},'${o.contact_name||''}')">🗑 删除</button>` : ''}
           ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
         </div>
         <div id="req-${o.id}" class="req-box" style="display:none"></div>
@@ -149,6 +150,16 @@ function viewReq(oid){
 function setStatus(oid,st){
   fetch('/api/orders/'+oid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})})
     .then(r=>r.json()).then(()=>loadOrders());
+}
+
+function delOrder(oid,name){
+  const who = name ? `（${name}）` : '';
+  if(!confirm(`确定删除订单 #${oid}${who}？\n删除后无法恢复，该单的备餐记录、工具借还会一并清除。`)) return;
+  fetch('/api/orders/'+oid,{method:'DELETE'})
+    .then(r=>r.json()).then(d=>{
+      if(d && d.ok){ loadOrders(); }
+      else alert((d && d.msg) || '删除失败');
+    }).catch(()=>alert('删除失败：网络错误'));
 }
 
 let currentReturnOid = null;
