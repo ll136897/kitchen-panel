@@ -173,15 +173,18 @@ def init_db():
                 status TEXT DEFAULT 'pending',    -- pending/preparing/done
                 payment_status TEXT DEFAULT 'unpaid',  -- unpaid/paid/partial 货款状态
                 deposit_status TEXT DEFAULT 'pending', -- pending/returned/forfeited 押金状态
-                created_at TEXT DEFAULT (datetime('now','localtime'))
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                deleted_at TEXT                    -- 回收站：软删除时间，NULL=正常
             )
         """)
-        # 迁移：老库补 payment_status / deposit_status
+        # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）
         cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)").fetchall()]
         if "payment_status" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'unpaid'")
         if "deposit_status" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN deposit_status TEXT DEFAULT 'pending'")
+        if "deleted_at" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT")
 
         # 订单→套餐明细
         cur.execute("""

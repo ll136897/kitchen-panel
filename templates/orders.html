@@ -23,7 +23,14 @@
       <div class="title"><span class="fire">🔥</span>订单列表</div>
       <div class="sub">查看、跟踪和管理所有订单</div>
     </div>
-    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadOrders)"><span class="btn-icon">🔄</span> 刷新</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="trashBtn" class="btn btn-sm btn-refresh" onclick="toggleTrash()">🗑 回收站</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadOrders)"><span class="btn-icon">🔄</span> 刷新</button>
+    </div>
+  </div>
+
+  <div id="trashTip" class="card" style="display:none;margin-bottom:14px;padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px">
+    ♻️ <b>回收站</b>：被删除的订单会在 7 天内保留，可随时「恢复」；超过 7 天会被自动彻底清除。点「彻底删除」可立即永久清除（不可恢复）。
   </div>
 
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
@@ -60,10 +67,27 @@ function statusLabel(s){
 }
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
 
+let showDeleted = false;
+function toggleTrash(){
+  showDeleted = !showDeleted;
+  loadOrders();
+}
 function loadOrders(){
-  fetch('/api/orders').then(r=>r.json()).then(d=>{
+  const url = showDeleted ? '/api/orders?deleted=1' : '/api/orders';
+  fetch(url).then(r=>r.json()).then(d=>{
     if(!d.ok) return;
     const orders = d.data || [];
+    // 回收站开关
+    const nDel = d.deleted_count || 0;
+    const btn = document.getElementById('trashBtn');
+    if(btn){
+      btn.textContent = showDeleted ? '← 返回订单列表' : `🗑 回收站${nDel?`（${nDel}）`:''}`;
+      btn.className = showDeleted ? 'btn btn-sm btn-refresh' : 'btn btn-sm btn-refresh';
+      btn.style.background = showDeleted ? '#6b7280' : (nDel ? '#c0392b' : '');
+      btn.style.color = (showDeleted || nDel) ? '#fff' : '';
+    }
+    const tip = document.getElementById('trashTip');
+    if(tip) tip.style.display = showDeleted ? 'block' : 'none';
 
     // ---- 顶部 KPI ----
     const count = {pending:0,preparing:0,done:0,cancelled:0};
@@ -104,6 +128,10 @@ function loadOrders(){
         ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
 
         <div class="btn-row">
+          ${showDeleted ? `
+            <button class="btn btn-sm btn-success" onclick="restoreOrder(${o.id})">♻️ 恢复</button>
+            <button class="btn btn-sm btn-danger" onclick="purgeOrder(${o.id},'${o.contact_name||''}')">🔥 彻底删除</button>
+          ` : `
           <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
           <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
           ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
@@ -111,6 +139,7 @@ function loadOrders(){
           ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
           ${(o.status==='done'||o.status==='cancelled') ? `<button class="btn btn-sm btn-danger" onclick="delOrder(${o.id},'${o.contact_name||''}')">🗑 删除</button>` : ''}
           ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
+          `}
         </div>
         <div id="req-${o.id}" class="req-box" style="display:none"></div>
       </div>`;
@@ -154,12 +183,31 @@ function setStatus(oid,st){
 
 function delOrder(oid,name){
   const who = name ? `（${name}）` : '';
-  if(!confirm(`确定删除订单 #${oid}${who}？\n删除后无法恢复，该单的备餐记录、工具借还会一并清除。`)) return;
+  if(!confirm(`确定把订单 #${oid}${who} 放进回收站？\n7 天内可在「回收站」恢复；超过 7 天将自动彻底清除。\n该单的备餐记录、工具借还仍会保留。`)) return;
   fetch('/api/orders/'+oid,{method:'DELETE'})
     .then(r=>r.json()).then(d=>{
-      if(d && d.ok){ loadOrders(); }
+      if(d && d.ok){ loadOrders(); showRefreshToast(); }
       else alert((d && d.msg) || '删除失败');
     }).catch(()=>alert('删除失败：网络错误'));
+}
+
+function restoreOrder(oid){
+  if(!confirm(`确定恢复订单 #${oid}？\n恢复后它将回到正常订单列表。`)) return;
+  fetch('/api/orders/'+oid+'/restore',{method:'POST'})
+    .then(r=>r.json()).then(d=>{
+      if(d && d.ok){ loadOrders(); showRefreshToast(); }
+      else alert((d && d.msg) || '恢复失败');
+    }).catch(()=>alert('恢复失败：网络错误'));
+}
+
+function purgeOrder(oid,name){
+  const who = name ? `（${name}）` : '';
+  if(!confirm(`⚠️ 彻底删除订单 #${oid}${who}？\n此操作不可恢复，该单的备餐记录、工具借还将一并永久清除。`)) return;
+  fetch('/api/orders/'+oid+'/purge',{method:'DELETE'})
+    .then(r=>r.json()).then(d=>{
+      if(d && d.ok){ loadOrders(); showRefreshToast(); }
+      else alert((d && d.msg) || '彻底删除失败');
+    }).catch(()=>alert('彻底删除失败：网络错误'));
 }
 
 let currentReturnOid = null;

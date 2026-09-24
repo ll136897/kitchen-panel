@@ -566,11 +566,20 @@ def create_order():
 def list_orders():
     db = g.db
     cur = db.cursor()
-    cur.execute("""
-        SELECT id, booking_date, booking_time, address, contact_name,
-               contact_phone, amount, deposit, note, status, created_at
-        FROM orders ORDER BY id DESC LIMIT 100
-    """)
+    purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
+    show_deleted = request.args.get("deleted") == "1"
+    if show_deleted:
+        cur.execute("""
+            SELECT id, booking_date, booking_time, address, contact_name,
+                   contact_phone, amount, deposit, note, status, created_at, deleted_at
+            FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 100
+        """)
+    else:
+        cur.execute("""
+            SELECT id, booking_date, booking_time, address, contact_name,
+                   contact_phone, amount, deposit, note, status, created_at
+            FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 100
+        """)
     orders = [dict(r) for r in cur.fetchall()]
     # 加套餐明细
     for o in orders:
@@ -581,20 +590,63 @@ def list_orders():
             WHERE op.order_id = ?
         """, (o["id"],))
         o["packages"] = [dict(r) for r in cur.fetchall()]
-    return jsonify({"ok": True, "data": orders})
+    deleted_count = cur.execute(
+        "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL").fetchone()[0]
+    return jsonify({"ok": True, "data": orders, "deleted_count": deleted_count})
+
+
+PURGE_DAYS = 7
+
+
+def purge_expired_deleted(db=None):
+    """回收站里超过 7 天的订单彻底删除（含级联的套餐/借还/勾选）"""
+    db = db or g.db
+    try:
+        db.execute("""
+            DELETE FROM orders
+            WHERE deleted_at IS NOT NULL
+              AND deleted_at < datetime('now','localtime','-%d days')
+        """ % PURGE_DAYS)
+        db.commit()
+    except Exception:
+        pass
+
+
+@app.route("/api/orders/<int:oid>/restore", methods=["POST"])
+def restore_order(oid):
+    """从回收站恢复订单"""
+    db = g.db
+    cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
+    if not cur.fetchone():
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    db.execute("UPDATE orders SET deleted_at=NULL WHERE id=?", (oid,))
+    db.commit()
+    return jsonify({"ok": True, "msg": "已恢复"})
+
+
+@app.route("/api/orders/<int:oid>/purge", methods=["DELETE"])
+def purge_order(oid):
+    """彻底删除（不可恢复）"""
+    db = g.db
+    cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
+    if not cur.fetchone():
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    db.execute("DELETE FROM orders WHERE id=?", (oid,))
+    db.commit()
+    return jsonify({"ok": True, "msg": "已彻底删除"})
 
 
 @app.route("/api/orders/<int:oid>", methods=["PATCH", "DELETE"])
 def update_order_status(oid):
     db = g.db
-    # 删除订单（备餐勾选/工具借还/套餐关联均已设级联删除，会一并清掉）
+    # 删除订单 → 进回收站（软删除），7 天内可恢复
     if request.method == "DELETE":
         cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
         if not cur.fetchone():
             return jsonify({"ok": False, "msg": "订单不存在"}), 404
-        db.execute("DELETE FROM orders WHERE id=?", (oid,))
+        db.execute("UPDATE orders SET deleted_at=datetime('now','localtime') WHERE id=?", (oid,))
         db.commit()
-        return jsonify({"ok": True, "msg": "已删除"})
+        return jsonify({"ok": True, "msg": "已放进回收站，7 天内可恢复"})
     data = request.get_json(force=True)
     status = data.get("status")
     if status not in ("pending", "preparing", "done", "cancelled"):
@@ -1342,7 +1394,7 @@ def api_history():
         SELECT strftime('%Y-%m', created_at) as month,
                COUNT(*) as cnt,
                COALESCE(SUM(CASE WHEN status!='cancelled' THEN amount ELSE 0 END),0) as revenue
-        FROM orders GROUP BY strftime('%Y-%m', created_at)
+        FROM orders WHERE deleted_at IS NULL GROUP BY strftime('%Y-%m', created_at)
         ORDER BY month DESC LIMIT 12
     """).fetchall()
     monthly = [dict(r) for r in rows]
@@ -1352,7 +1404,7 @@ def api_history():
         SELECT strftime('%Y-W%W', created_at) as week,
                COUNT(*) as cnt,
                COALESCE(SUM(CASE WHEN status!='cancelled' THEN amount ELSE 0 END),0) as revenue
-        FROM orders GROUP BY strftime('%Y-W%W', created_at)
+        FROM orders WHERE deleted_at IS NULL GROUP BY strftime('%Y-W%W', created_at)
         ORDER BY week DESC LIMIT 8
     """).fetchall()
     weekly = list(reversed([dict(r) for r in rows]))
@@ -1365,7 +1417,7 @@ def api_history():
         FROM order_packages op
         JOIN orders o ON op.order_id = o.id
         JOIN packages p ON op.package_id = p.id
-        WHERE o.status != 'cancelled'
+        WHERE o.status != 'cancelled' AND o.deleted_at IS NULL
         GROUP BY p.id
         ORDER BY total_qty DESC
     """).fetchall()
@@ -1373,7 +1425,7 @@ def api_history():
 
     # 状态分布
     rows = db.execute("""
-        SELECT status, COUNT(*) as cnt FROM orders GROUP BY status
+        SELECT status, COUNT(*) as cnt FROM orders WHERE deleted_at IS NULL GROUP BY status
     """).fetchall()
     status_dist = {r["status"]: r["cnt"] for r in rows}
 
@@ -1382,7 +1434,7 @@ def api_history():
         SELECT COUNT(*) as total,
                COALESCE(SUM(CASE WHEN status!='cancelled' THEN amount ELSE 0 END),0) as total_revenue,
                AVG(CASE WHEN status!='cancelled' THEN amount END) as avg_amount
-        FROM orders
+        FROM orders WHERE deleted_at IS NULL
     """).fetchone()
     overview = dict(rows)
 
@@ -1400,7 +1452,7 @@ def finance_summary():
     date_from = request.args.get("date_from")
     date_to = request.args.get("date_to")
     # 构建日期过滤条件（用参数化，带 o. 前缀避免 JOIN 歧义）
-    date_clause = "o.status != 'cancelled'"
+    date_clause = "o.status != 'cancelled' AND o.deleted_at IS NULL"
     params = []
     if date_from:
         date_clause += " AND o.booking_date >= ?"
@@ -1568,7 +1620,7 @@ def print_menu():
     db = g.db
     cur = db.cursor()
     cur.execute("SELECT id, booking_date, booking_time, address, contact_name, status "
-                "FROM orders WHERE status IN ('pending','preparing') ORDER BY id")
+                "FROM orders WHERE status IN ('pending','preparing') AND deleted_at IS NULL ORDER BY id")
     orders = [dict(r) for r in cur.fetchall()]
 
     order_details = []
@@ -1787,7 +1839,7 @@ def prep_merged():
         date = request.args.get("date") or _today_cst().isoformat()
         cur.execute("""
             SELECT id FROM orders
-            WHERE status IN ('pending','preparing') AND booking_date = ?
+            WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date = ?
             ORDER BY booking_time
         """, (date,))
         order_ids = [r["id"] for r in cur.fetchall()]
@@ -1804,7 +1856,7 @@ def prep_dates():
     cur.execute("""
         SELECT booking_date, COUNT(*) as cnt
         FROM orders
-        WHERE status IN ('pending','preparing') AND booking_date IS NOT NULL AND booking_date != ''
+        WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date IS NOT NULL AND booking_date != ''
         GROUP BY booking_date
         ORDER BY booking_date
     """)
