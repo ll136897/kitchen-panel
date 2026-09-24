@@ -224,11 +224,37 @@ function subcategorize(name, cat){
   return 'beef';
 }
 
+// 带自动重试的取数：Render 免费实例休眠后冷启动，首次请求可能失败/超时，
+// 自动重试可避免"页面空白、要手动刷新"的问题。
+async function fetchJSONRetry(url, tries){
+  tries = tries || 4;
+  for(let i=1;i<=tries;i++){
+    try{
+      const r = await fetch(url, {cache:'no-store'});
+      if(r.ok) return await r.json();
+    }catch(e){ /* 网络失败：继续重试 */ }
+    if(i < tries) await new Promise(s=>setTimeout(s, 1200));
+  }
+  return null;
+}
+
 function loadMenu(){
+  const box = document.getElementById('menuList');
+  // 首次加载时给出提示，避免"空白无反馈"
+  if(box && !packages.length){
+    box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
+      '⏳ 加载中…<br><span style="font-size:12px">若系统刚休眠，首次打开可能需要几十秒</span></div>';
+  }
   Promise.all([
-    fetch('/api/packages').then(r=>r.json()),
-    fetch('/api/ingredients').then(r=>r.json())
+    fetchJSONRetry('/api/packages'),
+    fetchJSONRetry('/api/ingredients')
   ]).then(([pkgRes, ingRes])=>{
+    if(!pkgRes || !ingRes){
+      if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
+        '⚠️ 数据加载失败（网络异常或系统正在启动）<br><br>'+
+        '<button class="btn btn-primary btn-sm" onclick="loadMenu()">🔄 重新加载</button></div>';
+      return;
+    }
     packages = pkgRes.data || [];
     allIngredients = (ingRes.data || []).sort((a,b)=>a.name.localeCompare(b.name,'zh'));
     render();
@@ -807,6 +833,9 @@ function showRefreshToast(){
   setTimeout(()=>t.remove(), 2200);
 }
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
+// 页面打开即自动加载菜单
+// （原来这里缺少初始调用，导致菜单页打开是空白、必须手动点「刷新」才显示）
+loadMenu();
 </script>
 </body>
 </html>

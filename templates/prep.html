@@ -320,9 +320,29 @@ function switchMode(mode){
   render();
 }
 
+// 带自动重试的取数：Render 免费实例休眠后冷启动，首次请求可能失败/超时，
+// 自动重试可避免"页面空白、要手动刷新"。
+async function fetchJSONRetry(url, tries){
+  tries = tries || 4;
+  for(let i=1;i<=tries;i++){
+    try{
+      const r = await fetch(url, {cache:'no-store'});
+      if(r.ok) return await r.json();
+    }catch(e){ /* 网络失败：继续重试 */ }
+    if(i < tries) await new Promise(s=>setTimeout(s, 1200));
+  }
+  return null;
+}
+
 function loadPrepDates(autoSwitch){
-  fetch('/api/prep/dates').then(r=>r.json()).then(res=>{
-    if(!res.ok) return;
+  return fetchJSONRetry('/api/prep/dates').then(res=>{
+    if(!res || !res.ok){
+      const box = document.getElementById('dateChips');
+      if(box) box.innerHTML = '<div class="muted" style="padding:6px;font-size:14px">'+
+        '⚠️ 日期加载失败（系统可能正在启动） '+
+        '<button class="btn btn-sm btn-primary" onclick="loadPrepDates(false)">🔄 重试</button></div>';
+      return;
+    }
     prepDates = res.dates || [];
     const todayStr = res.today;
     todayDateStr = todayStr;
@@ -379,8 +399,14 @@ function pickDate(dateStr){
 
 function loadPrep(){
   const d = document.getElementById('datePick').value;
-  fetch('/api/prep/merged?date='+d).then(r=>r.json()).then(d2=>{
-    if(!d2.ok){ alert('加载失败'); return; }
+  return fetchJSONRetry('/api/prep/merged?date='+d).then(d2=>{
+    if(!d2 || !d2.ok){
+      const box = document.getElementById('ordersList');
+      if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
+        '⚠️ 数据加载失败（网络异常或系统正在启动）<br><br>'+
+        '<button class="btn btn-primary btn-sm" onclick="loadPrep()">🔄 重新加载</button></div>';
+      return;
+    }
     prepData = d2.data;
     render();
     renderDateChips(d);  // 重新渲染 chips 以更新 active 状态

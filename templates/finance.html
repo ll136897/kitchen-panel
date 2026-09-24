@@ -176,13 +176,34 @@ function onDateChange(){
 // 初始化日期为今天
 document.getElementById('rangeDate').value = fmtDate(new Date());
 
+// 带自动重试的取数：Render 免费实例休眠后冷启动，首次请求可能失败/超时，
+// 自动重试可避免"页面空白、要手动刷新"。
+async function fetchJSONRetry(url, tries){
+  tries = tries || 4;
+  for(let i=1;i<=tries;i++){
+    try{
+      const r = await fetch(url, {cache:'no-store'});
+      if(r.ok) return await r.json();
+    }catch(e){ /* 网络失败：继续重试 */ }
+    if(i < tries) await new Promise(s=>setTimeout(s, 1200));
+  }
+  return null;
+}
+
 function loadAll(){
   const r = getRangeDates();
   const qs = `date_from=${r.from}&date_to=${r.to}`;
   Promise.all([
-    fetch('/api/finance/summary?'+qs).then(r=>r.json()),
-    fetch('/api/finance/orders?'+qs).then(r=>r.json())
+    fetchJSONRetry('/api/finance/summary?'+qs),
+    fetchJSONRetry('/api/finance/orders?'+qs)
   ]).then(([sumRes, ordRes])=>{
+    if(!sumRes || !ordRes){
+      const box = document.getElementById('kpiBox');
+      if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
+        '⚠️ 数据加载失败（网络异常或系统正在启动）<br><br>'+
+        '<button class="btn btn-primary btn-sm" onclick="loadAll()">🔄 重新加载</button></div>';
+      return;
+    }
     renderKpi(sumRes.data||{});
     renderOrders(ordRes.data||[]);
   });
@@ -348,7 +369,8 @@ function editIngCost(iid, val){
 // ===== 食材成本管理 =====
 let allCostItems = [];
 function loadCostItems(){
-  fetch('/api/ingredients').then(r=>r.json()).then(d=>{
+  fetchJSONRetry('/api/ingredients').then(d=>{
+    if(!d || !d.ok) return;   // 失败时静默，避免干扰主财务数据展示
     allCostItems = (d.data||[]).filter(i=>i.category !== 'packaging' && i.category !== 'utensil');
     const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
     allCostItems.sort((a,b)=>{
