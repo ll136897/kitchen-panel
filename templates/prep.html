@@ -147,6 +147,17 @@
     .cat-head .check-all-btn{font-size:10px;padding:3px 7px}
   }
 
+  /* 订单行：一排展示（地点|日期|时间|套餐|联系人|备注） */
+  .orow-head,.orow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;white-space:nowrap}
+  .orow-head{margin:2px 0 6px;color:#8a7a68;font-size:12px;font-weight:700;background:#f4efe6}
+  .orow{background:#fff;border:1px solid var(--border-l);margin-bottom:8px;overflow-x:auto}
+  .orow-head>span,.orow>span{flex:0 0 auto;font-size:13.5px}
+  .c-addr{min-width:88px;font-weight:700;color:#2b1e14}
+  .c-date{min-width:78px;color:#6b5b4a}
+  .c-time{min-width:52px;font-weight:700;color:#c0392b}
+  .c-pkg{min-width:114px}
+  .c-name{min-width:76px}
+  .c-note{max-width:240px;overflow:hidden;text-overflow:ellipsis;color:#8a7a68}
   .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
   .date-picker{padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:16px}
   /* 日期快捷按钮条：列出所有有备餐订单的日期 */
@@ -270,6 +281,8 @@ const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'
 function weekdayOf(s){ return WEEKDAYS[new Date(s+'T00:00:00Z').getUTCDay()]; }
 function mdOf(s){ const p=s.split('-'); return `${parseInt(p[1],10)}.${parseInt(p[2],10)}`; }
 function dayDiff(a,b){ return Math.round((new Date(a+'T00:00:00Z')-new Date(b+'T00:00:00Z'))/86400000); }
+// 出餐时间：订单时间与用餐时间视为同一个，只取一个显示（用餐 > 预约 > 收餐）
+function orderTimeOf(o){ return ((o&&(o.meal_time||o.booking_time||o.pickup_time))||'').trim(); }
 
 // 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
 document.getElementById('datePick').value = new Date().toISOString().slice(0,10);
@@ -385,17 +398,15 @@ function render(){
     document.getElementById('orderView').style.display='none';
     return;
   }
-  // 排序：已逾期 > 已到应备时间 > 即将 > 充裕 > 未来 > 待定
-  // 用 urgency.level 的优先级排序
-  const levelOrder = {'overdue':0,'soon':1,'past':2,'normal':3,'future':4};
+  // 排序：严格按出餐时间（日期 + 时间）升序；时间相同再按地点
   orders = orders.slice().sort((a,b)=>{
-    const la = (a.urgency&&a.urgency.level) || 'normal';
-    const lb = (b.urgency&&b.urgency.level) || 'normal';
-    const ra = levelOrder[la]===undefined?99:levelOrder[la];
-    const rb = levelOrder[lb]===undefined?99:levelOrder[lb];
-    if(ra!==rb) return ra-rb;
-    // 同级别按日期+时间升序
-    return (a.booking_date||'')+(a.booking_time||'') > (b.booking_date||'')+(b.booking_time||'') ? 1 : -1;
+    const da = a.booking_date || '9999-99-99', db = b.booking_date || '9999-99-99';
+    const ta = da + ' ' + (orderTimeOf(a) || '99:99');
+    const tb = db + ' ' + (orderTimeOf(b) || '99:99');
+    if(ta !== tb) return ta < tb ? -1 : 1;
+    const aa = a.address || '', ab = b.address || '';
+    if(aa !== ab) return aa < ab ? -1 : 1;
+    return (a.id||0) - (b.id||0);
   });
   d.orders = orders;
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
@@ -412,19 +423,38 @@ function render(){
     } else {
       dateLabel = o.booking_time || '待定';
     }
-    const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
-    // 非今天的订单日期用色块突出
-    const dateHighlight = (oDiff!==null && oDiff!==0)
-      ? `<span style="background:#fff3cd;color:#856404;padding:2px 8px;border-radius:6px;font-weight:700">${dateLabel}${mealStr}</span>`
-      : `📅 ${dateLabel}${mealStr}`;
-    return `<div class="order-mini">
-      <b>#${o.id}</b>
-      <span>${dateHighlight}</span>
-      <span class="muted">${o.address||''}</span>
-      ${pkgs?`<span class="muted">🍱 ${pkgs}</span>`:''}
-      ${urgBadge(o.urgency)}
+    // 日期列（今天/明天用中文，其余 MM.DD 周X）
+    let dateText2 = '待定';
+    if(oDate){
+      if(oDiff===0) dateText2 = '今天';
+      else if(oDiff===1) dateText2 = '明天';
+      else if(oDiff===-1) dateText2 = '昨天';
+      else dateText2 = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
+    }
+    // 时间列：只显示一个（订单时间/用餐时间视为同一个）
+    const t = orderTimeOf(o) || '—';
+    const addr = o.address || '—';
+    const nm = o.contact_name || '—';
+    const nt = o.note || '';
+    return `<div class="orow">
+      <span class="c-addr">📍 ${addr}</span>
+      <span class="c-date">${dateText2}</span>
+      <span class="c-time">${t}</span>
+      <span class="c-pkg">🍱 ${pkgs||'—'}</span>
+      <span class="c-name">👤 ${nm}</span>
+      <span class="c-note">${nt? '📝 '+nt : ''}</span>
     </div>`;
   }).join('');
+  // 表头（与数据列对齐）
+  document.getElementById('ordersList').innerHTML =
+    `<div class="orow-head">
+      <span class="c-addr">📍 地点</span>
+      <span class="c-date">日期</span>
+      <span class="c-time">时间</span>
+      <span class="c-pkg">🍱 套餐</span>
+      <span class="c-name">👤 联系人</span>
+      <span class="c-note">📝 备注</span>
+    </div>` + document.getElementById('ordersList').innerHTML;
 
   if(currentMode==='merged'){
     document.getElementById('orderView').style.display='none';
@@ -562,18 +592,20 @@ function renderByOrder(){
     // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
     const oDate = o.booking_date || '';
     const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
+    // 只显示一个时间（订单时间/用餐时间视为同一个）
+    const t = orderTimeOf(o);
     let dateLabel = '';
     if(oDate){
-      if(oDiff===0) dateLabel = `今天 ${o.booking_time||''}`;
-      else if(oDiff===1) dateLabel = `明天 ${o.booking_time||''}`;
-      else if(oDiff===-1) dateLabel = `昨天 ${o.booking_time||''}`;
-      else dateLabel = `${mdOf(oDate)} ${weekdayOf(oDate)} ${o.booking_time||''}`;
+      if(oDiff===0) dateLabel = `今天 ${t}`;
+      else if(oDiff===1) dateLabel = `明天 ${t}`;
+      else if(oDiff===-1) dateLabel = `昨天 ${t}`;
+      else dateLabel = `${mdOf(oDate)} ${weekdayOf(oDate)} ${t}`;
     } else {
-      dateLabel = o.booking_time || '待定';
+      dateLabel = t || '待定';
     }
-    const mealStr = o.meal_time ? ` · 用餐 ${o.meal_time}` : '';
+    const pkgsTxt = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
-      <h3 style="margin:0">📋 订单 #${o.id} · 📅 ${dateLabel}${mealStr} ${urgBadge(o.urgency)}</h3>
+      <h3 style="margin:0">📍 ${o.address||'—'} · 📅 ${dateLabel} · 🍱 ${pkgsTxt||'—'} · 👤 ${o.contact_name||'—'}</h3>
       <span>
         <button class="check-all-btn" onclick="window.open('/orders/${o.id}/ticket','_blank')" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#27ae60;color:#fff;cursor:pointer;font-weight:700">🖨 出餐单</button>
         <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
