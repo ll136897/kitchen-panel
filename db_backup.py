@@ -85,10 +85,26 @@ def backup_to_github():
         _backup_lock.release()
 
 
+def _local_has_data():
+    """本地数据库是否已有订单数据（有就别用旧备份覆盖）"""
+    if not os.path.exists(DB_PATH):
+        return False
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        n = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        conn.close()
+        return n > 0
+    except Exception:
+        return False
+
+
 def restore_from_github():
-    """从 GitHub 拉取 kitchen.db 恢复"""
+    """从 GitHub 拉取 kitchen.db 恢复（本地已有订单数据时跳过，避免旧备份覆盖新数据）"""
     if not GITHUB_TOKEN:
         print("[restore] 未设置 GITHUB_TOKEN，跳过")
+        return False
+    if _local_has_data():
+        print("[restore] 本地已有订单数据，跳过恢复（避免用旧备份覆盖新数据）")
         return False
     info = _github_api("GET", "")
     if not info:
