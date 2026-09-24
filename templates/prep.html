@@ -489,7 +489,7 @@ function itemRow(it, type, checkedMap){
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name">${it.name}</div>
+    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换菜" style="color:#c0392b;font-weight:700">🔄换</span>':''}</div>
     <div class="pr-ord">${totPkg}</div>
     <div class="pr-per">${perSize||'—'}</div>
     <div class="pr-unit">${unit}</div>

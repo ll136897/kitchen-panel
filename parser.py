@@ -213,6 +213,9 @@ def parse_order_text(raw_text):
     # 从备注解析额外加菜需求（单点食材）
     result["extra_ingredients"] = _parse_extra_ingredients(result["note"])
 
+    # 从备注解析换菜需求（A 换 B），用于改写备餐表
+    result["dish_swaps"] = _parse_dish_swaps(result["note"])
+
     return result
 
 
@@ -489,6 +492,60 @@ def _parse_extra_ingredients(note):
         if n:
             results.append({"name": name, "qty": n, "mode": mode})
     return results
+
+
+def _clean_swap_name(s):
+    """清理换菜里识别出的菜名（去掉标点、数量词、多余动词）"""
+    if not s:
+        return ''
+    s = s.strip()
+    s = re.sub(r"^(?:成|为|上|的|要|来|个|份|盘)", "", s)
+    s = re.sub(r"(?:一份|两份|二份|三份|1份|2份|3份|\d+份)$", "", s)
+    s = re.sub(r"[，,。;；、：:\s]+$", "", s)
+    return s.strip()
+
+
+def _parse_dish_swaps(note):
+    """从备注解析"换菜"需求：把某道菜换成另一道菜。
+    支持写法：
+      - 鸡尖换翅根 / 麻辣鸡尖换成奥尔良鸡翅根 / 把鸡尖替换成翅根
+      - 不要鸡尖，换翅根 / 不要鸡尖 换翅根（"不要X" + "换Y" 跨段搭配）
+    返回 [{from: 原菜名, to: 新菜名}]
+    """
+    if not note:
+        return []
+    swaps = []
+    segments = re.split(r"[+，,。；;、\s]+", note)
+    pending_src = None  # 上一段出现的"不要X"里的 X
+
+    for seg in segments:
+        if not seg:
+            continue
+        # 1) 单独的"换X"：与上一段"不要X"配对
+        m_only = re.match(r"^(?:换成|换为|替换成|替换|改成|改为|换)\s*(.+)$", seg)
+        if m_only:
+            dst = _clean_swap_name(m_only.group(1))
+            if pending_src and dst and pending_src != dst:
+                if (pending_src, dst) not in [(s["from"], s["to"]) for s in swaps]:
+                    swaps.append({"from": pending_src, "to": dst})
+            pending_src = None
+            continue
+        # 2) 段内完整写法 "A换B" / "A换成B"
+        m_full = re.search(r"(.+?)(?:换成|换为|替换成|替换|改成|改为|换)\s*(.+)$", seg)
+        if m_full:
+            src = _clean_swap_name(re.sub(r"^(?:不要了|不要|去掉|不加|没有|无|把)", "", m_full.group(1)))
+            dst = _clean_swap_name(m_full.group(2))
+            pending_src = None
+            if src and dst and len(src) >= 2 and len(dst) >= 2 and src != dst:
+                if (src, dst) not in [(s["from"], s["to"]) for s in swaps]:
+                    swaps.append({"from": src, "to": dst})
+            continue
+        # 3) 只写了"不要X"：暂存，等后面出现"换Y"再配对
+        m_no = re.match(r"^(?:不要了|不要|去掉|不加|没有|无)\s*(.+)$", seg)
+        if m_no:
+            pending_src = _clean_swap_name(m_no.group(1))
+            continue
+    return swaps
 
 
 def match_extra_ingredients_to_db(extra_ings):

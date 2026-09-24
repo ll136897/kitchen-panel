@@ -36,6 +36,31 @@ def get_available_tool_stock():
         return stock
 
 
+def match_ingredient_id_by_name(name):
+    """按菜名模糊匹配 ingredients 表，返回 id 或 None。
+    备注写"鸡尖"→库里"麻辣鸡尖"；备注写"麻辣鸡尖"→库里"鸡尖"都能配上。
+    """
+    if not name:
+        return None
+    key = str(name).strip()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM ingredients WHERE name = ?", (key,))
+        r = cur.fetchone()
+        if r:
+            return r["id"]
+        cur.execute("SELECT id FROM ingredients WHERE name LIKE ?", ('%' + key + '%',))
+        r = cur.fetchone()
+        if r:
+            return r["id"]
+        cur.execute("SELECT id, name FROM ingredients")
+        for x in cur.fetchall():
+            nm = x["name"] or ''
+            if key in nm or nm in key:
+                return x["id"]
+    return None
+
+
 def parse_time_str(t):
     """把 '12.00' / '12:00' / '12点' / '晚上6点' / '下午3点半' 解析成 (hour, minute)。
     识别中文时段词：凌晨/早上/上午/中午/下午/晚上，自动做 12 小时制转换。
@@ -294,6 +319,29 @@ def calc_order_requirements(order_id):
             ing_demand[iid]["per_package"] = ei["per_package"]
             ing_demand[iid]["order_qty"] += ei["qty"]
 
+        # 备注换菜：A 换 B —— 扣掉 A 的全部用量，按同样数量加上 B
+        for sw in (parsed.get("dish_swaps") or []):
+            src_id = match_ingredient_id_by_name(sw.get("from"))
+            dst_id = match_ingredient_id_by_name(sw.get("to"))
+            if not src_id or not dst_id or src_id == dst_id:
+                continue
+            if src_id not in ing_demand:
+                continue
+            amount = ing_demand[src_id]["total"]
+            if amount <= 0:
+                continue
+            ing_demand[src_id]["total"] = 0
+            ing_demand[src_id]["swapped_out"] = True
+            if dst_id not in ing_demand:
+                ing_demand[dst_id] = {
+                    "total": 0,
+                    "per_package": ing_demand[src_id].get("per_package", 0),
+                    "order_qty": ing_demand[src_id].get("order_qty", 1),
+                    "portion_count": ing_demand[src_id].get("portion_count", 1),
+                }
+            ing_demand[dst_id]["total"] += amount
+            ing_demand[dst_id]["swapped_in"] = True
+
     # 拉取详情
     ingredients_result = []
     with get_db() as conn:
@@ -304,6 +352,9 @@ def calc_order_requirements(order_id):
             if r:
                 stock = r["stock"] or 0
                 need = info["total"]
+                # 被换掉的菜用量为 0，不再出现在备餐表里
+                if need <= 0:
+                    continue
                 # 细分 meat 类 + 合并小料
                 cat = r["category"] or "other"
                 cat = _subcategorize_meat(r["name"], cat)
@@ -311,6 +362,7 @@ def calc_order_requirements(order_id):
                     cat = "sauce"
                 ingredients_result.append({
                     "id": ing_id, "name": r["name"], "unit": r["unit"],
+                    "swapped_in": bool(info.get("swapped_in")),
                     "need": round(need, 2), "stock": stock,
                     "shortage": round(max(0, need - stock), 2),
                     "threshold": r["threshold"] or 0,
@@ -886,6 +938,8 @@ def calc_merged_prep(order_ids):
                     "total_portions": 0,
                 }
             ing_merge[key]["total"] += ing["need"]
+            if ing.get("swapped_in"):
+                ing_merge[key]["swapped_in"] = True
             ing_merge[key]["order_ids"].append(o["id"])
             ing_merge[key]["per_package_samples"].append((ing.get("per_package"), ing.get("order_qty", 1)))
             ing_merge[key]["portion_count_samples"].append((ing.get("portion_count", 1), ing.get("order_qty", 1)))
