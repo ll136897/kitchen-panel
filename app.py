@@ -512,9 +512,38 @@ def api_parse():
     return jsonify({"ok": True, "data": parsed})
 
 
+def _dup_key_of(parsed):
+    """取用于「完全重复」判定的关键字段；关键信息缺失时返回 None（不做重复判断）"""
+    bd = (parsed.get("booking_date") or "").strip()
+    addr = (parsed.get("address") or "").strip()
+    if not bd or not addr:
+        return None
+    return (bd, (parsed.get("booking_time") or "").strip(), addr,
+            (parsed.get("contact_phone") or "").strip())
+
+
+def _find_duplicate_order(cur, parsed):
+    """找一条「完全重复」的现存订单（同日期+时间+地址+电话，且未取消、未删除）"""
+    key = _dup_key_of(parsed)
+    if not key:
+        return None
+    return cur.execute("""
+        SELECT id, booking_date, booking_time, address, contact_name, contact_phone
+        FROM orders
+        WHERE deleted_at IS NULL AND status != 'cancelled'
+          AND booking_date = ?
+          AND COALESCE(booking_time,'') = ?
+          AND COALESCE(address,'') = ?
+          AND COALESCE(contact_phone,'') = ?
+        ORDER BY id DESC LIMIT 1
+    """, key).fetchone()
+
+
 @app.route("/api/orders", methods=["POST"])
 def create_order():
-    """创建订单：接收 raw_text（单个或批量用 --- 分隔），自动解析入库"""
+    """创建订单：接收 raw_text（单个或批量用 --- 分隔），自动解析入库。
+    若发现一模一样的订单，返回 409 + duplicate 标记，由前端弹框让用户确认；
+    用户确认后带 force=true 再提交一次即强制入库。"""
     data = request.get_json(force=True)
     raw = data.get("raw_text", "")
     if not raw.strip():
@@ -527,10 +556,29 @@ def create_order():
 
     db = g.db
     cur = db.cursor()
+    parsed_chunks = [parse_order_text(c) for c in chunks]
+
+    # ---- 重复订单检查（调用方已 force 则跳过）----
+    if not data.get("force"):
+        for pc in parsed_chunks:
+            dup = _find_duplicate_order(cur, pc)
+            if dup:
+                d = dict(dup)
+                where = " ".join(x for x in [d.get("booking_date") or "",
+                                             d.get("booking_time") or "",
+                                             d.get("address") or "",
+                                             d.get("contact_name") or ""] if x)
+                return jsonify({
+                    "ok": False,
+                    "duplicate": True,
+                    "existing_id": d["id"],
+                    "existing": d,
+                    "msg": "已有一模一样的订单 #%s（%s）" % (d["id"], where),
+                }), 409
+
     order_ids = []
     results = []
-    for chunk in chunks:
-        parsed = parse_order_text(chunk)
+    for chunk, parsed in zip(chunks, parsed_chunks):
         matched = match_packages_in_db(parsed["packages"])
         cur.execute("""
             INSERT INTO orders

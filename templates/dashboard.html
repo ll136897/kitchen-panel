@@ -440,7 +440,13 @@ function parseOrder(){
 function confirmOrder(){
   const raw = document.getElementById('rawText').value.trim();
   if(!raw) return;
-  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+  postOrder(raw, false);
+}
+
+// 提交订单；若后端发现"一模一样的订单"(duplicate)，弹框让用户确认后再 force 提交
+function postOrder(raw, force){
+  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({raw_text:raw, force:!!force})})
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         clearText();
@@ -451,9 +457,15 @@ function confirmOrder(){
         } else {
           showStockToast(`✅ 订单 #${d.order_id} 已入库`);
         }
-      } else {
-        showStockToast('入库失败：'+(d.msg||'未知错误'));
+        return;
       }
+      // 完全重复：弹框确认（点确定=照录，点取消=放弃）
+      if(d.duplicate){
+        const go = confirm(`⚠️ 发现一模一样的订单\n\n${d.msg||''}\n\n确定还要再录一遍吗？\n· 点「确定」= 继续录入\n· 点「取消」= 放弃这一单`);
+        if(go) postOrder(raw, true);
+        return;
+      }
+      showStockToast('入库失败：'+(d.msg||'未知错误'));
     });
 }
 
