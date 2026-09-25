@@ -550,6 +550,7 @@ def calc_dashboard():
                    contact_phone, amount, status, note
             FROM orders
             WHERE status IN ('pending','preparing')
+              AND deleted_at IS NULL
               AND booking_date IS NOT NULL AND booking_date != ''
             ORDER BY booking_date, booking_time
         """)
