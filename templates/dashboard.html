@@ -567,6 +567,10 @@ function loadDash(){
     if(!alerts.length){
       alerts.push({cls:'green', body:`✅ 当前 <b>${t.pending}</b> 单待备、<b>${t.preparing}</b> 单备餐中，所有食材工具充足。`});
     }
+    // 已取消的单不计入"今日订单"、也不出现在下方列表 → 明确告知，避免"数字比列表多=丢单"的误解
+    if(t.cancelled){
+      alerts.push({cls:'gray', body:`ℹ️ 今天另有 <b>${t.cancelled}</b> 单是「已取消」状态，未计入「今日订单」、也不会出现在下面的待备列表里 —— 不是丢单。`});
+    }
     document.getElementById('alertBox').innerHTML = alerts.map(a=>
       `<div class="alert-bar ${a.cls}"><div class="alert-body">${a.body}</div></div>`
     ).join('');

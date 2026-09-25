@@ -430,14 +430,21 @@ def calc_dashboard():
     """
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM orders WHERE status IN ('pending','preparing')")
+        cur.execute("SELECT id FROM orders WHERE status IN ('pending','preparing') AND deleted_at IS NULL")
         order_ids = [r["id"] for r in cur.fetchall()]
 
         # ---- 今日统计 ----
+        # 口径统一为"预约日期=今天(北京时间)"且未取消，与下方"待备预约"列表一致；
+        # 已取消的单单独计数，供前端提示，避免"数字比列表多"造成"丢单"误解。
+        _today = today_cst().isoformat()
         cur.execute("SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as amt "
-                    "FROM orders WHERE date(created_at) = date('now','localtime')")
+                    "FROM orders WHERE booking_date = ? AND status != 'cancelled' AND deleted_at IS NULL",
+                    (_today,))
         today = cur.fetchone()
-        cur.execute("SELECT status, COUNT(*) as c FROM orders GROUP BY status")
+        cur.execute("SELECT COUNT(*) FROM orders WHERE booking_date = ? AND status = 'cancelled' "
+                    "AND deleted_at IS NULL", (_today,))
+        today_cancelled_count = cur.fetchone()[0]
+        cur.execute("SELECT status, COUNT(*) as c FROM orders WHERE deleted_at IS NULL GROUP BY status")
         status_map = {r["status"]: r["c"] for r in cur.fetchall()}
         today_count = today["c"]
         today_amt = round(today["amt"] or 0, 2)
@@ -567,6 +574,7 @@ def calc_dashboard():
         "today": {
             "count": today_count,
             "revenue": today_amt,
+            "cancelled": today_cancelled_count,
             "pending": pending_count,
             "preparing": preparing_count,
             "done": done_count,
