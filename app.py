@@ -298,12 +298,28 @@ def order_ticket(oid):
         total_str = "—"
     deposit = float(o.get("deposit") or 0)
 
+    # 优惠/加收：总额与套餐标价之和对不上时，用这一行把账做平
+    discount = float(o.get("discount") or 0)
+    adj_line = ""
+    if abs(discount) > 0.001 and calc_total > 0:
+        adj_line = ('<div class="item subst"><div class="ln"><span class="nm">套餐小计</span>'
+                    '<span></span><span>¥%.2f</span></div></div>' % round(calc_total, 2))
+        if discount > 0:
+            adj_line += ('<div class="item subst"><div class="ln"><span class="nm">优惠</span>'
+                         '<span></span><span>-¥%.2f</span></div></div>' % discount)
+        else:
+            adj_line += ('<div class="item subst"><div class="ln"><span class="nm">加收</span>'
+                         '<span></span><span>+¥%.2f</span></div></div>' % abs(discount))
+
     data = {
         "shop": shop, "no": no, "time": time_str,
         "customer": customer, "address": address,
         "items": data_items, "total": total_str,
         "deposit": ("¥%.2f" % deposit) if deposit > 0 else "",
         "note": note,
+        "subtotal": ("¥%.2f" % round(calc_total, 2)) if calc_total > 0 else "",
+        "discount_num": discount,
+        "discount_str": (("-¥%.2f" % discount) if discount > 0 else ("+¥%.2f" % abs(discount))) if abs(discount) > 0.001 else "",
     }
 
     html = """<!doctype html>
@@ -333,6 +349,7 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 .receipt .item { margin:2px 0; }
 .receipt .item .nm { word-break:break-all; }
 .receipt .item .ln { display:flex; justify-content:space-between; gap:6px; }
+.receipt .item.subst { color:#666; font-size:13px; }
 .receipt .grand { font-size:14px; font-weight:bold; display:flex; justify-content:space-between; }
 .receipt .ft { text-align:center; font-size:10.5px; margin-top:6px; color:#333; }
 .receipt .barcode { text-align:center; font-family:"Courier New",monospace; font-size:10px; letter-spacing:1px; margin-top:2px; }
@@ -362,6 +379,7 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 __META_EXTRA__
 __ITEMS__
 <div class="sep"></div>
+__ADJ_LINE__
 <div class="grand"><span>合计</span><span>__TOTAL__</span></div>
 __DEPOSIT_LINE__
 __NOTE_LINE__
@@ -384,6 +402,10 @@ function drawTicket(){
   L.push({t:'sep'});
   DATA.items.forEach(function(it){ L.push({t:'item', n:it.n, q:'x'+it.q, p:it.ps}); });
   L.push({t:'sep'});
+  if (DATA.discount_num && DATA.subtotal) {
+    L.push({t:'item', n:'套餐小计', q:'', p:DATA.subtotal});
+    L.push({t:'item', n:(DATA.discount_num > 0 ? '优惠' : '加收'), q:'', p:DATA.discount_str});
+  }
   L.push({t:'grand', l:'合计', r:DATA.total});
   if (DATA.deposit) L.push({t:'meta', l:'押金 '+DATA.deposit+'（离场退还）', r:''});
   if (DATA.note) { L.push({t:'sep'}); L.push({t:'note', text:'备注：'+DATA.note}); }
@@ -437,6 +459,7 @@ function exportPNG(){
             .replace("__TIME__", esc(time_str))
             .replace("__META_EXTRA__", meta_extra)
             .replace("__ITEMS__", item_rows)
+            .replace("__ADJ_LINE__", adj_line)
             .replace("__TOTAL__", esc(total_str))
             .replace("__DEPOSIT_LINE__", deposit_line)
             .replace("__NOTE_LINE__", note_line)
@@ -712,6 +735,13 @@ def edit_order(oid):
             return jsonify({"ok": False, "msg": "金额格式不对"}), 400
         sets.append("amount=?")
         params.append(amt)
+    if "discount" in data:
+        try:
+            disc = float(data.get("discount") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "msg": "优惠格式不对"}), 400
+        sets.append("discount=?")
+        params.append(disc)
     if sets:
         params.append(oid)
         cur.execute("UPDATE orders SET %s WHERE id=?" % ", ".join(sets), params)

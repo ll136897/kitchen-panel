@@ -174,10 +174,11 @@ def init_db():
                 payment_status TEXT DEFAULT 'unpaid',  -- unpaid/paid/partial 货款状态
                 deposit_status TEXT DEFAULT 'pending', -- pending/returned/forfeited 押金状态
                 created_at TEXT DEFAULT (datetime('now','localtime')),
-                deleted_at TEXT                    -- 回收站：软删除时间，NULL=正常
+                deleted_at TEXT,                   -- 回收站：软删除时间，NULL=正常
+                discount REAL NOT NULL DEFAULT 0   -- 优惠/折扣：正数=优惠，负数=加收
             )
         """)
-        # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）
+        # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）/ discount（优惠）
         cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)").fetchall()]
         if "payment_status" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'unpaid'")
@@ -185,6 +186,8 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN deposit_status TEXT DEFAULT 'pending'")
         if "deleted_at" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT")
+        if "discount" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0")
 
         # 订单→套餐明细
         cur.execute("""

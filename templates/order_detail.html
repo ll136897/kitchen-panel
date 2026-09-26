@@ -53,11 +53,13 @@
     <div class="edit-grid">
       <label>📅 预约日期<input type="date" id="edDate"></label>
       <label>⏰ 预约时间<input type="time" id="edTime"></label>
-      <label>💰 金额(元)<input type="number" id="edAmount" step="0.01" min="0"></label>
+      <label>💰 实收金额(元)<input type="number" id="edAmount" step="0.01" min="0" oninput="updateCalcHint()"></label>
+      <label>🏷 优惠(元)<input type="number" id="edDiscount" step="0.01" placeholder="减免多少，不填=0" oninput="recalcFromDiscount()"></label>
       <label>👤 联系人<input type="text" id="edName"></label>
       <label>📞 电话<input type="tel" id="edPhone"></label>
       <label style="grid-column:1/-1">📍 地址<input type="text" id="edAddr"></label>
     </div>
+    <div class="edit-hint" id="calcHint" style="margin-top:8px;font-size:13px;font-weight:600;color:#8a5a2b"></div>
     <div style="margin:12px 0 6px;font-weight:700;font-size:13px">🍱 套餐明细（份数可改，🗑 可删）</div>
     <div id="pkgRows"></div>
     <button type="button" class="btn btn-sm" onclick="addPkgRow()" style="margin-top:4px;border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 12px;border-radius:8px">＋ 增加套餐</button>
@@ -113,6 +115,7 @@ function loadDetail(){
       <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone||'-'}</div></div>
       <div class="cell"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
       <div class="cell"><div class="k">💰 金额</div><div class="v">¥${o.amount||0}</div></div>
+      ${(o.discount ? `<div class="cell"><div class="k">🏷 优惠</div><div class="v" style="color:#c0392b">${o.discount>0?'-':'+'}¥${Math.abs(o.discount)}</div></div>` : '')}
       <div class="cell"><div class="k">🔒 押金</div><div class="v">¥${o.deposit||0} (${depMap[o.deposit_status]||'-'})</div></div>
       <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
       <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
@@ -207,13 +210,50 @@ function toggleEdit(show){
 
 function pkgRowHtml(pid, qty){
   const opts = ALL_PKGS.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(pid)?' selected':'')+'>'+p.name+'（¥'+p.price+'）</option>').join('');
-  return '<div class="pkg-row"><select>'+opts+'</select>'+
-    '<input type="number" min="1" value="'+(qty||1)+'" title="份数">'+
-    '<button type="button" class="btn btn-sm" onclick="this.closest(\'.pkg-row\').remove()" style="border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 10px;border-radius:8px">🗑</button></div>';
+  return '<div class="pkg-row"><select onchange="recalcFromDiscount()">'+opts+'</select>'+
+    '<input type="number" min="1" value="'+(qty||1)+'" title="份数" oninput="recalcFromDiscount()">'+
+    '<button type="button" class="btn btn-sm" onclick="this.closest(\'.pkg-row\').remove();recalcFromDiscount()" style="border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 10px;border-radius:8px">🗑</button></div>';
 }
 
 function addPkgRow(pid, qty){
   document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(pid, qty));
+  recalcFromDiscount();
+}
+
+// 套餐标价合计（按当前行实时算）
+function pkgSubtotal(){
+  let sum = 0;
+  Array.prototype.forEach.call(document.querySelectorAll('#pkgRows .pkg-row'), function(r){
+    const pid = r.querySelector('select').value;
+    const q = parseInt(r.querySelector('input').value) || 0;
+    const p = ALL_PKGS.filter(function(x){ return String(x.id) === String(pid); })[0];
+    if(p) sum += (parseFloat(p.price) || 0) * q;
+  });
+  return Math.round(sum * 100) / 100;
+}
+
+// 只更新提示，不动金额（用于打开表单时）
+function updateCalcHint(){
+  const sub = pkgSubtotal();
+  const disc = parseFloat(document.getElementById('edDiscount').value) || 0;
+  const expect = Math.round((sub - disc) * 100) / 100;
+  const h = document.getElementById('calcHint');
+  let s = '套餐标价合计 ¥' + sub + (disc ? (' − 优惠 ¥' + Math.abs(disc)) : '') + ' = ¥' + expect;
+  const amt = parseFloat(document.getElementById('edAmount').value);
+  if(!isNaN(amt)){
+    const d = Math.round((amt - expect) * 100) / 100;
+    if(Math.abs(d) > 0.005) s += '　⚠️ 当前实收 ¥' + amt + '（相差 ¥' + d + '）';
+    else s += '　✅ 与实收一致';
+  }
+  h.textContent = s;
+}
+
+// 改了优惠或套餐 → 实收金额自动 = 合计 − 优惠
+function recalcFromDiscount(){
+  const sub = pkgSubtotal();
+  const disc = parseFloat(document.getElementById('edDiscount').value) || 0;
+  document.getElementById('edAmount').value = Math.round((sub - disc) * 100) / 100;
+  updateCalcHint();
 }
 
 function fillEdit(){
@@ -221,13 +261,17 @@ function fillEdit(){
   document.getElementById('edDate').value = o.booking_date || '';
   document.getElementById('edTime').value = o.booking_time || '';
   document.getElementById('edAmount').value = (o.amount || o.amount === 0) ? o.amount : '';
+  document.getElementById('edDiscount').value = (o.discount || o.discount === 0) ? o.discount : '';
   document.getElementById('edName').value = o.contact_name || '';
   document.getElementById('edPhone').value = o.contact_phone || '';
   document.getElementById('edAddr').value = o.address || '';
   const box = document.getElementById('pkgRows');
   box.innerHTML = '';
-  (o.packages||[]).forEach(p=>addPkgRow(p.package_id, p.quantity));
+  (o.packages||[]).forEach(p=>{
+    document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(p.package_id, p.quantity));
+  });
   document.getElementById('editMsg').textContent = '';
+  updateCalcHint();
 }
 
 function saveEdit(){
@@ -239,6 +283,7 @@ function saveEdit(){
     booking_date: document.getElementById('edDate').value,
     booking_time: document.getElementById('edTime').value,
     amount: document.getElementById('edAmount').value,
+    discount: document.getElementById('edDiscount').value || 0,
     contact_name: document.getElementById('edName').value,
     contact_phone: document.getElementById('edPhone').value,
     address: document.getElementById('edAddr').value,
