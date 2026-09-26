@@ -281,37 +281,39 @@ def _split_large_package(info):
 
     service = info["service_type"]
     raw = info["raw"]
-    remainder = max_p - 10
 
-    # 10人餐部分 → 9-10人餐
-    pkg_10 = {
-        "raw": f"10人餐(拆自「{raw}」)",
-        "min_people": 9,
-        "max_people": 10,
-        "service_type": service,
-        "quantity": qty,
-    }
-
-    # 余下部分：remainder=10 → 也是9-10人餐；否则按 remainder 匹配
-    if remainder >= 10:
-        # 20人餐 → 10+10，余下也是10人餐
-        pkg_rem = {
+    # 循环拆出若干个 9-10 人餐（每个覆盖 10 人），直到剩下不足 10 人；
+    # 这样 >20 人也能覆盖：22人 → 10+10+2（9-10人餐×2 + 2-3人餐）
+    #   30人 → 10+10+10（9-10人餐×3）
+    out = []
+    remaining = max_p
+    while remaining > 10:
+        out.append({
             "raw": f"10人餐(拆自「{raw}」)",
             "min_people": 9,
             "max_people": 10,
             "service_type": service,
             "quantity": qty,
-        }
-    else:
-        pkg_rem = {
-            "raw": f"{remainder}人餐(拆自「{raw}」)",
-            "min_people": remainder,
-            "max_people": remainder,
+        })
+        remaining -= 10
+
+    if remaining == 10:
+        out.append({
+            "raw": f"10人餐(拆自「{raw}」)",
+            "min_people": 9,
+            "max_people": 10,
             "service_type": service,
             "quantity": qty,
-        }
-
-    return [pkg_10, pkg_rem]
+        })
+    elif remaining > 0:
+        out.append({
+            "raw": f"{remaining}人餐(拆自「{raw}」)",
+            "min_people": remaining,
+            "max_people": remaining,
+            "service_type": service,
+            "quantity": qty,
+        })
+    return out
 
 
 # 工具简称别名（备注里常用简称 → 数据库标准名）
