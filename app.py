@@ -962,12 +962,21 @@ def stock_overview():
         "SELECT id,name,unit,stock,threshold,cost,category FROM ingredients").fetchall()]
     tools = [dict(r) for r in cur.execute(
         "SELECT id,name,stock,threshold,cost FROM tools").fetchall()]
+    # 工具的"可用量" = 总库存 - 在借未归还；预警按可用量算，但库存价值按总拥有量算
+    from calculator import get_available_tool_stock
+    _tavail = get_available_tool_stock()
+    for t in tools:
+        total = float(t.get("stock") or 0)
+        a = float(_tavail.get(t["id"], total))
+        t["total_stock"] = total
+        t["loaned"] = round(total - a, 4)
+        t["stock"] = a          # 展示与预警用可用量
 
-    def summarize(items, unit_default=""):
+    def summarize(items, val_key="stock"):
         out, low, val = [], [], 0.0
         for x in items:
             x["status"] = _stock_status(x.get("stock"), x.get("threshold"))
-            val += float(x.get("stock") or 0) * float(x.get("cost") or 0)
+            val += float(x.get(val_key) or 0) * float(x.get("cost") or 0)
             if x["status"] == "out":
                 out.append(x)
             elif x["status"] == "low":
@@ -977,7 +986,7 @@ def stock_overview():
                 "value": round(val, 2), "out_items": out[:50], "low_items": low[:50]}
 
     ing_s = summarize(ings)
-    tool_s = summarize(tools, "个")
+    tool_s = summarize(tools, "total_stock")
 
     pending = [dict(r) for r in cur.execute("""
         SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name, o.status
@@ -1000,11 +1009,30 @@ def stock_overview():
                        WHERE created_at >= datetime('now','localtime','-7 days')""").fetchone()
     recent = {"in": round(r["inq"], 2), "out": round(r["outq"], 2), "count": r["c"]}
 
+    # 在借未归还装备（户外装备要回收）
+    loans = [dict(r) for r in cur.execute("""
+        SELECT tl.id, tl.order_id, tl.tool_id, tl.quantity, tl.returned_qty, tl.lost_qty,
+               tl.status, tl.created_at, t.name as tool_name,
+               o.booking_date, o.booking_time, o.address, o.contact_name
+        FROM tool_loans tl
+        LEFT JOIN tools t ON tl.tool_id = t.id
+        LEFT JOIN orders o ON tl.order_id = o.id
+        WHERE tl.status IN ('borrowed','partial')
+        ORDER BY tl.order_id DESC, tl.id
+    """).fetchall()]
+    loaned_total = 0.0
+    for l in loans:
+        l["outstanding"] = round(float(l["quantity"] or 0) - float(l["returned_qty"] or 0)
+                                 - float(l["lost_qty"] or 0), 4)
+        loaned_total += l["outstanding"]
+
     return jsonify({"ok": True, "data": {
         "ingredients": ing_s, "tools": tool_s,
         "total_value": round(ing_s["value"] + tool_s["value"], 2),
         "pending_consume": pending, "deducted_count": deducted,
         "recent7": recent,
+        "loans": loans, "loaned_total": round(loaned_total, 2),
+        "loan_orders": len({l["order_id"] for l in loans}),
     }})
 
 
@@ -1063,7 +1091,10 @@ def stock_order_needs(oid):
 
 @app.route("/api/stock/consume", methods=["POST"])
 def stock_consume():
-    """按订单出库：把该单所需食材/工具从库存扣掉并记流水（ref=order:<id>）。
+    """按订单出库。
+    食材/耗材 → 永久消耗：扣库存并记流水。
+    工具/装备 → **只登记借出**（写 tool_loans），不扣总库存 —— 户外装备要回收，
+    归还后可用量自动恢复，只有丢失/损坏才扣总库存（由归还接口处理）。
     同一单重复调用默认拒绝（幂等保护）；要重扣先撤销。"""
     data = request.get_json(force=True)
     oid = data.get("order_id")
@@ -1076,38 +1107,58 @@ def stock_consume():
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
     if (o["stock_deducted_at"] or "").strip():
         return jsonify({"ok": False, "already": True,
-                        "msg": "订单 #%s 已经出过库了（%s），如需重扣请先撤销"
+                        "msg": "订单 #%s 已经出过库了（%s），如需重出请先撤销"
                                % (oid, o["stock_deducted_at"])}), 409
 
-    from calculator import calc_order_requirements
+    from calculator import calc_order_requirements, get_available_tool_stock
     req = calc_order_requirements(int(oid))
-    moved, short = 0, []
-    for itype, key, table, unit_default in (("ingredient", "ingredients", "ingredients", ""),
-                                            ("tool", "tools", "tools", "个")):
-        for it in req.get(key, []):
-            need = round(float(it.get("need") or 0), 4)
-            if need <= 0:
-                continue
-            row = cur.execute("SELECT stock FROM %s WHERE id=?" % table, (it["id"],)).fetchone()
-            if not row:
-                continue
-            avail = float(row["stock"] or 0)
-            if avail < need:
-                short.append({"name": it["name"], "need": need, "stock": avail,
-                              "unit": it.get("unit") or unit_default})
-            cur.execute("UPDATE %s SET stock = stock - ? WHERE id=?" % table, (need, it["id"]))
-            cur.execute("INSERT INTO stock_logs (item_type,item_id,delta,reason,ref) "
-                        "VALUES (?,?,?,?,?)",
-                        (itype, it["id"], -need, "订单#%s 出餐出库" % oid, "order:%s" % oid))
-            moved += 1
+    short = []
+
+    # ---- 1) 食材/耗材：扣库存 + 记流水 ----
+    consumed = 0
+    for it in req.get("ingredients", []):
+        need = round(float(it.get("need") or 0), 4)
+        if need <= 0:
+            continue
+        row = cur.execute("SELECT stock FROM ingredients WHERE id=?", (it["id"],)).fetchone()
+        if not row:
+            continue
+        avail = float(row["stock"] or 0)
+        if avail < need:
+            short.append({"kind": "ingredient", "name": it["name"], "need": need,
+                          "stock": avail, "unit": it.get("unit") or ""})
+        cur.execute("UPDATE ingredients SET stock = stock - ? WHERE id=?", (need, it["id"]))
+        cur.execute("INSERT INTO stock_logs (item_type,item_id,delta,reason,ref) "
+                    "VALUES (?,?,?,?,?)",
+                    ("ingredient", it["id"], -need, "订单#%s 出餐消耗" % oid, "order:%s" % oid))
+        consumed += 1
+
+    # ---- 2) 工具/装备：登记借出（不扣总库存、不写库存流水）----
+    avail_map = get_available_tool_stock()
+    for it in req.get("tools", []):
+        need = round(float(it.get("need") or 0), 4)
+        if need <= 0:
+            continue
+        a = avail_map.get(it["id"], 0)
+        if a < need:
+            short.append({"kind": "tool", "name": it["name"], "need": need,
+                          "stock": a, "unit": "个"})
+    before = cur.execute("SELECT COUNT(*) FROM tool_loans WHERE order_id=?", (oid,)).fetchone()[0]
+    borrow_tools(db, int(oid))
+    after = cur.execute("SELECT COUNT(*) FROM tool_loans WHERE order_id=?", (oid,)).fetchone()[0]
+    loaned = after - before
+
     cur.execute("UPDATE orders SET stock_deducted_at=datetime('now','localtime') WHERE id=?", (oid,))
     db.commit()
-    return jsonify({"ok": True, "moved": moved, "short": short})
+    return jsonify({"ok": True, "consumed": consumed, "loaned": loaned,
+                    "moved": consumed, "short": short})
 
 
 @app.route("/api/stock/consume/undo", methods=["POST"])
 def stock_consume_undo():
-    """撤销某单的出库：把该单产生的流水逐条反向，并删除这些流水。"""
+    """撤销某单的出库：
+    食材 → 逐条反向并把流水删掉；
+    工具 → 移除该单**尚未归还**的借出登记（已归还/已丢失的不动，避免把账搞乱）。"""
     data = request.get_json(force=True)
     oid = data.get("order_id")
     if not oid:
@@ -1116,15 +1167,73 @@ def stock_consume_undo():
     cur = db.cursor()
     ref = "order:%s" % oid
     rows = cur.execute("SELECT * FROM stock_logs WHERE ref=?", (ref,)).fetchall()
-    if not rows:
-        return jsonify({"ok": False, "msg": "该单没有出库记录"}), 404
+    loans = cur.execute("SELECT * FROM tool_loans WHERE order_id=?", (oid,)).fetchall()
+    if not rows and not loans:
+        return jsonify({"ok": False, "msg": "该单没有出库/借出记录"}), 404
+
     for r in rows:
-        table = "ingredients" if r["item_type"] == "ingredient" else "tools"
-        cur.execute("UPDATE %s SET stock = stock - ? WHERE id=?" % table, (r["delta"], r["item_id"]))
+        if r["item_type"] == "ingredient":
+            cur.execute("UPDATE ingredients SET stock = stock - ? WHERE id=?",
+                        (r["delta"], r["item_id"]))
     cur.execute("DELETE FROM stock_logs WHERE ref=?", (ref,))
+
+    removed, kept = 0, 0
+    for l in loans:
+        if (l["returned_qty"] or 0) == 0 and (l["lost_qty"] or 0) == 0:
+            cur.execute("DELETE FROM tool_loans WHERE id=?", (l["id"],))
+            removed += 1
+        else:
+            kept += 1
     cur.execute("UPDATE orders SET stock_deducted_at=NULL WHERE id=?", (oid,))
     db.commit()
-    return jsonify({"ok": True, "reverted": len(rows)})
+    return jsonify({"ok": True, "reverted": len(rows), "loans_removed": removed,
+                    "loans_kept": kept})
+
+
+@app.route("/api/stock/loans")
+def stock_loans_api():
+    """在借未归还的装备清单（天幕/桌椅/卡式炉等要回收）"""
+    rows = g.db.execute("""
+        SELECT tl.*, t.name as tool_name, t.cost,
+               o.booking_date, o.booking_time, o.address, o.contact_name
+        FROM tool_loans tl
+        LEFT JOIN tools t ON tl.tool_id = t.id
+        LEFT JOIN orders o ON tl.order_id = o.id
+        WHERE tl.status IN ('borrowed','partial')
+        ORDER BY tl.order_id DESC, tl.id
+    """).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+
+@app.route("/api/stock/loans/return-all", methods=["POST"])
+def stock_loans_return_all():
+    """一键归还某单的全部未还装备。
+    注意：借出时**没有扣总库存**，所以归还只需要把借出登记置为已归还，
+    可用量会自动恢复（总库存不动）。"""
+    data = request.get_json(force=True)
+    oid = data.get("order_id")
+    if not oid:
+        return jsonify({"ok": False, "msg": "缺少订单号"}), 400
+    db = g.db
+    cur = db.cursor()
+    rows = cur.execute("SELECT * FROM tool_loans WHERE order_id=? AND status IN ('borrowed','partial')",
+                       (oid,)).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "msg": "该单没有待归还的装备"}), 404
+    n = 0
+    for l in rows:
+        qty = float(l["quantity"] or 0)
+        returned = float(l["returned_qty"] or 0)
+        lost = float(l["lost_qty"] or 0)
+        rest = qty - returned - lost
+        if rest <= 0:
+            continue
+        cur.execute("UPDATE tool_loans SET returned_qty=?, status='returned', "
+                    "returned_at=datetime('now','localtime') WHERE id=?",
+                    (returned + rest, l["id"]))
+        n += 1
+    db.commit()
+    return jsonify({"ok": True, "returned": n})
 
 
 @app.route("/api/stock/stocktake", methods=["POST"])
@@ -1237,8 +1346,16 @@ def manage_tools():
     db = g.db
     if request.method == "GET":
         rows = db.execute("SELECT * FROM tools").fetchall()
-        from calculator import sort_tools
-        return jsonify({"ok": True, "data": sort_tools([dict(r) for r in rows])})
+        from calculator import sort_tools, get_available_tool_stock
+        avail = get_available_tool_stock()
+        items = []
+        for r in rows:
+            d = dict(r)
+            a = avail.get(d["id"], d.get("stock") or 0)
+            d["avail"] = a
+            d["loaned"] = round((d.get("stock") or 0) - a, 4)   # 借出中（含未归还）
+            items.append(d)
+        return jsonify({"ok": True, "data": sort_tools(items)})
     data = request.get_json(force=True)
     db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
               (data["name"], data.get("stock", 0), data.get("threshold", 0), data.get("cost", 0)))
