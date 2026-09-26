@@ -791,9 +791,11 @@ def update_order_status(oid):
     if status not in ("pending", "preparing", "done", "cancelled"):
         return jsonify({"ok": False, "msg": "状态非法"}), 400
     db.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
-    # 转备餐中 → 自动借出该订单所需工具
-    if status == "preparing":
-        borrow_tools(db, oid)
+    # 注：原先"转备餐中自动借出工具"已停用 —— 搭建/回收外包、粗放阶段不逐笔登记借还，
+    # 自动建借出挂账只会累积噪音；装备数量改以定期盘点为准。
+    # 若将来要恢复精细借还管理，把下面一行取消注释即可：
+    # if status == "preparing":
+    #     borrow_tools(db, oid)
     db.commit()
     return jsonify({"ok": True})
 
@@ -1026,6 +1028,19 @@ def stock_overview():
                                  - float(l["lost_qty"] or 0), 4)
         loaned_total += l["outstanding"]
 
+    # 上次盘点距今天数（现阶段库存主要靠定期盘点校准）
+    import datetime as _dt
+    from calculator import today_cst
+    _st = cur.execute("SELECT created_at FROM stock_logs WHERE ref='stocktake' "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+    last_st = _st["created_at"] if _st else None
+    days_st = None
+    if last_st:
+        try:
+            days_st = (today_cst() - _dt.date.fromisoformat(last_st[:10])).days
+        except Exception:
+            days_st = None
+
     return jsonify({"ok": True, "data": {
         "ingredients": ing_s, "tools": tool_s,
         "total_value": round(ing_s["value"] + tool_s["value"], 2),
@@ -1033,6 +1048,7 @@ def stock_overview():
         "recent7": recent,
         "loans": loans, "loaned_total": round(loaned_total, 2),
         "loan_orders": len({l["order_id"] for l in loans}),
+        "last_stocktake": last_st, "days_since_stocktake": days_st,
     }})
 
 
@@ -1093,9 +1109,9 @@ def stock_order_needs(oid):
 def stock_consume():
     """按订单出库。
     食材/耗材 → 永久消耗：扣库存并记流水。
-    工具/装备 → **只登记借出**（写 tool_loans），不扣总库存 —— 户外装备要回收，
-    归还后可用量自动恢复，只有丢失/损坏才扣总库存（由归还接口处理）。
-    同一单重复调用默认拒绝（幂等保护）；要重扣先撤销。"""
+    装备/工具 → **不记账**（搭建与回收外包给第三方、粗放阶段不逐笔登记借出归还；
+    装备数量以「定期盘点」为准），只在返回里列出该单需要的装备供参考。
+    同一单重复调用默认拒绝（幂等保护）；要重出先撤销。"""
     data = request.get_json(force=True)
     oid = data.get("order_id")
     if not oid:
@@ -1133,24 +1149,25 @@ def stock_consume():
                     ("ingredient", it["id"], -need, "订单#%s 出餐消耗" % oid, "order:%s" % oid))
         consumed += 1
 
-    # ---- 2) 工具/装备：登记借出（不扣总库存、不写库存流水）----
+    # ---- 2) 装备/工具：不记账 ----
+    # 现状（用户明确说明）：搭建与回收外包给第三方，粗放阶段不逐笔登记借出/归还，
+    # 所以出库**不扣装备库存、也不建借出挂账**（挂了也没人去清，还会让可用量假性下降、
+    # 触发假预警）。装备数量以「定期盘点」为准；这里只列出该单需要的装备供人工参考。
     avail_map = get_available_tool_stock()
+    gears = []
     for it in req.get("tools", []):
         need = round(float(it.get("need") or 0), 4)
         if need <= 0:
             continue
         a = avail_map.get(it["id"], 0)
+        gears.append({"name": it["name"], "need": need, "stock": a, "unit": "个"})
         if a < need:
             short.append({"kind": "tool", "name": it["name"], "need": need,
                           "stock": a, "unit": "个"})
-    before = cur.execute("SELECT COUNT(*) FROM tool_loans WHERE order_id=?", (oid,)).fetchone()[0]
-    borrow_tools(db, int(oid))
-    after = cur.execute("SELECT COUNT(*) FROM tool_loans WHERE order_id=?", (oid,)).fetchone()[0]
-    loaned = after - before
 
     cur.execute("UPDATE orders SET stock_deducted_at=datetime('now','localtime') WHERE id=?", (oid,))
     db.commit()
-    return jsonify({"ok": True, "consumed": consumed, "loaned": loaned,
+    return jsonify({"ok": True, "consumed": consumed, "loaned": 0, "gears": gears,
                     "moved": consumed, "short": short})
 
 
