@@ -175,10 +175,11 @@ def init_db():
                 deposit_status TEXT DEFAULT 'pending', -- pending/returned/forfeited 押金状态
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 deleted_at TEXT,                   -- 回收站：软删除时间，NULL=正常
-                discount REAL NOT NULL DEFAULT 0   -- 优惠/折扣：正数=优惠，负数=加收
+                discount REAL NOT NULL DEFAULT 0,  -- 优惠/折扣：正数=优惠，负数=加收
+                stock_deducted_at TEXT             -- 已按本单出库(扣库存)的时间，NULL=未出库
             )
         """)
-        # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）/ discount（优惠）
+        # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）/ discount（优惠）/ stock_deducted_at（出库）
         cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)").fetchall()]
         if "payment_status" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'unpaid'")
@@ -186,6 +187,8 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN deposit_status TEXT DEFAULT 'pending'")
         if "deleted_at" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN deleted_at TEXT")
+        if "stock_deducted_at" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN stock_deducted_at TEXT")
         if "discount" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0")
 
@@ -220,11 +223,16 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_type TEXT NOT NULL,          -- ingredient/tool
                 item_id INTEGER NOT NULL,
-                delta REAL NOT NULL,              -- 正=补货 负=报损
+                delta REAL NOT NULL,              -- 正=入库/退回  负=出库/报损
                 reason TEXT,
+                ref TEXT,                         -- 来源标记，如 order:123（便于按单撤销出库）
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+        # 迁移：老库补 ref 字段
+        _lc = [r[1] for r in cur.execute("PRAGMA table_info(stock_logs)").fetchall()]
+        if "ref" not in _lc:
+            cur.execute("ALTER TABLE stock_logs ADD COLUMN ref TEXT")
 
         # 工具借出归还记录（户外烤肉工具要回收）
         cur.execute("""

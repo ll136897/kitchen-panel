@@ -940,6 +940,230 @@ def list_purchases():
     return jsonify({"ok": True, "data": [dict(r) for r in rows]})
 
 
+# ================= 库存管理（总览 / 流水 / 出库 / 盘点） =================
+
+def _stock_status(stock, thr):
+    """库存分档：out=缺货(≤0)，low=低库存(≤阈值)，ok=正常"""
+    stock = float(stock or 0)
+    thr = float(thr or 0)
+    if stock <= 0:
+        return "out"
+    if thr > 0 and stock <= thr:
+        return "low"
+    return "ok"
+
+
+@app.route("/api/stock/overview")
+def stock_overview():
+    """库存总览：KPI + 缺货/低库存清单 + 待出库订单 + 近7天出入库"""
+    db = g.db
+    cur = db.cursor()
+    ings = [dict(r) for r in cur.execute(
+        "SELECT id,name,unit,stock,threshold,cost,category FROM ingredients").fetchall()]
+    tools = [dict(r) for r in cur.execute(
+        "SELECT id,name,stock,threshold,cost FROM tools").fetchall()]
+
+    def summarize(items, unit_default=""):
+        out, low, val = [], [], 0.0
+        for x in items:
+            x["status"] = _stock_status(x.get("stock"), x.get("threshold"))
+            val += float(x.get("stock") or 0) * float(x.get("cost") or 0)
+            if x["status"] == "out":
+                out.append(x)
+            elif x["status"] == "low":
+                low.append(x)
+        return {"count": len(items), "out": len(out), "low": len(low),
+                "ok": len(items) - len(out) - len(low),
+                "value": round(val, 2), "out_items": out[:50], "low_items": low[:50]}
+
+    ing_s = summarize(ings)
+    tool_s = summarize(tools, "个")
+
+    pending = [dict(r) for r in cur.execute("""
+        SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name, o.status
+        FROM orders o
+        WHERE o.deleted_at IS NULL AND o.status != 'cancelled'
+          AND (o.stock_deducted_at IS NULL OR o.stock_deducted_at = '')
+        ORDER BY o.booking_date, o.booking_time
+        LIMIT 60
+    """).fetchall()]
+    deducted = cur.execute("""
+        SELECT COUNT(*) FROM orders
+        WHERE deleted_at IS NULL AND status != 'cancelled'
+          AND stock_deducted_at IS NOT NULL AND stock_deducted_at != ''
+    """).fetchone()[0]
+
+    r = cur.execute("""SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) as inq,
+                              COALESCE(SUM(CASE WHEN delta<0 THEN -delta ELSE 0 END),0) as outq,
+                              COUNT(*) as c
+                       FROM stock_logs
+                       WHERE created_at >= datetime('now','localtime','-7 days')""").fetchone()
+    recent = {"in": round(r["inq"], 2), "out": round(r["outq"], 2), "count": r["c"]}
+
+    return jsonify({"ok": True, "data": {
+        "ingredients": ing_s, "tools": tool_s,
+        "total_value": round(ing_s["value"] + tool_s["value"], 2),
+        "pending_consume": pending, "deducted_count": deducted,
+        "recent7": recent,
+    }})
+
+
+@app.route("/api/stock/logs")
+def stock_logs_api():
+    """库存流水（最近 N 条，可按 item_type 过滤）"""
+    try:
+        limit = int(request.args.get("limit", 200))
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(1, min(limit, 1000))
+    itype = request.args.get("item_type") or ""
+    sql = """
+        SELECT l.*,
+               CASE WHEN l.item_type='ingredient' THEN i.name ELSE t.name END as item_name,
+               CASE WHEN l.item_type='ingredient' THEN i.unit ELSE '个' END as item_unit
+        FROM stock_logs l
+        LEFT JOIN ingredients i ON l.item_type='ingredient' AND l.item_id=i.id
+        LEFT JOIN tools t ON l.item_type='tool' AND l.item_id=t.id
+    """
+    params = []
+    if itype in ("ingredient", "tool"):
+        sql += " WHERE l.item_type = ? "
+        params.append(itype)
+    sql += " ORDER BY l.id DESC LIMIT ?"
+    params.append(limit)
+    rows = [dict(r) for r in g.db.execute(sql, params).fetchall()]
+    return jsonify({"ok": True, "data": rows})
+
+
+@app.route("/api/stock/order-needs/<int:oid>")
+def stock_order_needs(oid):
+    """预览某单出库会扣掉什么（不落库）"""
+    from calculator import calc_order_requirements
+    db = g.db
+    o = db.execute("SELECT id,booking_date,booking_time,address,contact_name,status,"
+                   "stock_deducted_at FROM orders WHERE id=? AND deleted_at IS NULL", (oid,)).fetchone()
+    if not o:
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    req = calc_order_requirements(oid)
+    items = []
+    for it in req.get("ingredients", []):
+        if float(it.get("need") or 0) <= 0:
+            continue
+        items.append({"item_type": "ingredient", "item_id": it["id"], "name": it["name"],
+                      "need": round(float(it["need"]), 2), "unit": it.get("unit") or "",
+                      "stock": it.get("stock", 0)})
+    for it in req.get("tools", []):
+        if float(it.get("need") or 0) <= 0:
+            continue
+        items.append({"item_type": "tool", "item_id": it["id"], "name": it["name"],
+                      "need": round(float(it["need"]), 2), "unit": "个",
+                      "stock": it.get("stock", 0)})
+    return jsonify({"ok": True, "data": {"order": dict(o), "items": items}})
+
+
+@app.route("/api/stock/consume", methods=["POST"])
+def stock_consume():
+    """按订单出库：把该单所需食材/工具从库存扣掉并记流水（ref=order:<id>）。
+    同一单重复调用默认拒绝（幂等保护）；要重扣先撤销。"""
+    data = request.get_json(force=True)
+    oid = data.get("order_id")
+    if not oid:
+        return jsonify({"ok": False, "msg": "缺少订单号"}), 400
+    db = g.db
+    cur = db.cursor()
+    o = cur.execute("SELECT * FROM orders WHERE id=? AND deleted_at IS NULL", (oid,)).fetchone()
+    if not o:
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    if (o["stock_deducted_at"] or "").strip():
+        return jsonify({"ok": False, "already": True,
+                        "msg": "订单 #%s 已经出过库了（%s），如需重扣请先撤销"
+                               % (oid, o["stock_deducted_at"])}), 409
+
+    from calculator import calc_order_requirements
+    req = calc_order_requirements(int(oid))
+    moved, short = 0, []
+    for itype, key, table, unit_default in (("ingredient", "ingredients", "ingredients", ""),
+                                            ("tool", "tools", "tools", "个")):
+        for it in req.get(key, []):
+            need = round(float(it.get("need") or 0), 4)
+            if need <= 0:
+                continue
+            row = cur.execute("SELECT stock FROM %s WHERE id=?" % table, (it["id"],)).fetchone()
+            if not row:
+                continue
+            avail = float(row["stock"] or 0)
+            if avail < need:
+                short.append({"name": it["name"], "need": need, "stock": avail,
+                              "unit": it.get("unit") or unit_default})
+            cur.execute("UPDATE %s SET stock = stock - ? WHERE id=?" % table, (need, it["id"]))
+            cur.execute("INSERT INTO stock_logs (item_type,item_id,delta,reason,ref) "
+                        "VALUES (?,?,?,?,?)",
+                        (itype, it["id"], -need, "订单#%s 出餐出库" % oid, "order:%s" % oid))
+            moved += 1
+    cur.execute("UPDATE orders SET stock_deducted_at=datetime('now','localtime') WHERE id=?", (oid,))
+    db.commit()
+    return jsonify({"ok": True, "moved": moved, "short": short})
+
+
+@app.route("/api/stock/consume/undo", methods=["POST"])
+def stock_consume_undo():
+    """撤销某单的出库：把该单产生的流水逐条反向，并删除这些流水。"""
+    data = request.get_json(force=True)
+    oid = data.get("order_id")
+    if not oid:
+        return jsonify({"ok": False, "msg": "缺少订单号"}), 400
+    db = g.db
+    cur = db.cursor()
+    ref = "order:%s" % oid
+    rows = cur.execute("SELECT * FROM stock_logs WHERE ref=?", (ref,)).fetchall()
+    if not rows:
+        return jsonify({"ok": False, "msg": "该单没有出库记录"}), 404
+    for r in rows:
+        table = "ingredients" if r["item_type"] == "ingredient" else "tools"
+        cur.execute("UPDATE %s SET stock = stock - ? WHERE id=?" % table, (r["delta"], r["item_id"]))
+    cur.execute("DELETE FROM stock_logs WHERE ref=?", (ref,))
+    cur.execute("UPDATE orders SET stock_deducted_at=NULL WHERE id=?", (oid,))
+    db.commit()
+    return jsonify({"ok": True, "reverted": len(rows)})
+
+
+@app.route("/api/stock/stocktake", methods=["POST"])
+def stock_stocktake():
+    """盘点：传每项实际数量，差额自动调整库存并记流水。
+    请求体：{"items":[{"item_type":"ingredient","item_id":1,"actual":1234.5}, ...]}"""
+    data = request.get_json(force=True)
+    items = data.get("items") or []
+    if not items:
+        return jsonify({"ok": False, "msg": "没有盘点数据"}), 400
+    db = g.db
+    cur = db.cursor()
+    changed = []
+    for it in items:
+        itype = it.get("item_type")
+        iid = it.get("item_id")
+        if itype not in ("ingredient", "tool") or not iid:
+            continue
+        try:
+            actual = float(it.get("actual"))
+        except (TypeError, ValueError):
+            continue
+        table = "ingredients" if itype == "ingredient" else "tools"
+        row = cur.execute("SELECT name, stock FROM %s WHERE id=?" % table, (iid,)).fetchone()
+        if not row:
+            continue
+        before = float(row["stock"] or 0)
+        delta = round(actual - before, 4)
+        if abs(delta) < 0.0001:
+            continue
+        cur.execute("UPDATE %s SET stock=? WHERE id=?" % table, (actual, iid))
+        cur.execute("INSERT INTO stock_logs (item_type,item_id,delta,reason,ref) "
+                    "VALUES (?,?,?,?,?)",
+                    (itype, iid, delta, "盘点调整", "stocktake"))
+        changed.append({"name": row["name"], "before": before, "after": actual, "delta": delta})
+    db.commit()
+    return jsonify({"ok": True, "changed": changed, "count": len(changed)})
+
+
 @app.route("/api/ingredients/<int:iid>/cost", methods=["POST"])
 def update_ingredient_cost(iid):
     """手动修改食材/工具成本单价"""
