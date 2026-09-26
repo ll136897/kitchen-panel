@@ -348,6 +348,7 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 <div class="toolbar">
   <button class="b-print" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
   <button class="b-png" onclick="exportPNG()">📷 导出图片</button>
+  <button class="b-edit" onclick="location.href='/orders/__OID__'" style="background:#f0f2f5;color:#1f2329">✏️ 编辑本单</button>
 </div>
 <div class="hint">手机端：点「导出图片」后在下方长按图片即可保存/转发</div>
 <div id="pngHint">✅ 图片已生成，长按下方图片可保存或转发</div>
@@ -432,6 +433,7 @@ function exportPNG(){
     html = (html
             .replace("__SHOP__", esc(shop))
             .replace("__NO__", esc(no))
+            .replace("__OID__", str(oid))
             .replace("__TIME__", esc(time_str))
             .replace("__META_EXTRA__", meta_extra)
             .replace("__ITEMS__", item_rows)
@@ -682,6 +684,65 @@ def purge_order(oid):
     db.execute("DELETE FROM orders WHERE id=?", (oid,))
     db.commit()
     return jsonify({"ok": True, "msg": "已彻底删除"})
+
+
+@app.route("/api/orders/<int:oid>/edit", methods=["PUT", "POST"])
+def edit_order(oid):
+    """编辑订单：可改 预约日期/时间、用餐时间、地址、联系人/电话、金额、备注。
+    传了 packages 就整单替换套餐明细：[{package_id, people, quantity}, ...]"""
+    data = request.get_json(force=True)
+    db = g.db
+    cur = db.cursor()
+    if not cur.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+
+    def _txt(k):
+        return (data.get(k) or "").strip()
+
+    sets, params = [], []
+    for k in ("booking_date", "booking_time", "meal_time", "note",
+              "address", "contact_name", "contact_phone"):
+        if k in data:
+            sets.append("%s=?" % k)
+            params.append(_txt(k))
+    if "amount" in data:
+        try:
+            amt = float(data.get("amount") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "msg": "金额格式不对"}), 400
+        sets.append("amount=?")
+        params.append(amt)
+    if sets:
+        params.append(oid)
+        cur.execute("UPDATE orders SET %s WHERE id=?" % ", ".join(sets), params)
+
+    if "packages" in data:
+        rows = []
+        for p in (data.get("packages") or []):
+            try:
+                pid = int(p.get("package_id"))
+            except (TypeError, ValueError):
+                continue
+            try:
+                qty = int(p.get("quantity") or 1)
+            except (TypeError, ValueError):
+                qty = 1
+            if qty <= 0:
+                continue
+            pk = cur.execute("SELECT max_people FROM packages WHERE id=?", (pid,)).fetchone()
+            if not pk:
+                continue
+            people = p.get("people")
+            if people in (None, ""):
+                people = pk["max_people"]
+            rows.append((pid, int(people or 0), qty))
+        cur.execute("DELETE FROM order_packages WHERE order_id=?", (oid,))
+        for pid, people, qty in rows:
+            cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity) "
+                        "VALUES (?,?,?,?)", (oid, pid, people, qty))
+
+    db.commit()
+    return jsonify({"ok": True, "msg": "已保存"})
 
 
 @app.route("/api/orders/<int:oid>", methods=["PATCH", "DELETE"])

@@ -15,7 +15,14 @@
 .req-tbl th{background:#3a2416;color:#fff;padding:6px;text-align:center;font-size:11px}
 .req-tbl td{padding:5px 6px;border-bottom:1px solid #f0ebe3;text-align:center}
 .cat-row{background:#8e1e1a;color:#fff;font-weight:700;padding:5px 8px !important;text-align:left !important}
-@media(max-width:600px){.detail-grid{grid-template-columns:1fr}.req-tbl{font-size:12px}.req-tbl th,.req-tbl td{padding:4px 3px}}
+.edit-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.edit-grid label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:4px}
+.edit-grid input{padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box}
+.pkg-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.pkg-row select{flex:1 1 auto;min-width:0;padding:7px;border:1px solid var(--border);border-radius:8px;font-size:14px}
+.pkg-row input{width:64px;padding:7px;border:1px solid var(--border);border-radius:8px;font-size:14px}
+.edit-hint{font-size:12px;color:var(--muted);margin-top:4px}
+@media(max-width:600px){.detail-grid{grid-template-columns:1fr}.req-tbl{font-size:12px}.req-tbl th,.req-tbl td{padding:4px 3px}.edit-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -34,7 +41,32 @@
       <div class="title">📋 订单详情 <span id="ordId" style="color:var(--primary)"></span></div>
       <div class="sub" id="ordSub">加载中...</div>
     </div>
-    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadDetail)"><span class="btn-icon">🔄</span> 刷新</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="toggleEdit()" style="border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700;padding:6px 12px;border-radius:8px">✏️ 编辑本单</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadDetail)"><span class="btn-icon">🔄</span> 刷新</button>
+    </div>
+  </div>
+
+  <!-- 编辑本单（日期 / 套餐菜品 / 金额 等） -->
+  <div class="detail-card" id="editCard" style="display:none">
+    <h3 style="margin:0 0 10px">✏️ 编辑本单</h3>
+    <div class="edit-grid">
+      <label>📅 预约日期<input type="date" id="edDate"></label>
+      <label>⏰ 预约时间<input type="time" id="edTime"></label>
+      <label>💰 金额(元)<input type="number" id="edAmount" step="0.01" min="0"></label>
+      <label>👤 联系人<input type="text" id="edName"></label>
+      <label>📞 电话<input type="tel" id="edPhone"></label>
+      <label style="grid-column:1/-1">📍 地址<input type="text" id="edAddr"></label>
+    </div>
+    <div style="margin:12px 0 6px;font-weight:700;font-size:13px">🍱 套餐明细（份数可改，🗑 可删）</div>
+    <div id="pkgRows"></div>
+    <button type="button" class="btn btn-sm" onclick="addPkgRow()" style="margin-top:4px;border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 12px;border-radius:8px">＋ 增加套餐</button>
+    <div class="edit-hint">小票上的"合计"用的是这里的💰金额；菜品/套餐明细改这里就会同步到备餐表。</div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary btn-sm" onclick="saveEdit()" style="cursor:pointer;padding:8px 16px;border-radius:8px;border:none">💾 保存</button>
+      <button class="btn btn-sm" onclick="toggleEdit(false)" style="border:1px solid var(--border);background:#fff;cursor:pointer;padding:8px 16px;border-radius:8px">取消</button>
+      <span id="editMsg" class="edit-hint"></span>
+    </div>
   </div>
 
   <!-- 基本信息 -->
@@ -67,6 +99,7 @@ function loadDetail(){
   fetch(`/api/orders/${oid}/detail`).then(r=>r.json()).then(d=>{
     if(!d.ok){document.getElementById('ordSub').textContent='订单不存在';return;}
     const o = d.data;
+    curOrder = o;
     document.getElementById('ordId').textContent = '#' + o.id;
     const u = o.urgency||{};
     document.getElementById('ordSub').textContent = `${o.booking_date||'日期待定'} ${o.booking_time||''} · ${u.label||''}`;
@@ -153,6 +186,77 @@ function loadDetail(){
   });
 }
 
+// ===== 编辑本单 =====
+let ALL_PKGS = [];
+let curOrder = null;
+
+function loadPkgs(cb){
+  if(ALL_PKGS.length){ if(cb) cb(); return; }
+  fetch('/api/packages').then(r=>r.json()).then(d=>{
+    ALL_PKGS = d.data||[];
+    if(cb) cb();
+  }).catch(()=>{ if(cb) cb(); });
+}
+
+function toggleEdit(show){
+  const c = document.getElementById('editCard');
+  const willShow = (typeof show === 'boolean') ? show : (!c.style.display || c.style.display === 'none');
+  c.style.display = willShow ? 'block' : 'none';
+  if(willShow) loadPkgs(fillEdit);
+}
+
+function pkgRowHtml(pid, qty){
+  const opts = ALL_PKGS.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(pid)?' selected':'')+'>'+p.name+'（¥'+p.price+'）</option>').join('');
+  return '<div class="pkg-row"><select>'+opts+'</select>'+
+    '<input type="number" min="1" value="'+(qty||1)+'" title="份数">'+
+    '<button type="button" class="btn btn-sm" onclick="this.closest(\'.pkg-row\').remove()" style="border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 10px;border-radius:8px">🗑</button></div>';
+}
+
+function addPkgRow(pid, qty){
+  document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(pid, qty));
+}
+
+function fillEdit(){
+  const o = curOrder; if(!o) return;
+  document.getElementById('edDate').value = o.booking_date || '';
+  document.getElementById('edTime').value = o.booking_time || '';
+  document.getElementById('edAmount').value = (o.amount || o.amount === 0) ? o.amount : '';
+  document.getElementById('edName').value = o.contact_name || '';
+  document.getElementById('edPhone').value = o.contact_phone || '';
+  document.getElementById('edAddr').value = o.address || '';
+  const box = document.getElementById('pkgRows');
+  box.innerHTML = '';
+  (o.packages||[]).forEach(p=>addPkgRow(p.package_id, p.quantity));
+  document.getElementById('editMsg').textContent = '';
+}
+
+function saveEdit(){
+  if(!curOrder) return;
+  const pkgs = Array.prototype.map.call(document.querySelectorAll('#pkgRows .pkg-row'), function(r){
+    return {package_id: r.querySelector('select').value, quantity: r.querySelector('input').value};
+  }).filter(function(x){ return x.package_id; });
+  const body = {
+    booking_date: document.getElementById('edDate').value,
+    booking_time: document.getElementById('edTime').value,
+    amount: document.getElementById('edAmount').value,
+    contact_name: document.getElementById('edName').value,
+    contact_phone: document.getElementById('edPhone').value,
+    address: document.getElementById('edAddr').value,
+    packages: pkgs
+  };
+  const m = document.getElementById('editMsg');
+  m.textContent = '保存中…';
+  fetch('/api/orders/'+curOrder.id+'/edit',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(r=>r.json()).then(function(d){
+      if(d.ok){
+        m.textContent = '✅ 已保存' + (pkgs.length ? ('（'+pkgs.length+' 个套餐）') : '');
+        loadDetail();
+      } else {
+        m.textContent = '❌ ' + (d.msg||'保存失败');
+      }
+    }).catch(function(){ m.textContent = '❌ 网络错误，请重试'; });
+}
+
 // ===== 刷新特效 =====
 function refreshWithFx(fn){
   const btn = event.target.closest('.btn-refresh');
@@ -171,6 +275,7 @@ function showRefreshToast(){
   setTimeout(()=>t.remove(), 2200);
 }
 loadDetail();
+loadPkgs();
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
 </body>
