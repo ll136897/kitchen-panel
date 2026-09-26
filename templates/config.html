@@ -3,20 +3,59 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>配置 · 刘和牛户外烤肉</title>
+<title>库存管理 · 刘和牛户外烤肉</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-.cost-cell{width:90px;text-align:right}
-.cost-input{width:80px;text-align:right;border:1px solid #ddd;border-radius:4px;padding:2px 4px;font-size:13px}
+.cost-cell{min-width:78px;text-align:right}
+.cost-input{width:72px;text-align:right;border:1px solid #ddd;border-radius:4px;padding:2px 4px;font-size:13px}
 .cost-input:focus{border-color:var(--primary);outline:none}
-.cost-saved{color:#27ae60;font-size:11px;margin-left:4px}
-.row-cost-total{background:#faf6ef;font-weight:700;color:#c0392b}
-.inbound-row{background:#f0f7ff !important}
-.inbound-input{width:60px;border:1px solid #bbb;border-radius:4px;padding:2px 4px;font-size:13px}
-/* 低库存告警样式 */
+.inbound-input{width:62px;border:1px solid #bbb;border-radius:4px;padding:3px 4px;font-size:13px}
 .low-stock{background:#fdecea !important}
 .low-stock td{color:#c0392b}
-.low-stock .alert-badge{display:inline-block;background:#c0392b;color:#fff;font-size:10px;padding:0 5px;border-radius:8px;margin-left:4px;font-weight:600}
+.alert-badge{display:inline-block;background:#c0392b;color:#fff;font-size:10px;padding:0 5px;border-radius:8px;margin-left:4px;font-weight:600}
+/* 分区选项卡：自动换行，避免手机端要左右滑动 */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;padding:2px 0 8px}
+.tabs button{flex:0 0 auto;border:1px solid var(--border-l);background:#fff;border-radius:20px;padding:6px 11px;font-size:13px;font-weight:700;color:#5c6670;cursor:pointer;white-space:nowrap}
+.tabs button.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.tabpane{display:none}
+.tabpane.on{display:block}
+/* 库存 KPI */
+.inv-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:4px}
+.inv-kpi .k{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:10px 8px;text-align:center}
+.inv-kpi .n{font-size:19px;font-weight:800;line-height:1.2}
+.inv-kpi .l{font-size:11px;color:var(--muted);margin-top:3px}
+.k-red .n{color:#c0392b}.k-orange .n{color:#d35400}.k-green .n{color:#27ae60}.k-dark .n{color:#1f2329}.k-blue .n{color:#2471a3}
+/* 单品行 */
+.inv-row{display:flex;align-items:center;gap:8px;padding:7px 9px;border-bottom:1px solid #f2ede6;font-size:14px;flex-wrap:wrap}
+.inv-row:last-child{border-bottom:none}
+.inv-row .nm{flex:1 1 auto;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.inv-row .num{font-variant-numeric:tabular-nums;font-weight:700}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;font-weight:700}
+.b-out{background:#c0392b;color:#fff}
+.b-low{background:#fdecea;color:#c0392b}
+.b-ok{background:#eafaf0;color:#1e8449}
+/* 表格：手机上隐藏次要列，避免横向滑动 */
+.tbl-inv{table-layout:fixed;width:100%}
+.tbl-inv td,.tbl-inv th{overflow-wrap:anywhere}
+/* 明细的手机卡片版（窄屏用卡片，避免表格截断名称） */
+.det-cards{display:none}
+.ic{background:#fff;border:1px solid var(--border-l);border-radius:10px;padding:9px 10px;margin-bottom:8px}
+.ic.low{background:#fdecea;border-color:#f5c6c0}
+.ic-hd{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ic-nm{font-weight:700;font-size:14px;overflow-wrap:anywhere}
+.ic-meta{font-size:11px;color:var(--muted);margin:3px 0 6px}
+.ic-grid{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px;margin-bottom:7px}
+.ic-grid b{font-weight:800}
+.ic-act{display:flex;gap:6px;align-items:center}
+@media(max-width:600px){
+  .inv-kpi{grid-template-columns:repeat(2,1fr)}
+  .inv-kpi .k:nth-child(5){grid-column:1/-1}
+  .tbl-inv .c-opt{display:none}
+  .tbl-inv{font-size:12px}
+  .tbl-inv td,.tbl-inv th{padding:4px 3px}
+  .tbl-detail{display:none}
+  .det-cards{display:block}
+}
 </style>
 </head>
 <body>
@@ -26,133 +65,397 @@
   <a href="/prep" class="nav-item">🍱 备餐</a>
   <a href="/finance" class="nav-item">📈 财务</a>
   <a href="/menu" class="nav-item">📜 菜单</a>
-  <a href="/config" class="nav-item active">⚙️ 配置</a>
+  <a href="/config" class="nav-item active">📦 库存</a>
   <button class="nav-item" onclick="doBackup()" style="border:none;background:none;cursor:pointer;font-size:14px;padding:6px 10px;border-radius:6px;" title="备份数据">💾 备份</button>
 </nav>
 <div class="container">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
-    <div><div class="title">⚙️ 配置中心</div>
-    <div class="sub">库存成本 · 定价 · 全局设置</div></div>
-    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(()=>{loadIngs();loadTools();loadPkgs();loadSettings();})">🔄 刷新</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 10px">
+    <div><div class="title">📦 库存管理</div>
+    <div class="sub">台账 · 出入库 · 盘点 · 流水</div></div>
+    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(reloadAll)"><span class="btn-icon">🔄</span> 刷新</button>
   </div>
 
-  <div class="card">
-    <h3>💰 65%毛利定价计算</h3>
-    <div class="inline-form">
-      <input id="cost" type="number" placeholder="食材成本" step="0.01">
-      <button class="btn btn-primary" onclick="calcPrice()">算售价</button>
-    </div>
-    <div id="priceResult" class="price-result"></div>
+  <div class="tabs" id="tabBar">
+    <button data-t="ov"  class="on" onclick="showTab('ov')">📊 总览</button>
+    <button data-t="out" onclick="showTab('out')">📤 出库</button>
+    <button data-t="in"  onclick="showTab('in')">📥 入库</button>
+    <button data-t="cnt" onclick="showTab('cnt')">🧮 盘点</button>
+    <button data-t="log" onclick="showTab('log')">📜 流水</button>
+    <button data-t="det" onclick="showTab('det')">🥩 明细</button>
+    <button data-t="set" onclick="showTab('set')">⚙️ 设置</button>
   </div>
 
-  <div class="card">
-    <h3>🚚 全局设置</h3>
-    <div class="inline-form">
-      <label>配送费 ¥</label>
-      <input id="deliveryFee" type="number" step="1" style="width:90px">
-      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
-      <span class="muted" id="deliveryHint"></span>
+  <!-- ================= 总览 ================= -->
+  <div class="tabpane on" id="pane-ov">
+    <div class="card">
+      <div class="inv-kpi" id="ovKpi"></div>
+      <div id="ovAlerts" style="margin-top:10px"></div>
     </div>
-    <div class="inline-form" style="margin-top:8px">
-      <label>⏰ 备餐提前(小时)</label>
-      <input id="prepLead" type="number" step="0.5" style="width:90px" placeholder="2">
-      <button class="btn btn-primary" onclick="savePrepLead()">保存</button>
-      <span class="muted">用餐时间 - 该值 = 应开始备餐时间</span>
-    </div>
-  </div>
-
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0">🥩 食材库存与成本</h3>
-      <span class="muted" id="ingCostTotal"></span>
-    </div>
-    <table class="tbl" id="ingTable">
-      <thead><tr>
-        <th>食材</th><th>分类</th><th>单位</th><th>库存</th><th>阈值</th>
-        <th class="cost-cell">成本¥/单位 · <span style="font-size:11px;color:#888;font-weight:400">参考</span></th><th>小计¥</th><th>调整</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="btn-row">
-      <button class="btn btn-sm btn-accent" onclick="toggleInbound()">📥 采购入库</button>
-      <button class="btn btn-sm" onclick="toggleAdd('ing')">+ 添加食材</button>
-    </div>
-    <!-- 采购入库面板 -->
-    <div id="inboundPanel" style="display:none;margin-top:10px;padding:10px;background:#f0f7ff;border-radius:8px">
-      <div style="font-weight:700;margin-bottom:6px">📥 批量采购入库
-        <span style="font-weight:400;font-size:12px;color:#888;margin-left:8px">成本规则：涨价用新价·跌价/持平用加权平均</span>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">🚚 待出库订单 <span class="muted" id="pendHint" style="font-size:12px"></span></h3>
       </div>
-      <table class="tbl" id="inboundTable">
-        <thead><tr><th>食材</th><th>当前库存</th><th>采购数量</th><th>采购单价¥</th><th>供应商</th></tr></thead>
+      <div id="pendList" style="margin-top:8px"></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">出库 = 按该单的备餐需求把食材/工具从库存扣掉。每单只会扣一次，扣错了可以撤销。</div>
+    </div>
+  </div>
+
+  <!-- ================= 出库 ================= -->
+  <div class="tabpane" id="pane-out">
+    <div class="card">
+      <h3>📤 按订单出库</h3>
+      <div class="sub" style="margin-bottom:8px">出库会按备餐需求扣减库存并记录流水。已出库的单可撤销（库存自动还原）。</div>
+      <div id="outList"></div>
+    </div>
+  </div>
+
+  <!-- ================= 入库 ================= -->
+  <div class="tabpane" id="pane-in">
+    <div class="card">
+      <h3>📥 批量采购入库
+        <span class="muted" style="font-weight:400;font-size:12px">成本规则：涨价用新价 · 跌价/持平用加权平均</span>
+      </h3>
+      <table class="tbl tbl-inv" id="inboundTable">
+        <thead><tr><th>食材</th><th class="c-opt">当前库存</th><th>采购数量</th><th>采购单价¥</th><th class="c-opt">供应商</th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="btn-row" style="margin-top:8px">
-        <input id="inboundReason" placeholder="备注（可选）" style="flex:1">
+        <input id="inboundReason" placeholder="备注（可选）" style="flex:1;min-width:120px">
         <button class="btn btn-success" onclick="submitInbound()">✅ 确认入库</button>
       </div>
       <div id="inboundMsg" style="margin-top:6px"></div>
     </div>
-    <div id="addIng" style="display:none" class="inline-form">
-      <input id="ingName" placeholder="名称">
-      <select id="ingCat" style="min-width:90px">
-        <option value="beef">🥩 牛肉</option>
-        <option value="pork">🥓 猪肉</option>
-        <option value="chicken">🍗 鸡肉</option>
-        <option value="vegetable">🥬 素菜</option>
-        <option value="side">🥗 小菜</option>
-        <option value="sauce">🧂 小料</option>
-        <option value="drink">🎁 赠品</option>
-        <option value="packaging">📦 食材包装</option>
-        <option value="utensil">🍱 客户餐具</option>
-        <option value="staple">🍚 主食</option>
-        <option value="other">📦 其他</option>
-      </select>
-      <input id="ingUnit" placeholder="单位" size="6">
-      <input id="ingStock" type="number" placeholder="库存" size="6">
-      <input id="ingThr" type="number" placeholder="阈值" size="6">
-      <input id="ingCost" type="number" placeholder="成本" size="6" step="0.01">
-      <button class="btn btn-sm btn-success" onclick="addIng()">添加</button>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">📦 采购记录</h3>
+        <button class="btn btn-sm" onclick="loadPurchases()">🔄 刷新记录</button>
+      </div>
+      <table class="tbl tbl-inv" id="purchaseTable" style="margin-top:8px">
+        <thead><tr><th>日期</th><th>品项</th><th>数量</th><th>单价</th><th>总额</th><th class="c-opt">供应商</th></tr></thead>
+        <tbody><tr><td colspan="6" class="muted" style="text-align:center">点击刷新查看</td></tr></tbody>
+      </table>
     </div>
   </div>
 
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0">🔧 工具库存与成本</h3>
-      <span class="muted" id="toolCostTotal"></span>
-    </div>
-    <table class="tbl" id="toolTable">
-      <thead><tr>
-        <th>工具</th><th>库存</th><th>阈值</th>
-        <th class="cost-cell">成本¥/个</th><th>小计¥</th><th>调整</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="btn-row"><button class="btn btn-sm" onclick="toggleAdd('tool')">+ 添加工具</button></div>
-    <div id="addTool" style="display:none" class="inline-form">
-      <input id="toolName" placeholder="名称">
-      <input id="toolStock" type="number" placeholder="库存" size="6">
-      <input id="toolThr" type="number" placeholder="阈值" size="6">
-      <input id="toolCost" type="number" placeholder="成本" size="6" step="0.01">
-      <button class="btn btn-sm btn-success" onclick="addTool()">添加</button>
+  <!-- ================= 盘点 ================= -->
+  <div class="tabpane" id="pane-cnt">
+    <div class="card">
+      <h3>🧮 库存盘点</h3>
+      <div class="sub" style="margin-bottom:8px">只填你**实际数到**的数量；没填的项不动。差额会自动调整库存并记入流水（来源=盘点调整）。</div>
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn btn-sm btn-accent" onclick="submitStocktake()">✅ 提交盘点</button>
+        <button class="btn btn-sm" onclick="loadStocktake()">↺ 重置输入</button>
+        <span id="cntMsg" style="font-size:13px"></span>
+      </div>
+      <div id="cntBox"></div>
     </div>
   </div>
 
-  <div class="card">
-    <h3>📦 采购记录</h3>
-    <button class="btn btn-sm" onclick="loadPurchases()">🔄 刷新记录</button>
-    <table class="tbl" id="purchaseTable" style="margin-top:8px">
-      <thead><tr><th>日期</th><th>品项</th><th>数量</th><th>单价</th><th>总额</th><th>供应商</th></tr></thead>
-      <tbody><tr><td colspan="6" class="muted" style="text-align:center">点击刷新查看</td></tr></tbody>
-    </table>
+  <!-- ================= 流水 ================= -->
+  <div class="tabpane" id="pane-log">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+        <h3 style="margin:0">📜 库存流水</h3>
+        <div class="btn-row" style="margin:0">
+          <button class="btn btn-sm" onclick="loadLogs('')">全部</button>
+          <button class="btn btn-sm" onclick="loadLogs('ingredient')">仅食材</button>
+          <button class="btn btn-sm" onclick="loadLogs('tool')">仅工具</button>
+        </div>
+      </div>
+      <div id="logList" style="margin-top:8px"></div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>🍱 套餐配置</h3>
-    <div id="pkgList"></div>
+  <!-- ================= 明细 ================= -->
+  <div class="tabpane" id="pane-det">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">🥩 食材库存与成本</h3>
+        <span class="muted" id="ingCostTotal"></span>
+      </div>
+      <table class="tbl tbl-inv tbl-detail" id="ingTable">
+        <thead><tr>
+          <th>食材</th><th class="c-opt">分类</th><th class="c-opt">单位</th><th>库存</th><th class="c-opt">阈值</th>
+          <th class="cost-cell c-opt">成本¥</th><th class="c-opt">小计¥</th><th>调整</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="det-cards" id="ingCards"></div>
+      <div class="btn-row">
+        <button class="btn btn-sm btn-accent" onclick="showTab('in')">📥 去入库</button>
+        <button class="btn btn-sm" onclick="toggleAdd('ing')">+ 添加食材</button>
+      </div>
+      <div id="addIng" style="display:none" class="inline-form">
+        <input id="ingName" placeholder="名称">
+        <select id="ingCat" style="min-width:90px">
+          <option value="beef">🥩 牛肉</option>
+          <option value="pork">🥓 猪肉</option>
+          <option value="chicken">🍗 鸡肉</option>
+          <option value="vegetable">🥬 素菜</option>
+          <option value="side">🥗 小菜</option>
+          <option value="sauce">🧂 小料</option>
+          <option value="drink">🎁 赠品</option>
+          <option value="packaging">📦 食材包装</option>
+          <option value="utensil">🍱 客户餐具</option>
+          <option value="staple">🍚 主食</option>
+          <option value="other">📦 其他</option>
+        </select>
+        <input id="ingUnit" placeholder="单位" size="6">
+        <input id="ingStock" type="number" placeholder="库存" size="6">
+        <input id="ingThr" type="number" placeholder="阈值" size="6">
+        <input id="ingCost" type="number" placeholder="成本" size="6" step="0.01">
+        <button class="btn btn-sm btn-success" onclick="addIng()">添加</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="margin:0">🔧 工具库存与成本</h3>
+        <span class="muted" id="toolCostTotal"></span>
+      </div>
+      <table class="tbl tbl-inv tbl-detail" id="toolTable">
+        <thead><tr>
+          <th>工具</th><th>库存</th><th class="c-opt">阈值</th>
+          <th class="cost-cell c-opt">成本¥</th><th class="c-opt">小计¥</th><th>调整</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="det-cards" id="toolCards"></div>
+      <div class="btn-row"><button class="btn btn-sm" onclick="toggleAdd('tool')">+ 添加工具</button></div>
+      <div id="addTool" style="display:none" class="inline-form">
+        <input id="toolName" placeholder="名称">
+        <input id="toolStock" type="number" placeholder="库存" size="6">
+        <input id="toolThr" type="number" placeholder="阈值" size="6">
+        <input id="toolCost" type="number" placeholder="成本" size="6" step="0.01">
+        <button class="btn btn-sm btn-success" onclick="addTool()">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 设置 ================= -->
+  <div class="tabpane" id="pane-set">
+    <div class="card">
+      <h3>💰 65%毛利定价计算</h3>
+      <div class="inline-form">
+        <input id="cost" type="number" placeholder="食材成本" step="0.01">
+        <button class="btn btn-primary" onclick="calcPrice()">算售价</button>
+      </div>
+      <div id="priceResult" class="price-result"></div>
+    </div>
+    <div class="card">
+      <h3>🚚 全局设置</h3>
+      <div class="inline-form">
+        <label>配送费 ¥</label>
+        <input id="deliveryFee" type="number" step="1" style="width:90px">
+        <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+        <span class="muted" id="deliveryHint"></span>
+      </div>
+      <div class="inline-form" style="margin-top:8px">
+        <label>⏰ 备餐提前(小时)</label>
+        <input id="prepLead" type="number" step="0.5" style="width:90px" placeholder="2">
+        <button class="btn btn-primary" onclick="savePrepLead()">保存</button>
+        <span class="muted">用餐时间 - 该值 = 应开始备餐时间</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>🍱 套餐配置</h3>
+      <div id="pkgList"></div>
+    </div>
   </div>
 </div>
 <script src="/static/app.js"></script>
 <script>
+// ================= 分区切换 =================
+function showTab(t){
+  document.querySelectorAll('#tabBar button').forEach(b=>b.classList.toggle('on', b.dataset.t===t));
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.toggle('on', p.id==='pane-'+t));
+  if(t==='ov') loadOverview();
+  if(t==='out') loadConsume();
+  if(t==='in'){ loadInboundTable(); }
+  if(t==='cnt') loadStocktake();
+  if(t==='log') loadLogs(window._logFilter||'');
+  if(t==='det'){ loadIngs(); loadTools(); }
+  if(t==='set'){ loadPkgs(); loadSettings(); }
+}
+
+function reloadAll(){
+  const cur = document.querySelector('#tabBar button.on').dataset.t;
+  if(cur==='ov') loadOverview();
+  else if(cur==='out') loadConsume();
+  else if(cur==='in'){ loadIngs(); loadInboundTable(); loadPurchases(); }
+  else if(cur==='cnt') loadStocktake();
+  else if(cur==='log') loadLogs(window._logFilter||'');
+  else if(cur==='det'){ loadIngs(); loadTools(); }
+  else { loadPkgs(); loadSettings(); loadIngs(); loadTools(); }
+}
+
+// ================= 总览 =================
+function loadOverview(){
+  fetch('/api/stock/overview').then(r=>r.json()).then(d=>{
+    const D = d.data||{};
+    const ing = D.ingredients||{}, tl = D.tools||{}, r7 = D.recent7||{};
+    document.getElementById('ovKpi').innerHTML = [
+      {c:'k-dark',  n:(ing.count||0)+(tl.count||0), l:'在册品项'},
+      {c:'k-red',   n:(ing.out||0)+(tl.out||0),     l:'缺货'},
+      {c:'k-orange',n:(ing.low||0)+(tl.low||0),     l:'低库存'},
+      {c:'k-blue',  n:'¥'+fmtN(D.total_value||0),   l:'库存总值'},
+      {c:'k-green', n:(D.pending_consume||[]).length, l:'待出库订单'},
+    ].map(k=>`<div class="k ${k.c}"><div class="n">${k.n}</div><div class="l">${k.l}</div></div>`).join('');
+
+    // 预警清单
+    const outItems = [...(ing.out_items||[]), ...(tl.out_items||[])].map(x=>({...x,unit:x.unit||'个'}));
+    const lowItems = [...(ing.low_items||[]), ...(tl.low_items||[])].map(x=>({...x,unit:x.unit||'个'}));
+    let a = '';
+    if(outItems.length) a += alertBlock('🚨 缺货（'+outItems.length+'）', outItems, 'b-out');
+    if(lowItems.length) a += alertBlock('⚠️ 低库存（'+lowItems.length+'）', lowItems, 'b-low');
+    if(!a) a = '<div class="alert-bar green" style="border-radius:8px"><div class="alert-body">✅ 库存充足，没有缺货或低库存项。</div></div>';
+    if(r7.count) a += `<div class="muted" style="font-size:12px;margin-top:8px">📈 近 7 天：入库 ${fmtN(r7.in)} · 出库 ${fmtN(r7.out)}（共 ${r7.count} 条流水）</div>`;
+    document.getElementById('ovAlerts').innerHTML = a;
+
+    // 待出库订单
+    const pend = D.pending_consume||[];
+    document.getElementById('pendHint').textContent = pend.length ? `（${pend.length} 单）` : '';
+    document.getElementById('pendList').innerHTML = pend.length ? pend.map(o=>`
+      <div class="inv-row">
+        <span class="nm">#${o.id} ${o.booking_date||'日期待定'} ${o.booking_time||''} · ${o.address||''} · ${o.contact_name||''}</span>
+        <span class="badge ${o.status==='preparing'?'b-low':'b-ok'}">${o.status==='preparing'?'备餐中':'待备'}</span>
+        <button class="btn btn-sm btn-primary" onclick="doConsume(${o.id})">出库</button>
+      </div>`).join('')
+      : '<div class="muted" style="padding:12px;text-align:center">没有待出库的订单 👍</div>';
+  });
+}
+
+function alertBlock(title, items, cls){
+  return `<div style="margin-bottom:8px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:4px">${title}</div>
+    <div style="border:1px solid var(--border-l);border-radius:8px;overflow:hidden">
+      ${items.map(x=>`<div class="inv-row"><span class="nm">${x.name}</span>
+        <span class="badge ${cls}">${cls==='b-out'?'缺货':'低'}</span>
+        <span class="num">${fmtN(x.stock)} ${x.unit||''}</span>
+        <span class="muted" style="font-size:12px">阈值 ${fmtN(x.threshold)}</span></div>`).join('')}
+    </div></div>`;
+}
+
+// ================= 出库 =================
+function loadConsume(){
+  fetch('/api/stock/overview').then(r=>r.json()).then(d=>{
+    const pend=(d.data||{}).pending_consume||[];
+    document.getElementById('outList').innerHTML = pend.length ? pend.map(o=>`
+      <div class="inv-row">
+        <span class="nm">#${o.id} ${o.booking_date||''} ${o.booking_time||''} · ${o.address||''} · ${o.contact_name||''}</span>
+        <button class="btn btn-sm" onclick="previewConsume(${o.id})">🔍 预览</button>
+        <button class="btn btn-sm btn-primary" onclick="doConsume(${o.id})">📤 出库</button>
+      </div>`).join('')
+      : '<div class="muted" style="padding:12px;text-align:center">所有订单都已出库 👍</div>';
+  });
+}
+
+function previewConsume(oid){
+  fetch('/api/stock/order-needs/'+oid).then(r=>r.json()).then(d=>{
+    if(!d.ok){ alert(d.msg||'取不到需求'); return; }
+    const items=d.data.items||[];
+    const txt = items.slice(0,40).map(x=>`${x.name}  -${x.need}${x.unit}`).join('\n');
+    alert(`订单 #${oid} 出库将扣减 ${items.length} 项：\n\n${txt}${items.length>40?'\n…':''}`);
+  });
+}
+
+function doConsume(oid){
+  fetch('/api/stock/order-needs/'+oid).then(r=>r.json()).then(d=>{
+    if(!d.ok){ alert(d.msg||'取不到需求'); return; }
+    const items=d.data.items||[];
+    if(!items.length){ alert('该单没有备餐需求，无需出库'); return; }
+    const short = items.filter(x=>(x.stock||0) < x.need);
+    let msg = `确认给订单 #${oid} 出库？将扣减 ${items.length} 项。`;
+    if(short.length) msg += `\n\n⚠️ 有 ${short.length} 项库存不够（会扣成负数，建议先入库）：\n` +
+      short.slice(0,8).map(x=>`· ${x.name}：需要 ${x.need}${x.unit}，现有 ${x.stock}${x.unit}`).join('\n');
+    if(!confirm(msg)) return;
+    fetch('/api/stock/consume',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({order_id:oid})}).then(r=>r.json()).then(res=>{
+      if(res.ok){
+        showRefreshToast();
+        alert(`✅ 订单 #${oid} 已出库，共扣减 ${res.moved} 项` + (res.short&&res.short.length?`\n⚠️ 其中 ${res.short.length} 项库存不足，已扣成负数`:''));
+        loadConsume();
+      } else if(res.already){
+        alert(res.msg);
+      } else {
+        alert('出库失败：'+(res.msg||'未知错误'));
+      }
+    });
+  });
+}
+
+// ================= 盘点 =================
+function loadStocktake(){
+  Promise.all([
+    fetch('/api/ingredients').then(r=>r.json()),
+    fetch('/api/tools').then(r=>r.json())
+  ]).then(([a,b])=>{
+    const ings=(a.data||[]), tools=(b.data||[]);
+    const row=(t,x)=>`<tr>
+      <td>${x.name}<span class="muted" style="font-size:11px"> (${t==='ingredient'?(x.unit||''):'个'})</span></td>
+      <td class="c-opt" style="text-align:right">${fmtN(x.stock)}</td>
+      <td style="text-align:right"><input type="number" step="0.01" class="inbound-input" data-t="${t}" data-id="${x.id}" placeholder="实际"></td>
+    </tr>`;
+    let html = '<table class="tbl tbl-inv"><thead><tr><th>品项</th><th class="c-opt">账面</th><th>实际数量</th></tr></thead><tbody>';
+    html += `<tr><td colspan="3" style="background:#3a2416;color:#fff;font-weight:700;padding:5px 8px;font-size:12px">🥩 食材（${ings.length}）</td></tr>`;
+    html += ings.map(x=>row('ingredient',x)).join('');
+    html += `<tr><td colspan="3" style="background:#8e1e1a;color:#fff;font-weight:700;padding:5px 8px;font-size:12px">🔧 工具（${tools.length}）</td></tr>`;
+    html += tools.map(x=>row('tool',x)).join('');
+    html += '</tbody></table>';
+    document.getElementById('cntBox').innerHTML = html;
+    document.getElementById('cntMsg').textContent = '';
+  });
+}
+
+function submitStocktake(){
+  const items=[];
+  document.querySelectorAll('#cntBox input[data-t]').forEach(el=>{
+    const v = el.value.trim();
+    if(v==='') return;
+    items.push({item_type:el.dataset.t, item_id:parseInt(el.dataset.id), actual:parseFloat(v)});
+  });
+  if(!items.length){ document.getElementById('cntMsg').innerHTML='<span style="color:#e74c3c">没有填写任何实际数量</span>'; return; }
+  fetch('/api/stock/stocktake',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items:items})}).then(r=>r.json()).then(d=>{
+    if(!d.ok){ document.getElementById('cntMsg').innerHTML='<span style="color:#e74c3c">'+(d.msg||'失败')+'</span>'; return; }
+    let msg = `✅ 盘点完成，调整 ${d.count} 项`;
+    if(d.changed && d.changed.length){
+      msg += '：' + d.changed.slice(0,6).map(c=>`${c.name} ${c.delta>0?'+':''}${c.delta}`).join('、');
+      if(d.changed.length>6) msg += ` 等`;
+    } else {
+      msg += '（与实际一致，无需调整）';
+    }
+    document.getElementById('cntMsg').innerHTML = msg;
+    showRefreshToast();
+    loadStocktake();
+    loadIngs(); loadTools();
+  });
+}
+
+// ================= 流水 =================
+function loadLogs(filter){
+  window._logFilter = filter||'';
+  const q = window._logFilter ? ('?limit=300&item_type='+window._logFilter) : '?limit=300';
+  fetch('/api/stock/logs'+q).then(r=>r.json()).then(d=>{
+    const rows=d.data||[];
+    document.getElementById('logList').innerHTML = rows.length ? rows.map(l=>`
+      <div class="inv-row">
+        <span class="muted" style="font-size:11px;flex:0 0 88px">${(l.created_at||'').slice(5,16)}</span>
+        <span class="nm">${l.item_name||('#'+l.item_id)}</span>
+        <span class="num" style="color:${l.delta>=0?'#1e8449':'#c0392b'}">${l.delta>=0?'+':''}${fmtN(l.delta)}${l.item_unit||''}</span>
+        <span class="muted" style="font-size:12px">${l.reason||''}</span>
+      </div>`).join('')
+      : '<div class="muted" style="padding:12px;text-align:center">暂无流水</div>';
+  });
+}
+
+// ================= 公共 =================
+function fmtN(n){
+  n = Number(n)||0;
+  if(Math.abs(n) >= 1000) return Math.round(n).toLocaleString();
+  return (Math.round(n*100)/100).toString();
+}
+
 function calcPrice(){
   const cost = parseFloat(document.getElementById('cost').value||0);
   fetch('/api/price',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cost:cost,margin:0.65})})
@@ -179,94 +482,72 @@ const ING_CAT_COLOR = {
 function loadIngs(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
     const data = d.data||[];
-    // 按分类分组（后端已做 meat 细分 + 固定排序，组内顺序即正确顺序）
     const byCat = {};
-    data.forEach(x=>{
-      const c = x.category || 'other';
-      (byCat[c] = byCat[c]||[]).push(x);
-    });
-    let totalCost = 0;
-    let html = '';
+    data.forEach(x=>{ const c=x.category||'other'; (byCat[c]=byCat[c]||[]).push(x); });
+    let totalCost = 0, html = '', cards = '';
     for(const cat of ING_CAT_ORDER){
       const items = byCat[cat];
       if(!items || !items.length) continue;
       const color = ING_CAT_COLOR[cat] || '#6b4f3a';
       const label = ING_CAT_LABEL[cat] || cat;
-      // 分类标题行
-      html += `<tr><td colspan="8" style="background:${color};color:#fff;font-weight:700;padding:6px 8px;font-size:13px">${label} · ${items.length}项</td></tr>`;
+      html += `<tr><td colspan="8" style="background:${color};color:#fff;font-weight:700;padding:6px 8px;font-size:12px">${label} · ${items.length}项</td></tr>`;
+      cards += `<div style="background:${color};color:#fff;font-weight:700;padding:4px 8px;border-radius:6px;margin:10px 0 6px;font-size:12px">${label} · ${items.length}项</div>`;
       for(const x of items){
         const sub = (x.stock||0)*(x.cost||0);
         totalCost += sub;
         const catOptions = ING_CAT_ORDER.map(c=>`<option value="${c}" ${c===cat?'selected':''}>${ING_CAT_LABEL[c]}</option>`).join('');
-        // 低库存告警：stock <= threshold
         const isLow = (x.stock||0) <= (x.threshold||0);
         const lowClass = isLow ? 'low-stock' : '';
         const alertBadge = isLow ? '<span class="alert-badge">低库存</span>' : '';
         html += `<tr class="${lowClass}">
-          <td><input type="text" value="${x.name}" onchange="editIng(${x.id},'name',this.value)" style="border:none;background:transparent;font-weight:700;min-width:80px">${alertBadge}</td>
-          <td><select onchange="editIng(${x.id},'category',this.value)" style="border:1px solid #ddd;border-radius:4px;padding:2px;font-size:12px;background:#f9f9f9">${catOptions}</select></td>
-          <td><input type="text" value="${x.unit||''}" onchange="editIng(${x.id},'unit',this.value)" size="4" style="border:none;background:transparent;text-align:center"></td>
-          <td style="text-align:right;font-weight:700">${x.stock}</td><td style="text-align:right">${x.threshold}</td>
-          <td class="cost-cell">
+          <td><input type="text" value="${x.name}" onchange="editIng(${x.id},'name',this.value)" style="border:none;background:transparent;font-weight:700;width:100%;min-width:70px">${alertBadge}
+            <div class="muted" style="font-size:11px">${ING_CAT_LABEL[cat]} · ${x.unit||''}</div></td>
+          <td class="c-opt"><select onchange="editIng(${x.id},'category',this.value)" style="border:1px solid #ddd;border-radius:4px;padding:2px;font-size:12px;background:#f9f9f9;max-width:96px">${catOptions}</select></td>
+          <td class="c-opt"><input type="text" value="${x.unit||''}" onchange="editIng(${x.id},'unit',this.value)" size="4" style="border:none;background:transparent;text-align:center;width:46px"></td>
+          <td style="text-align:right;font-weight:700">${x.stock}</td>
+          <td class="c-opt" style="text-align:right">${x.threshold}</td>
+          <td class="cost-cell c-opt">
             <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
               onchange="updateCost('ingredient',${x.id},this.value)" id="cost-ing-${x.id}"
               oninput="showCostRef('ing',${x.id},this.value,'${x.unit||''}')">
-            <span class="cost-ref" id="cost-ref-ing-${x.id}" style="font-size:10px;color:#888;margin-left:2px;white-space:nowrap"></span>
           </td>
-          <td style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
+          <td class="c-opt" style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
           <td><input type="number" id="adj-ing-${x.id}" size="4" placeholder="±" class="inbound-input">
           <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id})">补/损</button></td>
         </tr>`;
+        cards += `<div class="ic ${isLow?'low':''}">
+          <div class="ic-hd"><span class="ic-nm">${x.name}</span>${isLow?'<span class="alert-badge">低库存</span>':''}</div>
+          <div class="ic-meta">${ING_CAT_LABEL[cat]} · 单位 ${x.unit||''} · 阈值 ${x.threshold}</div>
+          <div class="ic-grid"><span>库存 <b>${x.stock}</b></span><span>成本 ¥${x.cost||0}</span><span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span></div>
+          <div class="ic-act"><input type="number" id="adjm-ingredient-${x.id}" class="inbound-input" placeholder="±">
+          <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id},'m')">补/损</button></div>
+        </div>`;
       }
     }
-    document.querySelector('#ingTable tbody').innerHTML=html || '<tr><td colspan="8" class="muted" style="text-align:center;padding:16px">暂无食材，点击"+ 添加食材"</td></tr>';
+    document.querySelector('#ingTable tbody').innerHTML=html || '<tr><td colspan="8" class="muted" style="text-align:center;padding:16px">暂无食材</td></tr>';
+    document.getElementById('ingCards').innerHTML = cards || '<div class="muted" style="padding:12px;text-align:center">暂无食材</div>';
     document.getElementById('ingCostTotal').textContent = `库存价值合计: ¥${totalCost.toFixed(2)}`;
-    // 初始化所有参考价
-    document.querySelectorAll('[id^="cost-ing-"]').forEach(el=>{
-      const id=el.id.replace('cost-ing-','');
-      const refId='cost-ref-ing-'+id;
-      const unit=el.closest('tr').querySelectorAll('td input')[2]?.value||'';
-      showCostRef('ing',id,el.value,unit);
-    });
   });
 }
 
-// 根据单位实时换算参考价（g→kg, ml→L 等）
 function showCostRef(prefix,id,costVal,unit){
   const refEl=document.getElementById('cost-ref-'+prefix+'-'+id);
   if(!refEl) return;
   const c=parseFloat(costVal||0);
   if(!c||!unit){ refEl.textContent=''; return; }
   let ref='';
-  if(unit==='g'){
-    // 克 → kg（进货常用）
-    const kg=c*1000;
-    ref=`¥${kg.toFixed(kg>=100?0:1)}/kg`;
-    // 额外：1kg/袋参考
-    // ref += ` · ¥${kg.toFixed(0)}/袋(1kg)`;
-  } else if(unit==='ml'){
-    const L=c*1000;
-    ref=`¥${L.toFixed(L>=10?1:2)}/L`;
-  } else if(unit==='份'){
-    // 份 → 盒（假设一盒=2-3份，标注参考）
-    ref=`¥${(c*2).toFixed(2)}/盒(≈2份)`;
-  } else if(unit==='个'){
-    ref=`¥${(c*60).toFixed(0)}/袋(≈60个)`;
-  } else if(unit==='瓶'){
-    ref='';
-  } else if(unit==='包'){
-    ref='';
-  }
+  if(unit==='g'){ const kg=c*1000; ref=`¥${kg.toFixed(kg>=100?0:1)}/kg`; }
+  else if(unit==='ml'){ const L=c*1000; ref=`¥${L.toFixed(L>=10?1:2)}/L`; }
+  else if(unit==='份'){ ref=`¥${(c*2).toFixed(2)}/盒(≈2份)`; }
+  else if(unit==='个'){ ref=`¥${(c*60).toFixed(0)}/袋(≈60个)`; }
   refEl.textContent=ref;
 }
 
-// 内联编辑食材字段（name/unit/category）
 function editIng(id, field, value){
   fetch(`/api/ingredients/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({[field]:value})}).then(r=>r.json()).then(d=>{
     if(d.ok){
       showRefreshToast();
-      // 仅在分类变化时重新加载（重排），其他字段不重排避免输入框失焦
       if(field==='category') loadIngs();
     }
   });
@@ -275,27 +556,34 @@ function editIng(id, field, value){
 function loadTools(){
   fetch('/api/tools').then(r=>r.json()).then(d=>{
     const data = d.data||[];
-    let totalCost = 0;
+    let totalCost = 0, cards = '';
     const html=data.map(x=>{
       const sub = (x.stock||0)*(x.cost||0);
       totalCost += sub;
-      // 低库存告警：stock <= threshold
       const isLow = (x.stock||0) <= (x.threshold||0);
       const lowClass = isLow ? 'low-stock' : '';
       const alertBadge = isLow ? '<span class="alert-badge">低库存</span>' : '';
+      cards += `<div class="ic ${isLow?'low':''}">
+        <div class="ic-hd"><span class="ic-nm">${x.name}</span>${isLow?'<span class="alert-badge">低库存</span>':''}</div>
+        <div class="ic-meta">🔧 工具 · 阈值 ${x.threshold}</div>
+        <div class="ic-grid"><span>库存 <b>${x.stock}</b></span><span>成本 ¥${x.cost||0}</span><span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span></div>
+        <div class="ic-act"><input type="number" id="adjm-tool-${x.id}" class="inbound-input" placeholder="±">
+        <button class="btn btn-sm" onclick="adjustStock('tool',${x.id},'m')">补/损</button></div>
+      </div>`;
       return `<tr class="${lowClass}">
         <td>${x.name}${alertBadge}</td>
-        <td style="text-align:right">${x.stock}</td><td style="text-align:right">${x.threshold}</td>
-        <td class="cost-cell">
+        <td style="text-align:right">${x.stock}</td><td class="c-opt" style="text-align:right">${x.threshold}</td>
+        <td class="cost-cell c-opt">
           <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
             onchange="updateCost('tool',${x.id},this.value)" id="cost-tool-${x.id}">
         </td>
-        <td style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
+        <td class="c-opt" style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
         <td><input type="number" id="adj-tool-${x.id}" size="4" placeholder="±" class="inbound-input">
         <button class="btn btn-sm" onclick="adjustStock('tool',${x.id})">补/损</button></td>
       </tr>`;
     }).join('');
     document.querySelector('#toolTable tbody').innerHTML=html;
+    document.getElementById('toolCards').innerHTML = cards || '<div class="muted" style="padding:12px;text-align:center">暂无工具</div>';
     document.getElementById('toolCostTotal').textContent = `工具价值合计: ¥${totalCost.toFixed(2)}`;
   });
 }
@@ -310,25 +598,13 @@ function updateCost(type,id,val){
 }
 
 // ===== 采购入库 =====
-function toggleInbound(){
-  const p = document.getElementById('inboundPanel');
-  if(p.style.display=='none'){
-    p.style.display='block';
-    loadInboundTable();
-  } else {
-    p.style.display='none';
-  }
-}
+function toggleInbound(){ showTab('in'); }
 
 function loadInboundTable(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
     const data = d.data||[];
-    // 按分类分组，与菜单页顺序一致
     const byCat = {};
-    data.forEach(x=>{
-      const c = x.category || 'other';
-      (byCat[c] = byCat[c]||[]).push(x);
-    });
+    data.forEach(x=>{ const c=x.category||'other'; (byCat[c]=byCat[c]||[]).push(x); });
     let html = '';
     for(const cat of ING_CAT_ORDER){
       const items = byCat[cat];
@@ -338,13 +614,14 @@ function loadInboundTable(){
       html += `<tr><td colspan="5" style="background:${color};color:#fff;font-weight:700;padding:4px 8px;font-size:12px">${label} · ${items.length}项</td></tr>`;
       for(const x of items){
         const isLow = (x.stock||0) <= (x.threshold||0);
-        const rowClass = isLow ? 'inbound-row low-stock' : 'inbound-row';
+        const rowClass = isLow ? 'low-stock' : '';
+        const alertBadge = isLow ? '<span class="alert-badge">低库存</span>' : '';
         html += `<tr class="${rowClass}">
-          <td>${x.name}<span class="muted">(${x.unit})</span></td>
-          <td style="text-align:right">${x.stock}</td>
+          <td>${x.name}<span class="muted">(${x.unit})</span>${alertBadge}</td>
+          <td class="c-opt" style="text-align:right">${x.stock}</td>
           <td><input type="number" class="inbound-input" id="ib-qty-${x.id}" placeholder="0" step="0.1"></td>
           <td><input type="number" class="inbound-input" id="ib-price-${x.id}" placeholder="¥" step="0.01" value="${x.cost||''}"></td>
-          <td><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:100px"></td>
+          <td class="c-opt"><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:90px"></td>
         </tr>`;
       }
     }
@@ -356,18 +633,21 @@ function submitInbound(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
     const items=[];
     (d.data||[]).forEach(x=>{
-      const qty=parseFloat(document.getElementById(`ib-qty-${x.id}`).value||0);
-      const price=parseFloat(document.getElementById(`ib-price-${x.id}`).value||0);
-      const sup=document.getElementById(`ib-sup-${x.id}`).value||'';
-      if(qty>0) items.push({item_type:'ingredient',item_id:x.id,qty:qty,unit_price:price,supplier:sup});
+      const qtyEl=document.getElementById(`ib-qty-${x.id}`);
+      if(!qtyEl) return;
+      const qty=parseFloat(qtyEl.value||0);
+      if(!(qty>0)) return;
+      const price=parseFloat((document.getElementById(`ib-price-${x.id}`)||{}).value||0);
+      const sup=(document.getElementById(`ib-sup-${x.id}`)||{}).value||'';
+      items.push({item_type:'ingredient',item_id:x.id,qty:qty,unit_price:price,supplier:sup});
     });
     if(!items.length){document.getElementById('inboundMsg').innerHTML='<span style="color:#e74c3c">未填写任何采购数量</span>';return;}
-    const reason=document.getElementById('inboundReason').value||'采购入库';
+    const reason=(document.getElementById('inboundReason').value||'采购入库');
     fetch('/api/stock/inbound',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({items:items,reason:reason})})
-      .then(r=>r.json()).then(d=>{
-        if(d.ok){
-          document.getElementById('inboundMsg').innerHTML=`<span style="color:#27ae60">✅ 成功入库 ${d.done} 项</span>`;
+      .then(r=>r.json()).then(res=>{
+        if(res.ok){
+          document.getElementById('inboundMsg').innerHTML=`<span style="color:#27ae60">✅ 成功入库 ${res.done} 项</span>`;
           showRefreshToast();
           loadIngs();
           loadInboundTable();
@@ -380,12 +660,12 @@ function submitInbound(){
 function loadPurchases(){
   fetch('/api/purchases').then(r=>r.json()).then(d=>{
     const html=(d.data||[]).map(p=>`<tr>
-      <td>${(p.purchased_at||'').slice(0,16)}</td>
+      <td>${(p.purchased_at||'').slice(5,16)}</td>
       <td>${p.item_name||'-'}</td>
       <td style="text-align:right">${p.quantity} ${p.item_unit||''}</td>
       <td style="text-align:right">¥${p.unit_price}</td>
       <td style="text-align:right;font-weight:700;color:#c0392b">¥${p.total_cost}</td>
-      <td>${p.supplier||'-'}</td>
+      <td class="c-opt">${p.supplier||'-'}</td>
     </tr>`).join('') || '<tr><td colspan="6" class="muted" style="text-align:center">暂无记录</td></tr>';
     document.querySelector('#purchaseTable tbody').innerHTML=html;
   });
@@ -427,11 +707,13 @@ function saveSettings(){
   fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delivery_fee:v})})
     .then(r=>r.json()).then(()=>{loadSettings();loadPkgs();});
 }
-function adjustStock(type,id){
-  const v=parseFloat(document.getElementById(`adj-${type}-${id}`).value||0);
+function adjustStock(type,id,suf){
+  const el=document.getElementById('adj'+(suf||'')+'-'+type+'-'+id);
+  const v=parseFloat((el&&el.value)||0);
   if(!v){alert('输入数字');return;}
   const reason=type=='ingredient'?'食材调整':'工具调整';
-  fetch('/api/stock/adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_type:type,item_id:id,delta:v,reason})})
+  fetch('/api/stock/adjust',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:type,item_id:id,delta:v,reason})})
     .then(r=>r.json()).then(()=>{type=='ingredient'?loadIngs():loadTools();});
 }
 function toggleAdd(t){ document.getElementById(t=='ing'?'addIng':'addTool').style.display='block'; }
@@ -445,7 +727,6 @@ function addTool(){
     name:toolName.value,stock:parseFloat(toolStock.value||0),threshold:parseFloat(toolThr.value||0),cost:parseFloat(toolCost.value||0)
   })}).then(r=>r.json()).then(()=>{loadTools();['toolName','toolStock','toolThr','toolCost'].forEach(x=>document.getElementById(x).value='');});
 }
-loadIngs();loadTools();loadPkgs();loadSettings();
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){
@@ -466,6 +747,9 @@ function showRefreshToast(){
 }
 
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
+
+// 首屏：加载总览
+loadOverview();
 </script>
 </body>
 </html>
