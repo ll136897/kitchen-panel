@@ -964,15 +964,19 @@ def stock_overview():
         "SELECT id,name,unit,stock,threshold,cost,category FROM ingredients").fetchall()]
     tools = [dict(r) for r in cur.execute(
         "SELECT id,name,stock,threshold,cost FROM tools").fetchall()]
-    # 工具的"可用量" = 总库存 - 在借未归还；预警按可用量算，但库存价值按总拥有量算
-    from calculator import get_available_tool_stock
+    # 装备的"剩余可用" = 总库存 − 未完成订单占用（占用由订单自动推导，无需人工登记）
+    # 预警按"剩余可用"算，库存价值按总拥有量算
+    from calculator import (get_available_tool_stock, get_tool_reserved,
+                            list_reserving_orders, calc_order_tool_needs)
     _tavail = get_available_tool_stock()
+    _tres = get_tool_reserved()
     for t in tools:
         total = float(t.get("stock") or 0)
-        a = float(_tavail.get(t["id"], total))
+        rsv = float(_tres.get(t["id"], 0))
         t["total_stock"] = total
-        t["loaned"] = round(total - a, 4)
-        t["stock"] = a          # 展示与预警用可用量
+        t["reserved"] = round(rsv, 4)
+        t["loaned"] = round(rsv, 4)          # 兼容旧字段名
+        t["stock"] = float(_tavail.get(t["id"], total))   # 展示与预警用"剩余可用"
 
     def summarize(items, val_key="stock"):
         out, low, val = [], [], 0.0
@@ -1041,6 +1045,20 @@ def stock_overview():
         except Exception:
             days_st = None
 
+    # 各"未完成订单"分别要用哪些装备（接新单时看这个 + 上面的剩余量）
+    _tname = {t["id"]: t["name"] for t in tools}
+    tool_plan = []
+    for o in list_reserving_orders():
+        tl = []
+        for tid, info in calc_order_tool_needs(o["id"]).items():
+            need = info.get("total") or 0
+            if need <= 0:
+                continue
+            tl.append({"name": _tname.get(tid, "?"), "need": round(need, 2)})
+        if tl:
+            o["tools"] = sorted(tl, key=lambda x: -x["need"])
+            tool_plan.append(o)
+
     return jsonify({"ok": True, "data": {
         "ingredients": ing_s, "tools": tool_s,
         "total_value": round(ing_s["value"] + tool_s["value"], 2),
@@ -1048,6 +1066,7 @@ def stock_overview():
         "recent7": recent,
         "loans": loans, "loaned_total": round(loaned_total, 2),
         "loan_orders": len({l["order_id"] for l in loans}),
+        "tool_plan": tool_plan,
         "last_stocktake": last_st, "days_since_stocktake": days_st,
     }})
 
@@ -1363,14 +1382,18 @@ def manage_tools():
     db = g.db
     if request.method == "GET":
         rows = db.execute("SELECT * FROM tools").fetchall()
-        from calculator import sort_tools, get_available_tool_stock
+        from calculator import sort_tools, get_available_tool_stock, get_tool_reserved
         avail = get_available_tool_stock()
+        reserved = get_tool_reserved()
         items = []
         for r in rows:
             d = dict(r)
-            a = avail.get(d["id"], d.get("stock") or 0)
-            d["avail"] = a
-            d["loaned"] = round((d.get("stock") or 0) - a, 4)   # 借出中（含未归还）
+            total = d.get("stock") or 0
+            rsv = round(float(reserved.get(d["id"], 0)), 4)
+            d["total_stock"] = total
+            d["avail"] = avail.get(d["id"], total)
+            d["reserved"] = rsv      # 被"未完成订单"占用的数量（由订单自动推导，无需登记）
+            d["loaned"] = rsv        # 兼容旧字段名
             items.append(d)
         return jsonify({"ok": True, "data": sort_tools(items)})
     data = request.get_json(force=True)

@@ -19,21 +19,91 @@ def now_cst():
     return datetime.datetime.now(CST)
 
 
+def calc_order_tool_needs(order_id):
+    """只算某单需要的装备（套餐配的装备 + 备注追加的），**不依赖可用量**。
+    单独抽出来是为了让"占用统计"能调用它而不会与 get_available_tool_stock() 递归。
+    返回 {tool_id: {"total": n, "per_package": x, "order_qty": k}}
+    """
+    tool_demand = {}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT raw_text FROM orders WHERE id = ?", (order_id,))
+        row = cur.fetchone()
+        if not row:
+            return {}
+        raw_text = row["raw_text"] or ""
+        cur.execute("SELECT package_id, quantity FROM order_packages WHERE order_id = ?", (order_id,))
+        pkgs = [dict(r) for r in cur.fetchall()]
+
+        for pk in pkgs:
+            cur.execute("""
+                SELECT pt.per_package, t.id, t.name
+                FROM package_tools pt
+                JOIN tools t ON pt.tool_id = t.id
+                WHERE pt.package_id = ?
+            """, (pk["package_id"],))
+            for r in cur.fetchall():
+                amount = r["per_package"] * pk["quantity"]
+                if r["id"] not in tool_demand:
+                    tool_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0}
+                tool_demand[r["id"]]["total"] += amount
+                tool_demand[r["id"]]["per_package"] = r["per_package"]
+                tool_demand[r["id"]]["order_qty"] += pk["quantity"]
+
+        # 备注解析出的追加装备（"多拿2个天幕"等）
+        parsed = parse_order_text(raw_text)
+        extra = parsed.get("extra_tools", {})
+        for tname, info in extra.items():
+            qty = info["qty"] if isinstance(info, dict) else info
+            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
+            cur.execute("SELECT id FROM tools WHERE name = ?", (tname,))
+            tr = cur.fetchone()
+            if not tr:
+                continue
+            tid = tr["id"]
+            pkg_qty_sum = sum(int(pk.get("quantity") or 1) for pk in pkgs) or 1
+            if tid not in tool_demand:
+                tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": pkg_qty_sum}
+            if mode == "set":
+                tool_demand[tid]["total"] = qty
+            else:
+                tool_demand[tid]["total"] += qty
+            tool_demand[tid]["per_package"] = qty
+    return tool_demand
+
+
+def list_reserving_orders():
+    """当前仍然"占着装备"的订单：未完成、未取消、未删除，且预约日期未过期。
+    日期已过 = 活动办完了，自动释放占用（不要求用户去点"归还"或"完成"）。"""
+    with get_db() as conn:
+        cur = conn.cursor()
+        return [dict(r) for r in cur.execute("""
+            SELECT id, booking_date, booking_time, address, contact_name, status
+            FROM orders
+            WHERE deleted_at IS NULL AND status IN ('pending','preparing')
+              AND (COALESCE(booking_date,'') = '' OR booking_date >= ?)
+            ORDER BY booking_date, booking_time
+        """, (today_cst().isoformat(),)).fetchall()]
+
+
+def get_tool_reserved():
+    """各装备被"未完成订单"占用的数量。占用完全由订单推导，无需人工登记。"""
+    reserved = {}
+    for o in list_reserving_orders():
+        for tid, info in calc_order_tool_needs(o["id"]).items():
+            reserved[tid] = reserved.get(tid, 0) + (info.get("total") or 0)
+    return reserved
+
+
 def get_available_tool_stock():
-    """返回 {tool_id: 可用数量} = 总库存 - 已借出未归还数量"""
+    """返回 {tool_id: 可用数量} = 总库存 − 未完成订单占用（可用于接新单的量）"""
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id, stock FROM tools")
         stock = {r["id"]: r["stock"] or 0 for r in cur.fetchall()}
-        cur.execute("""
-            SELECT tool_id, SUM(quantity - returned_qty - lost_qty) as out
-            FROM tool_loans WHERE status IN ('borrowed','partial')
-            GROUP BY tool_id
-        """)
-        for r in cur.fetchall():
-            out = r["out"] or 0
-            stock[r["tool_id"]] = max(0, stock.get(r["tool_id"], 0) - out)
-        return stock
+    for tid, rsv in get_tool_reserved().items():
+        stock[tid] = max(0, stock.get(tid, 0) - rsv)
+    return stock
 
 
 def match_ingredient_id_by_name(name):
@@ -261,45 +331,11 @@ def calc_order_requirements(order_id):
                 ing_demand[r["id"]]["order_qty"] += d["quantity"]
 
     # 工具需求 = 套餐工具 + 备注解析的额外工具
-    tool_demand = {}
+    # 统一走 calc_order_tool_needs()（"占用统计"用同一个函数，保证口径一致、且不会递归）
+    tool_demand = calc_order_tool_needs(order_id)
     with get_db() as conn:
         cur = conn.cursor()
-        for pk in pkgs:
-            cur.execute("""
-                SELECT pt.per_package, t.id, t.name
-                FROM package_tools pt
-                JOIN tools t ON pt.tool_id = t.id
-                WHERE pt.package_id = ?
-            """, (pk["package_id"],))
-            for r in cur.fetchall():
-                amount = r["per_package"] * pk["quantity"]
-                if r["id"] not in tool_demand:
-                    tool_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0}
-                tool_demand[r["id"]]["total"] += amount
-                tool_demand[r["id"]]["per_package"] = r["per_package"]
-                tool_demand[r["id"]]["order_qty"] += pk["quantity"]
-
-        # 备注解析额外工具
         parsed = parse_order_text(raw_text)
-        extra = parsed.get("extra_tools", {})
-        for tname, info in extra.items():
-            qty = info["qty"] if isinstance(info, dict) else info
-            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
-            cur.execute("SELECT id FROM tools WHERE name = ?", (tname,))
-            tr = cur.fetchone()
-            if tr:
-                tid = tr["id"]
-                # 份数 = 本单套餐总份数（备注工具沿用同一份数，不额外 +1，
-                # 否则备餐页"份数"列会虚高、与合计对不上）
-                pkg_qty_sum = sum(int(pk.get("quantity") or 1) for pk in pkgs) or 1
-                if tid not in tool_demand:
-                    tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": pkg_qty_sum}
-                # 已在套餐里的工具：份数保持套餐份数，不重复累加
-                if mode == "set":
-                    tool_demand[tid]["total"] = qty       # 覆盖：总数=qty
-                else:
-                    tool_demand[tid]["total"] += qty      # 增量：套餐基础上 +qty
-                tool_demand[tid]["per_package"] = qty
 
         # 备注解析额外加菜（单点食材）
         from parser import match_extra_ingredients_to_db

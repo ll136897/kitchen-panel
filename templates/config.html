@@ -99,12 +99,17 @@
       <div class="muted" style="font-size:12px;margin-top:8px">出库 = 食材/耗材扣减（装备不记账，靠盘点校正）。每单只出一次，出错了可撤销。<br>
         💡 现阶段搭建回收外包、不逐笔登记，所以<b>「定期盘点」才是把库存数校准的主要手段</b>——出库点不点都不影响盘点校正。</div>
     </div>
-    <div class="card" id="ovLoanCard" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <h3 style="margin:0">🔧 待归还装备 <span class="muted" id="ovLoanHint" style="font-size:12px"></span></h3>
-        <button class="btn btn-sm" onclick="loadOverview()">🔄 刷新</button>
+    <div class="card">
+      <h3>🔧 装备占用与剩余 <span class="muted" style="font-weight:400;font-size:12px">接新单前先看这个</span></h3>
+      <div class="sub" style="margin-bottom:8px">
+        「占用」= <b>还没做完的订单</b>要用的装备，按套餐自动算出来；订单做完 / 取消 / 日期过了会<b>自动释放</b>，不需要你登记。<br>
+        「剩余」= 总库存 − 占用 = 还能给新订单用的量。
       </div>
-      <div id="ovLoanList" style="margin-top:8px"></div>
+      <div id="toolPlan"></div>
+    </div>
+    <div class="card">
+      <h3>📋 各单要用哪些装备</h3>
+      <div id="orderToolPlan" style="margin-top:8px"></div>
     </div>
   </div>
 
@@ -351,9 +356,44 @@ function loadOverview(){
       </div>`).join('')
       : '<div class="muted" style="padding:12px;text-align:center">没有待出库的订单 👍</div>';
 
-    // 待归还装备
-    renderLoans('ovLoanList','ovLoanHint','ovLoanCard', D.loans||[]);
+    // 装备占用与剩余 + 各单装备明细
+    renderOrderToolPlan(D.tool_plan||[]);
+    loadToolPlan();
   });
+}
+
+// 装备占用与剩余（接新单参考）
+function loadToolPlan(){
+  fetch('/api/tools').then(r=>r.json()).then(d=>{
+    const ts = d.data||[];
+    const el = document.getElementById('toolPlan');
+    if(!el) return;
+    el.innerHTML = ts.length ? ts.map(t=>{
+      const total = Number(t.stock)||0;
+      const rsv = Number(t.reserved)||0;
+      const av = (t.avail===undefined||t.avail===null) ? total : Number(t.avail);
+      const short = av <= (t.threshold||0);
+      return `<div class="inv-row">
+        <span class="nm">${t.name}</span>
+        <span class="muted" style="font-size:12px">总 ${fmtN(total)}</span>
+        <span class="num" style="color:#d35400">占用 ${fmtN(rsv)}</span>
+        <span class="num" style="color:${short?'#c0392b':'#1e8449'}">剩余 ${fmtN(av)}</span>
+        ${short?'<span class="badge b-low">剩余不足</span>':''}
+      </div>`;
+    }).join('') : '<div class="muted" style="padding:12px;text-align:center">暂无装备</div>';
+  });
+}
+
+// 各"未完成订单"要用哪些装备
+function renderOrderToolPlan(plan){
+  const el = document.getElementById('orderToolPlan');
+  if(!el) return;
+  el.innerHTML = (plan||[]).length ? plan.map(o=>`
+    <div style="border:1px solid var(--border-l);border-radius:10px;margin-bottom:8px;overflow:hidden">
+      <div style="background:#faf6ef;padding:7px 9px;font-weight:700;font-size:13px">#${o.id} ${o.booking_date||'日期待定'} ${o.booking_time||''} · ${o.address||''} · ${o.contact_name||''}</div>
+      <div style="padding:6px 9px;font-size:13px;overflow-wrap:anywhere">🔧 ${(o.tools||[]).map(t=>`${t.name}×${fmtN(t.need)}`).join('、')||'无'}</div>
+    </div>`).join('')
+    : '<div class="muted" style="padding:12px;text-align:center">当前没有未完成的订单 👍</div>';
 }
 
 // 待归还装备清单（按订单分组）。现阶段不逐笔登记借还，通常为空 → 整块自动隐藏。
@@ -457,8 +497,8 @@ function doConsume(oid){
       + `· 装备 ${gears.length} 项 → 不记账（现阶段不逐笔登记，靠盘点校正）`;
     if(shortFood.length) msg += `\n\n⚠️ 有 ${shortFood.length} 项食材库存不够（会扣成负数，建议先入库）：\n` +
       shortFood.slice(0,8).map(x=>`· ${x.name}：需要 ${x.need}${x.unit}，现有 ${x.stock}${x.unit}`).join('\n');
-    if(shortGear.length) msg += `\n\n⚠️ 有 ${shortGear.length} 项装备账面不足（仅供参考，不影响出库）：\n` +
-      shortGear.slice(0,8).map(x=>`· ${x.name}：需要 ${x.need}${x.unit}，账面 ${x.stock}${x.unit}`).join('\n');
+    if(shortGear.length) msg += `\n\n⚠️ 有 ${shortGear.length} 项装备"剩余"不够（可能已被其他单占用，仅供参考）：\n` +
+      shortGear.slice(0,8).map(x=>`· ${x.name}：需要 ${x.need}${x.unit}，剩余 ${x.stock}${x.unit}`).join('\n');
     if(!confirm(msg)) return;
     fetch('/api/stock/consume',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({order_id:oid})}).then(r=>r.json()).then(res=>{
@@ -466,8 +506,8 @@ function doConsume(oid){
         showRefreshToast();
         let ok = `✅ 订单 #${oid} 已出库\n· 食材消耗 ${res.consumed||0} 项（已扣库存）`;
         if(res.gears&&res.gears.length){
-          ok += `\n· 装备 ${res.gears.length} 项（不记账），本单需要：\n   ` +
-            res.gears.slice(0,10).map(g=>`${g.name}×${g.need}`).join('、') + (res.gears.length>10?' …':'');
+          ok += `\n· 装备 ${res.gears.length} 项（不记账，本单要用）：\n   ` +
+            res.gears.slice(0,10).map(g=>`${g.name}×${g.need}(剩${fmtN(g.stock)})`).join('、') + (res.gears.length>10?' …':'');
         }
         if(res.short&&res.short.length){
           const sf = res.short.filter(x=>x.kind==='ingredient').length;
@@ -697,24 +737,24 @@ function loadTools(){
     let totalCost = 0, cards = '';
     const html=data.map(x=>{
       const total = x.stock||0;
-      const loaned = x.loaned||0;
+      const reserved = x.reserved || 0;
       const avail = (x.avail===undefined||x.avail===null) ? total : x.avail;
       const sub = total*(x.cost||0);
       totalCost += sub;
       const isLow = avail <= (x.threshold||0);
       const lowClass = isLow ? 'low-stock' : '';
-      const alertBadge = isLow ? '<span class="alert-badge">库存不足</span>' : '';
-      const subline = loaned ? `<div class="muted" style="font-size:11px">总 ${fmtN(total)} · 借出 ${fmtN(loaned)} · 可用 ${fmtN(avail)}</div>` : '';
+      const alertBadge = isLow ? '<span class="alert-badge">剩余不足</span>' : '';
+      const subline = `<div class="muted" style="font-size:11px">总 ${fmtN(total)} · 占用 ${fmtN(reserved)} · <b style="color:${isLow?'#c0392b':'#1e8449'}">剩余 ${fmtN(avail)}</b></div>`;
       cards += `<div class="ic ${isLow?'low':''}">
-        <div class="ic-hd"><span class="ic-nm">${x.name}</span>${isLow?'<span class="alert-badge">库存不足</span>':''}</div>
-        <div class="ic-meta">🔧 装备 · 阈值 ${x.threshold} · 总 ${fmtN(total)}${loaned?` · 借出 ${fmtN(loaned)}`:''}</div>
-        <div class="ic-grid"><span>可用 <b>${fmtN(avail)}</b></span><span>成本 ¥${x.cost||0}</span><span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span></div>
+        <div class="ic-hd"><span class="ic-nm">${x.name}</span>${isLow?'<span class="alert-badge">剩余不足</span>':''}</div>
+        <div class="ic-meta">🔧 装备 · 阈值 ${x.threshold} · 总 ${fmtN(total)} · 占用 ${fmtN(reserved)}</div>
+        <div class="ic-grid"><span>剩余 <b style="color:${isLow?'#c0392b':'#1e8449'}">${fmtN(avail)}</b></span><span>成本 ¥${x.cost||0}</span><span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span></div>
         <div class="ic-act"><input type="number" id="adjm-tool-${x.id}" class="inbound-input" placeholder="±">
         <button class="btn btn-sm" onclick="adjustStock('tool',${x.id},'m')">补/损</button></div>
       </div>`;
       return `<tr class="${lowClass}">
         <td>${x.name}${alertBadge}${subline}</td>
-        <td style="text-align:right"><b>${fmtN(avail)}</b></td><td class="c-opt" style="text-align:right">${x.threshold}</td>
+        <td style="text-align:right"><b style="color:${isLow?'#c0392b':'#1e8449'}">${fmtN(avail)}</b></td><td class="c-opt" style="text-align:right">${x.threshold}</td>
         <td class="cost-cell c-opt">
           <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
             onchange="updateCost('tool',${x.id},this.value)" id="cost-tool-${x.id}">
