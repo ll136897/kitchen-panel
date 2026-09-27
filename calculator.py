@@ -55,7 +55,7 @@ def calc_order_tool_needs(order_id):
         extra = parsed.get("extra_tools", {})
         for tname, info in extra.items():
             qty = info["qty"] if isinstance(info, dict) else info
-            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
+            mode = info.get("mode", "set") if isinstance(info, dict) else "set"   # 缺省=总数（用户确认的大多数情况）
             cur.execute("SELECT id FROM tools WHERE name = ?", (tname,))
             tr = cur.fetchone()
             if not tr:
@@ -687,7 +687,7 @@ def preview_parse(raw_text):
         # 备注额外工具
         for tname, info in parsed["extra_tools"].items():
             qty = info["qty"] if isinstance(info, dict) else info
-            mode = info.get("mode", "add") if isinstance(info, dict) else "add"
+            mode = info.get("mode", "set") if isinstance(info, dict) else "set"   # 缺省=总数（用户确认的大多数情况）
             cur.execute("SELECT id, stock, threshold FROM tools WHERE name = ?", (tname,))
             r = cur.fetchone()
             if r:
