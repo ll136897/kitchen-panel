@@ -1,5 +1,6 @@
 """烤肉店后厨备餐系统 - Flask 主应用"""
 import math
+import os
 from flask import Flask, request, jsonify, render_template, g
 from models import get_db, init_db
 from parser import parse_order_text, match_packages_in_db
@@ -283,6 +284,60 @@ def order_detail_page(oid):
     return render_template("order_detail.html", oid=oid)
 
 
+# ===== 出餐单图片：存成"真实网址" =====
+# 前端用 canvas 画出小票后，本来只得到一个 data: 开头的内联图片；
+# 新版 iOS 长按这种内联图片不再弹「存储到照片」，所以这里把它存下来，
+# 换成一个真正的 https 图片地址——长按能存、能转发、能分享。
+TICKET_SHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "tickets")
+
+
+@app.route("/api/ticket/<int:oid>/shot", methods=["POST"])
+def ticket_shot_save(oid):
+    """保存出餐单图片，返回可直接访问的网址。保留策略：每单最多 5 张、超过 7 天自动清理。"""
+    import base64
+    import time as _time
+    import glob as _glob
+    data = request.get_json(force=True, silent=True) or {}
+    durl = (data.get("data_url") or "").strip()
+    if not durl.startswith("data:image/png;base64,"):
+        return jsonify({"ok": False, "msg": "图片数据格式不对"}), 400
+    try:
+        raw = base64.b64decode(durl.split(",", 1)[1])
+    except Exception:
+        return jsonify({"ok": False, "msg": "图片解码失败"}), 400
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        return jsonify({"ok": False, "msg": "图片大小异常"}), 400
+    try:
+        os.makedirs(TICKET_SHOT_DIR, exist_ok=True)
+        fn = "t%d_%s.png" % (oid, _time.strftime("%Y%m%d_%H%M%S"))
+        with open(os.path.join(TICKET_SHOT_DIR, fn), "wb") as f:
+            f.write(raw)
+    except Exception as e:
+        # 磁盘不可写时不要报错给用户看，前端会自动退回 data: 图片
+        return jsonify({"ok": False, "msg": "服务器暂时无法保存图片"}), 500
+    # 清理（失败无所谓，不影响返回）
+    try:
+        same = sorted(_glob.glob(os.path.join(TICKET_SHOT_DIR, "t%d_*.png" % oid)))
+        for old in same[:-5]:
+            try:
+                os.remove(old)
+            except Exception:
+                pass
+        now = _time.time()
+        for f2 in _glob.glob(os.path.join(TICKET_SHOT_DIR, "*.png")):
+            try:
+                if now - os.path.getmtime(f2) > 7 * 86400:
+                    os.remove(f2)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    url = "/static/tickets/%s" % fn
+    return jsonify({"ok": True, "url": url,
+                    "abs": request.host_url.rstrip("/") + url,
+                    "kb": round(len(raw) / 1024.0, 1)})
+
+
 # ===== 出餐明细单（客户小票：可打印/存PDF/导出图片）=====
 @app.route("/orders/<int:oid>/ticket")
 def order_ticket(oid):
@@ -407,9 +462,10 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 #imgView .sub { color:#8a97a5; font-size:12px; padding-bottom:10px; }
 #imgView img { width:100%; max-width:340px; border:1px solid #d4dae3; border-radius:8px; background:#fff; }
 #imgView .acts { margin-top:14px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
-#imgView a.b-dl, #imgView button.b-back { display:inline-block; padding:11px 20px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; border:none; text-decoration:none; }
-#imgView a.b-dl { background:#27ae60; color:#fff; }
-#imgView button.b-back { background:#f0f2f5; color:#1f2329; }
+#imgView .acts a, #imgView .acts button { display:inline-block; padding:11px 18px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; border:none; text-decoration:none; }
+#imgView .b-dl { background:#27ae60; color:#fff; }
+#imgView .b-open { background:#2471a3; color:#fff; }
+#imgView .b-back { background:#f0f2f5; color:#1f2329; }
 @media print {
   body { background:#fff; }
   .toolbar, .hint, #imgView { display:none !important; }
@@ -424,7 +480,7 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
   <button class="b-png" onclick="exportPNG()">🖼️ 存为图片</button>
   <button class="b-edit" onclick="location.href='/orders/__OID__'" style="background:#f0f2f5;color:#1f2329">✏️ 编辑本单</button>
 </div>
-<div class="hint" id="listHint">点「🖼️ 存为图片」→ 长按图片保存（手机）/ 右键另存为（电脑）</div>
+<div class="hint" id="listHint">点「🖼️ 存为图片」→ 可「存到相册」，也可长按图片保存</div>
 <div class="wrap" id="rcptWrap">
 <div class="receipt" id="rcpt">
 <div class="c shop">__SHOP__</div>
@@ -446,10 +502,12 @@ __NOTE_LINE__
 </div>
 <div id="imgView">
   <div class="ok">✅ 图片已生成</div>
-  <div class="sub">长按图片 → 存储到照片（手机）　　右键 → 另存为（电脑）</div>
+  <div class="sub" id="imgHint">长按图片 → 存储到照片</div>
   <img id="ticketImg" alt="出餐单图片">
   <div class="acts">
-    <a id="dlLink" class="b-dl" download="ticket.png">⬇️ 保存图片</a>
+    <button id="shareBtn" class="b-dl" onclick="shareImg()" style="display:none">📤 存到相册 / 分享</button>
+    <a id="dlLink" class="b-dl" download="ticket.png">⬇️ 下载图片</a>
+    <a id="openLink" class="b-open" target="_blank" rel="noopener" style="display:none">↗︎ 新窗口打开</a>
     <button class="b-back" onclick="backToReceipt()">↩︎ 返回小票</button>
   </div>
 </div>
@@ -534,16 +592,70 @@ function drawTicket(){
   octx.drawImage(cv, 0, 0, out.width, out.height, 0, 0, out.width, out.height);
   return out;
 }
+var _cv = null, _blob = null, _fileName = 'ticket.png', _realUrl = '';
+function imgFileName(){ return '出餐单_' + String(DATA.no||'').replace('#','') + '.png'; }
+function setHint(ready){
+  var h = document.getElementById('imgHint');
+  if(!h) return;
+  h.innerHTML = ready
+    ? '点「📤 存到相册」直接保存　·　或长按图片 → 存储到照片'
+    : '长按图片 → 存储到照片（若长按没反应，点「↗︎ 新窗口打开」再长按）';
+}
+function toBlob(cb){
+  if(!_cv){ cb(null); return; }
+  if(_cv.toBlob){ _cv.toBlob(function(b){ cb(b); }, 'image/png'); return; }
+  try{
+    var bin = atob(_cv.toDataURL('image/png').split(',')[1]);
+    var arr = new Uint8Array(bin.length);
+    for (var i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    cb(new Blob([arr], {type:'image/png'}));
+  }catch(e){ cb(null); }
+}
 function exportPNG(){
-  var url = drawTicket().toDataURL('image/png');
-  document.getElementById('ticketImg').src = url;
-  var a = document.getElementById('dlLink');
-  a.href = url;
-  a.download = '出餐单_' + DATA.no.replace('#','') + '.png';
+  _cv = drawTicket();
+  _fileName = imgFileName();
+  var dataUrl = _cv.toDataURL('image/png');
+  document.getElementById('ticketImg').src = dataUrl;
+  var dl = document.getElementById('dlLink');
+  dl.href = dataUrl; dl.download = _fileName;
   document.getElementById('rcptWrap').style.display = 'none';
   document.getElementById('listHint').style.display = 'none';
   document.getElementById('imgView').style.display = 'block';
   window.scrollTo(0,0);
+  setHint(false);
+  // 先把图片数据备好：系统分享必须是"点击瞬间"同步调用，不能等异步
+  toBlob(function(b){
+    if(!b) return;
+    _blob = b;
+    var f = null;
+    try { f = new File([b], _fileName, {type:'image/png'}); } catch(e){}
+    if (f && navigator.canShare && navigator.canShare({files:[f]})) {
+      document.getElementById('shareBtn').style.display = 'inline-block';
+    }
+  });
+  // 再存成真实网址（新版 iOS 长按 data: 内联图片不再弹"存储到照片"）
+  fetch('/api/ticket/__OID__/shot', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({data_url: dataUrl})
+  }).then(function(r){ return r.json(); }).then(function(res){
+    if (res && res.ok && res.abs){
+      _realUrl = res.abs;
+      document.getElementById('ticketImg').src = res.abs;
+      document.getElementById('dlLink').href = res.abs;
+      var o = document.getElementById('openLink');
+      o.href = res.abs; o.style.display = 'inline-block';
+      setHint(true);
+    }
+  }).catch(function(){});
+}
+function shareImg(){
+  var f = null;
+  try { f = new File([_blob], _fileName, {type:'image/png'}); } catch(e){}
+  if (!f || !navigator.canShare || !navigator.canShare({files:[f]})){
+    alert('这个浏览器不支持直接存相册。\\n\\n办法一：长按上面的图片 → 选「存储到照片」\\n办法二：点「↗︎ 新窗口打开」→ 在新页面长按图片保存');
+    return;
+  }
+  navigator.share({files:[f], title:_fileName}).catch(function(){});
 }
 function backToReceipt(){
   document.getElementById('imgView').style.display = 'none';

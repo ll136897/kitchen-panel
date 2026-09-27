@@ -16,3 +16,4 @@ tunnel.js
 package-lock.json
 package.json
 _libs/
+static/tickets/
