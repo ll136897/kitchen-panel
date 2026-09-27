@@ -214,6 +214,49 @@ def backup_status():
     })
 
 
+@app.route("/api/version", methods=["GET"])
+def api_version():
+    """当前部署的版本信息。
+    用途：确认"线上到底跑的是哪一版"——看部署时间即可，
+    不用去比对 GitHub 上的提交标题（那里最新一条通常是自动备份 kitchen.db 的提交，容易被误以为没更新）。
+    """
+    import os as _os
+    import datetime as _dt
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    deployed_at = ""
+    for fn in ("app.py", "parser.py", "calculator.py"):
+        try:
+            mt = _os.path.getmtime(_os.path.join(here, fn))
+            t = _dt.datetime.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M")
+            if not deployed_at or t > deployed_at:
+                deployed_at = t
+        except Exception:
+            pass
+    sha = ""
+    latest = ""
+    try:
+        import subprocess as _sp
+        sha = _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=here,
+                               stderr=_sp.DEVNULL).decode().strip()
+        # 最新一条**非自动备份**的提交标题 —— 直接看出这一版包含什么改动
+        out = _sp.check_output(["git", "log", "-n", "60", "--pretty=%s"], cwd=here,
+                               stderr=_sp.DEVNULL).decode("utf-8", "replace").splitlines()
+        for ln in out:
+            ln = (ln or "").strip()
+            if ln and not ln.lower().startswith("auto:"):
+                latest = ln
+                break
+        # 去掉 feat/fix(范围): 这类技术前缀，显示成"出餐单：xxx"这样的大白话
+        import re as _re
+        m = _re.match(r"^(feat|fix|refactor|chore|perf|docs|style|test)\s*(?:\(([^)]*)\))?\s*[:：]\s*(.+)$", latest)
+        if m:
+            latest = ((m.group(2) + "：") if m.group(2) else "") + m.group(3)
+    except Exception:
+        pass
+    return jsonify({"ok": True, "deployed_at": deployed_at, "sha": sha,
+                    "latest_change": latest})
+
+
 # ===== 页面 =====
 @app.route("/")
 def index():

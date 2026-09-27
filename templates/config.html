@@ -294,6 +294,7 @@
       <div id="pkgList"></div>
     </div>
   </div>
+  <div id="verLine" style="text-align:center;color:var(--muted);font-size:11px;padding:12px 0 22px"></div>
 </div>
 <script src="/static/app.js"></script>
 <script>
@@ -930,8 +931,26 @@ function showRefreshToast(){
 
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 
-// 首屏：加载总览
+// 部署版本（用来确认线上是不是已经更新到最新代码）
+function loadVersion(){
+  fetch('/api/version').then(r=>r.json()).then(d=>{
+    if(!d || !d.ok) return;
+    const el = document.getElementById('verLine');
+    if(el){
+      let s = '📦 库存管理 · 本版本部署于 ' + (d.deployed_at||'?');
+      if(d.latest_change){
+        let t = d.latest_change;
+        if(t.length > 34) t = t.slice(0, 34) + '…';
+        s += ' · 含：' + t;
+      }
+      el.textContent = s;
+    }
+  }).catch(function(){});
+}
+
+// 首屏：加载总览 + 版本
 loadOverview();
+loadVersion();
 </script>
 </body>
 </html>
