@@ -60,7 +60,7 @@
       <label style="grid-column:1/-1">📍 地址<input type="text" id="edAddr"></label>
     </div>
     <div class="edit-hint" id="calcHint" style="margin-top:8px;font-size:13px;font-weight:600;color:#8a5a2b"></div>
-    <div style="margin:12px 0 6px;font-weight:700;font-size:13px">🍱 套餐明细（份数可改，🗑 可删）</div>
+    <div style="margin:12px 0 6px;font-weight:700;font-size:13px">🍱 套餐明细（份数、本单单价可改，🗑 可删）</div>
     <div id="pkgRows"></div>
     <button type="button" class="btn btn-sm" onclick="addPkgRow()" style="margin-top:4px;border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 12px;border-radius:8px">＋ 增加套餐</button>
     <div class="edit-hint">小票上的"合计"用的是这里的💰金额；菜品/套餐明细改这里就会同步到备餐表。</div>
@@ -208,26 +208,45 @@ function toggleEdit(show){
   if(willShow) loadPkgs(fillEdit);
 }
 
-function pkgRowHtml(pid, qty){
+function pkgRowHtml(pid, qty, price, std){
+  const cur = ALL_PKGS.filter(p=>String(p.id)===String(pid))[0];
+  const base = (std!==undefined && std!==null) ? std : (cur ? cur.price : '');
   const opts = ALL_PKGS.map(p=>'<option value="'+p.id+'"'+(String(p.id)===String(pid)?' selected':'')+'>'+p.name+'（¥'+p.price+'）</option>').join('');
-  return '<div class="pkg-row"><select onchange="recalcFromDiscount()">'+opts+'</select>'+
+  const pv = (price!==undefined && price!==null && price!=='') ? price : '';
+  return '<div class="pkg-row" data-std="'+base+'"><select onchange="pkgRowPkgChange(this)">'+opts+'</select>'+
     '<input type="number" min="1" value="'+(qty||1)+'" title="份数" oninput="recalcFromDiscount()">'+
+    '<input type="number" min="0" step="0.01" class="pkg-price" value="'+pv+'" placeholder="单价'+base+'" title="本单该套餐单价（留空=用标准价）" oninput="recalcFromDiscount()">'+
     '<button type="button" class="btn btn-sm" onclick="this.closest(\'.pkg-row\').remove();recalcFromDiscount()" style="border:1px solid var(--border);background:#fff;cursor:pointer;padding:6px 10px;border-radius:8px">🗑</button></div>';
 }
 
-function addPkgRow(pid, qty){
-  document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(pid, qty));
+// 换套餐时，单价留空的话跟着换成新套餐的标准价（提示值）
+function pkgRowPkgChange(sel){
+  const row = sel.closest('.pkg-row');
+  const cur = ALL_PKGS.filter(p=>String(p.id)===String(sel.value))[0];
+  const base = cur ? cur.price : '';
+  row.dataset.std = base;
+  row.querySelector('.pkg-price').placeholder = '单价' + base;
   recalcFromDiscount();
 }
 
-// 套餐标价合计（按当前行实时算）
+function addPkgRow(pid, qty, price, std){
+  document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(pid, qty, price, std));
+  recalcFromDiscount();
+}
+
+// 套餐合计（按当前行实时算：行内填了单价就用行内，否则用套餐标准价）
 function pkgSubtotal(){
   let sum = 0;
   Array.prototype.forEach.call(document.querySelectorAll('#pkgRows .pkg-row'), function(r){
     const pid = r.querySelector('select').value;
-    const q = parseInt(r.querySelector('input').value) || 0;
-    const p = ALL_PKGS.filter(function(x){ return String(x.id) === String(pid); })[0];
-    if(p) sum += (parseFloat(p.price) || 0) * q;
+    const q = parseInt(r.querySelector('input[type=number]').value) || 0;
+    const priceEl = r.querySelector('.pkg-price');
+    let price = parseFloat(priceEl && priceEl.value);
+    if(isNaN(price)){
+      const p = ALL_PKGS.filter(function(x){ return String(x.id) === String(pid); })[0];
+      price = p ? (parseFloat(p.price) || 0) : 0;
+    }
+    sum += price * q;
   });
   return Math.round(sum * 100) / 100;
 }
@@ -268,7 +287,8 @@ function fillEdit(){
   const box = document.getElementById('pkgRows');
   box.innerHTML = '';
   (o.packages||[]).forEach(p=>{
-    document.getElementById('pkgRows').insertAdjacentHTML('beforeend', pkgRowHtml(p.package_id, p.quantity));
+    document.getElementById('pkgRows').insertAdjacentHTML('beforeend',
+      pkgRowHtml(p.package_id, p.quantity, p.price, p.std_price));
   });
   document.getElementById('editMsg').textContent = '';
   updateCalcHint();
@@ -277,7 +297,12 @@ function fillEdit(){
 function saveEdit(){
   if(!curOrder) return;
   const pkgs = Array.prototype.map.call(document.querySelectorAll('#pkgRows .pkg-row'), function(r){
-    return {package_id: r.querySelector('select').value, quantity: r.querySelector('input').value};
+    const priceEl = r.querySelector('.pkg-price');
+    return {
+      package_id: r.querySelector('select').value,
+      quantity: r.querySelector('input[type=number]').value,
+      price: (priceEl && priceEl.value !== '') ? priceEl.value : null   // 留空=用套餐标准价
+    };
   }).filter(function(x){ return x.package_id; });
   const body = {
     booking_date: document.getElementById('edDate').value,

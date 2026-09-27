@@ -200,10 +200,15 @@ def init_db():
                 package_id INTEGER NOT NULL,
                 people INTEGER NOT NULL,          -- 实际人数（取max）
                 quantity INTEGER NOT NULL DEFAULT 1, -- 份数
+                price REAL,                       -- 本单该套餐单价（可改；NULL=用套餐标准价）
                 FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
                 FOREIGN KEY (package_id) REFERENCES packages(id)
             )
         """)
+        # 迁移：老库补 price 字段（每单可单独改套餐单价）
+        _opc = [r[1] for r in cur.execute("PRAGMA table_info(order_packages)").fetchall()]
+        if "price" not in _opc:
+            cur.execute("ALTER TABLE order_packages ADD COLUMN price REAL")
 
         # 订单→单点明细
         cur.execute("""

@@ -254,7 +254,7 @@ def order_ticket(oid):
         return "订单不存在", 404
     o = dict(r)
     cur.execute("""
-        SELECT op.quantity, op.people, p.name as pkg_name, p.price
+        SELECT op.quantity, op.people, op.price as op_price, p.name as pkg_name, p.price
         FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
         WHERE op.order_id = ?
         ORDER BY op.id
@@ -266,9 +266,6 @@ def order_ticket(oid):
 
     shop = "刘和牛户外烤肉"
     no = "#%d" % oid
-    time_str = (o.get("pickup_time") or o.get("meal_time") or
-                ((o.get("booking_date") or "") + " " + (o.get("booking_time") or "")).strip() or
-                "时间待定")
     contact = (o.get("contact_name") or "").strip()
     phone = (o.get("contact_phone") or "").strip()
     customer = (contact + (" " + phone if phone else "")).strip() or "—"
@@ -280,7 +277,9 @@ def order_ticket(oid):
     data_items = []
     for p in pkgs:
         qty = int(p.get("quantity") or 1)
-        price = float(p.get("price") or 0)
+        # 本单单价优先（op.price），没改过就用套餐标准价
+        op_price = p.get("op_price")
+        price = float(op_price) if op_price is not None else float(p.get("price") or 0)
         line = round(price * qty, 2)
         calc_total += line
         price_str = ("¥%.2f" % line) if price > 0 else "—"
@@ -298,6 +297,14 @@ def order_ticket(oid):
         total_str = "—"
     deposit = float(o.get("deposit") or 0)
 
+    # 日期单独成行，不再与单号挤在一起；收餐时间那类长句子单独放到下面
+    date_str = ("%s %s" % ((o.get("booking_date") or "").strip(),
+                           (o.get("booking_time") or "").strip())).strip() or "待定"
+    meal_str = (o.get("meal_time") or "").strip()
+    if len(meal_str) > 12:
+        meal_str = ""
+    pickup_str = (o.get("pickup_time") or "").strip()
+
     # 优惠/加收：总额与套餐标价之和对不上时，用这一行把账做平
     discount = float(o.get("discount") or 0)
     adj_line = ""
@@ -312,7 +319,7 @@ def order_ticket(oid):
                          '<span></span><span>+¥%.2f</span></div></div>' % abs(discount))
 
     data = {
-        "shop": shop, "no": no, "time": time_str,
+        "shop": shop, "no": no, "date": date_str, "meal": meal_str, "pickup": pickup_str,
         "customer": customer, "address": address,
         "items": data_items, "total": total_str,
         "deposit": ("¥%.2f" % deposit) if deposit > 0 else "",
@@ -332,19 +339,17 @@ def order_ticket(oid):
 * { box-sizing: border-box; }
 body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; font-size:14px; }
 .toolbar { text-align:center; padding:14px 10px 4px; }
-.toolbar button { margin:4px 6px; padding:10px 22px; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; }
+.toolbar button { margin:4px 6px; padding:10px 20px; border:none; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; }
 .b-print { background:#c0392b; color:#fff; }
 .b-png { background:#27ae60; color:#fff; }
 .hint { text-align:center; font-size:12px; color:#8a97a5; padding:2px 10px 8px; }
-#pngBox { text-align:center; padding:6px 0 20px; }
-#pngBox img { width:100%; max-width:260px; border:1px solid #d4dae3; border-radius:6px; background:#fff; }
-#pngHint { display:none; text-align:center; color:#27ae60; font-size:13px; font-weight:600; padding:4px 0 12px; }
 .wrap { display:flex; justify-content:center; padding:10px 8px 30px; }
 .receipt { width:58mm; background:#fff; color:#000; padding:2mm 3mm; font-family:"Courier New","PingFang SC",monospace; font-size:12px; line-height:1.45; }
 .receipt .c { text-align:center; }
 .receipt .shop { font-size:15px; font-weight:bold; letter-spacing:1px; }
 .receipt .title { font-size:13px; border-top:1px dashed #000; border-bottom:1px dashed #000; padding:3px 0; margin:4px 0; text-align:center; letter-spacing:2px; }
-.receipt .meta { display:flex; justify-content:space-between; font-size:11px; }
+/* 信息行各自独占一行，长内容自动换行 —— 修掉"单号与日期数字挤在一起/重合" */
+.receipt .meta { font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
 .receipt .sep { border-top:1px dashed #000; margin:4px 0; }
 .receipt .item { margin:2px 0; }
 .receipt .item .nm { word-break:break-all; }
@@ -353,9 +358,18 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 .receipt .grand { font-size:14px; font-weight:bold; display:flex; justify-content:space-between; }
 .receipt .ft { text-align:center; font-size:10.5px; margin-top:6px; color:#333; }
 .receipt .barcode { text-align:center; font-family:"Courier New",monospace; font-size:10px; letter-spacing:1px; margin-top:2px; }
+/* 图片视图：生成后直接显示大图，长按/右键即可另存 */
+#imgView { display:none; text-align:center; padding:10px 10px 34px; }
+#imgView .ok { color:#27ae60; font-weight:700; font-size:15px; padding:4px 0 2px; }
+#imgView .sub { color:#8a97a5; font-size:12px; padding-bottom:10px; }
+#imgView img { width:100%; max-width:340px; border:1px solid #d4dae3; border-radius:8px; background:#fff; }
+#imgView .acts { margin-top:14px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
+#imgView a.b-dl, #imgView button.b-back { display:inline-block; padding:11px 20px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; border:none; text-decoration:none; }
+#imgView a.b-dl { background:#27ae60; color:#fff; }
+#imgView button.b-back { background:#f0f2f5; color:#1f2329; }
 @media print {
   body { background:#fff; }
-  .toolbar, .hint, #pngBox, #pngHint { display:none !important; }
+  .toolbar, .hint, #imgView { display:none !important; }
   .wrap { padding:0; }
   @page { size: 58mm auto; margin: 2mm; }
 }
@@ -364,41 +378,52 @@ body { margin:0; background:#eef1f5; color:#1f2329; font-family:-apple-system,"P
 <body>
 <div class="toolbar">
   <button class="b-print" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
-  <button class="b-png" onclick="exportPNG()">📷 导出图片</button>
+  <button class="b-png" onclick="exportPNG()">🖼️ 存为图片</button>
   <button class="b-edit" onclick="location.href='/orders/__OID__'" style="background:#f0f2f5;color:#1f2329">✏️ 编辑本单</button>
 </div>
-<div class="hint">手机端：点「导出图片」后在下方长按图片即可保存/转发</div>
-<div id="pngHint">✅ 图片已生成，长按下方图片可保存或转发</div>
-<div id="pngBox"></div>
-<div class="wrap">
+<div class="hint" id="listHint">点「🖼️ 存为图片」→ 长按图片保存（手机）/ 右键另存为（电脑）</div>
+<div class="wrap" id="rcptWrap">
 <div class="receipt" id="rcpt">
 <div class="c shop">__SHOP__</div>
 <div class="c" style="font-size:11px">出 餐 明 细 单</div>
 <div class="title">*** 出餐明细单 ***</div>
-<div class="meta"><span>单号：__NO__</span><span>__TIME__</span></div>
+<div class="meta">单号：__NO__</div>
+<div class="meta">日期：__DATE__</div>
 __META_EXTRA__
 __ITEMS__
 <div class="sep"></div>
 __ADJ_LINE__
 <div class="grand"><span>合计</span><span>__TOTAL__</span></div>
 __DEPOSIT_LINE__
+__EXTRA_LINE__
 __NOTE_LINE__
 <div class="ft">谢谢惠顾 · 请按小票核对菜品<br>祝您用餐愉快！</div>
 <div class="barcode">__NO__</div>
 </div>
 </div>
+<div id="imgView">
+  <div class="ok">✅ 图片已生成</div>
+  <div class="sub">长按图片 → 存储到照片（手机）　　右键 → 另存为（电脑）</div>
+  <img id="ticketImg" alt="出餐单图片">
+  <div class="acts">
+    <a id="dlLink" class="b-dl" download="ticket.png">⬇️ 保存图片</a>
+    <button class="b-back" onclick="backToReceipt()">↩︎ 返回小票</button>
+  </div>
+</div>
 <script>
 var DATA = __DATA__;
 function drawTicket(){
   var S = 2, W = 219;
-  var lh = { c:18, title:22, sep:10, meta:16, grp:18, item:16, grand:20, note:16, ft:26, bar:16 };
+  var lh = { c:18, title:22, sep:10, meta:15, item:16, grand:20, note:15, ft:26, bar:16 };
   var L = [];
   L.push({t:'c', bold:true, size:15, text:DATA.shop});
   L.push({t:'c', size:11, text:'出 餐 明 细 单'});
   L.push({t:'title', text:'*** 出餐明细单 ***'});
-  L.push({t:'meta', l:'单号：'+DATA.no, r:DATA.time});
-  if (DATA.customer && DATA.customer !== '—') L.push({t:'meta', l:'客户：'+DATA.customer, r:''});
-  if (DATA.address) L.push({t:'meta', l:'地址：'+DATA.address, r:''});
+  L.push({t:'meta', l:'单号：'+DATA.no});
+  L.push({t:'meta', l:'日期：'+(DATA.date||'待定')});
+  if (DATA.meal) L.push({t:'meta', l:'用餐：'+DATA.meal});
+  if (DATA.customer && DATA.customer !== '—') L.push({t:'meta', l:'客户：'+DATA.customer});
+  if (DATA.address) L.push({t:'meta', l:'地址：'+DATA.address});
   L.push({t:'sep'});
   DATA.items.forEach(function(it){ L.push({t:'item', n:it.n, q:'x'+it.q, p:it.ps}); });
   L.push({t:'sep'});
@@ -407,47 +432,101 @@ function drawTicket(){
     L.push({t:'item', n:(DATA.discount_num > 0 ? '优惠' : '加收'), q:'', p:DATA.discount_str});
   }
   L.push({t:'grand', l:'合计', r:DATA.total});
-  if (DATA.deposit) L.push({t:'meta', l:'押金 '+DATA.deposit+'（离场退还）', r:''});
+  if (DATA.deposit) L.push({t:'meta', l:'押金 '+DATA.deposit+'（离场退还）'});
+  if (DATA.pickup) L.push({t:'meta', l:'收餐：'+DATA.pickup});
   if (DATA.note) { L.push({t:'sep'}); L.push({t:'note', text:'备注：'+DATA.note}); }
   L.push({t:'ft', text:'谢谢惠顾 · 请按小票核对菜品\\n祝您用餐愉快！'});
   L.push({t:'bar', text:DATA.no});
-  var H = 10; L.forEach(function(l){ H += (lh[l.t] || 16); });
-  var cv = document.createElement('canvas'); cv.width = W*S; cv.height = H*S;
+
+  // 先画在足够高的画布上，最后按实际高度裁剪（避免文字换行导致高度算不准）
+  var BIG = 3000;
+  var cv = document.createElement('canvas');
+  cv.width = W*S; cv.height = BIG*S;
   var ctx = cv.getContext('2d'); ctx.scale(S,S);
-  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H); ctx.fillStyle = '#000'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,BIG); ctx.fillStyle='#000'; ctx.textBaseline='top';
+  var FONT = '"PingFang SC","Microsoft YaHei",monospace';
   var y = 8;
   function dash(x1,y1,x2,y2){ ctx.save(); ctx.setLineDash([3,2]); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.restore(); }
+  // 按可用宽度折行，避免长文本（地址/备注/收餐说明）超出票面
+  function wrap(text, maxW, font){
+    ctx.font = font;
+    var out = [], cur = '';
+    var chars = String(text).split('');
+    for (var i=0;i<chars.length;i++){
+      var t = cur + chars[i];
+      if (ctx.measureText(t).width > maxW && cur){ out.push(cur); cur = chars[i]; }
+      else cur = t;
+    }
+    if (cur) out.push(cur);
+    return out.length ? out : [''];
+  }
   L.forEach(function(l){
-    if (l.t==='c'){ ctx.textAlign='center'; ctx.font=(l.bold?'bold ':'')+(l.size||12)+'px "PingFang SC","Microsoft YaHei",monospace'; ctx.fillText(l.text, W/2, y); y += lh.c; }
-    else if (l.t==='title'){ ctx.textAlign='center'; ctx.font='bold 13px "PingFang SC","Microsoft YaHei",monospace'; dash(4,y,W-4,y); y+=5; ctx.fillText(l.text, W/2, y); y += lh.title; }
+    if (l.t==='c'){ ctx.textAlign='center'; ctx.font=(l.bold?'bold ':'')+(l.size||12)+'px '+FONT; ctx.fillText(l.text, W/2, y); y += lh.c; }
+    else if (l.t==='title'){ ctx.textAlign='center'; ctx.font='bold 13px '+FONT; dash(4,y,W-4,y); y+=5; ctx.fillText(l.text, W/2, y); y += lh.title; }
     else if (l.t==='sep'){ dash(4,y,W-4,y); y += lh.sep; }
-    else if (l.t==='meta'){ ctx.textAlign='left'; ctx.font='11px "PingFang SC","Microsoft YaHei",monospace'; ctx.fillText(l.l,4,y); ctx.textAlign='right'; ctx.fillText(l.r||'',W-4,y); ctx.textAlign='left'; y += lh.meta; }
-    else if (l.t==='item'){ ctx.textAlign='left'; ctx.font='12px "PingFang SC","Microsoft YaHei",monospace'; ctx.fillText(l.n,4,y); ctx.textAlign='right'; ctx.fillText(l.q+'   '+l.p, W-4, y); ctx.textAlign='left'; y += lh.item; }
-    else if (l.t==='grand'){ ctx.textAlign='left'; ctx.font='bold 14px "PingFang SC","Microsoft YaHei",monospace'; ctx.fillText(l.l,4,y); ctx.textAlign='right'; ctx.fillText(l.r,W-4,y); ctx.textAlign='left'; y += lh.grand; }
-    else if (l.t==='note'){ ctx.textAlign='left'; ctx.font='12px "PingFang SC","Microsoft YaHei",monospace'; ctx.fillText(l.text,4,y); y += lh.note; }
-    else if (l.t==='ft'){ ctx.textAlign='center'; ctx.font='10.5px "PingFang SC","Microsoft YaHei",monospace'; l.text.split('\\n').forEach(function(s){ ctx.fillText(s, W/2, y); y += 13; }); }
+    else if (l.t==='meta'){ ctx.textAlign='left'; ctx.font='11px '+FONT; wrap(l.l, W-8, '11px '+FONT).forEach(function(s){ ctx.fillText(s,4,y); y += lh.meta; }); }
+    else if (l.t==='item'){
+      ctx.font='12px '+FONT;
+      var right = (l.q ? (l.q+'   ') : '') + (l.p||'');
+      var rw = ctx.measureText(right).width;
+      var nm = String(l.n||'');
+      if (ctx.measureText(nm).width > (W-8-rw-8)){
+        while (nm.length > 1 && ctx.measureText(nm+'…').width > (W-8-rw-8)) nm = nm.slice(0,-1);
+        nm += '…';
+      }
+      ctx.textAlign='left'; ctx.fillText(nm,4,y);
+      ctx.textAlign='right'; ctx.fillText(right, W-4, y); ctx.textAlign='left';
+      y += lh.item;
+    }
+    else if (l.t==='grand'){ ctx.textAlign='left'; ctx.font='bold 14px '+FONT; ctx.fillText(l.l,4,y); ctx.textAlign='right'; ctx.fillText(l.r,W-4,y); ctx.textAlign='left'; y += lh.grand; }
+    else if (l.t==='note'){ ctx.textAlign='left'; wrap(l.text, W-8, '12px '+FONT).forEach(function(s){ ctx.fillText(s,4,y); y += lh.note; }); }
+    else if (l.t==='ft'){ ctx.textAlign='center'; ctx.font='10.5px '+FONT; l.text.split('\\n').forEach(function(s){ ctx.fillText(s, W/2, y); y += 13; }); }
     else if (l.t==='bar'){ ctx.textAlign='center'; ctx.font='10px "Courier New",monospace'; ctx.fillText(l.text, W/2, y); y += lh.bar; }
   });
-  return cv;
+  var H = Math.max(20, y + 8);
+  var out = document.createElement('canvas');
+  out.width = W*S; out.height = Math.round(H*S);
+  var octx = out.getContext('2d');
+  octx.fillStyle = '#fff'; octx.fillRect(0,0,out.width,out.height);
+  octx.drawImage(cv, 0, 0, out.width, out.height, 0, 0, out.width, out.height);
+  return out;
 }
 function exportPNG(){
   var url = drawTicket().toDataURL('image/png');
-  document.getElementById('pngBox').innerHTML = '<img src="'+url+'" alt="出餐单图片">';
-  document.getElementById('pngHint').style.display = 'block';
-  try { var a = document.createElement('a'); a.href = url; a.download = '出餐单_'+DATA.no.replace('#','')+'.png'; document.body.appendChild(a); a.click(); a.remove(); } catch(e) {}
+  document.getElementById('ticketImg').src = url;
+  var a = document.getElementById('dlLink');
+  a.href = url;
+  a.download = '出餐单_' + DATA.no.replace('#','') + '.png';
+  document.getElementById('rcptWrap').style.display = 'none';
+  document.getElementById('listHint').style.display = 'none';
+  document.getElementById('imgView').style.display = 'block';
+  window.scrollTo(0,0);
+}
+function backToReceipt(){
+  document.getElementById('imgView').style.display = 'none';
+  document.getElementById('rcptWrap').style.display = 'flex';
+  document.getElementById('listHint').style.display = 'block';
+  window.scrollTo(0,0);
 }
 </script>
 </body>
 </html>"""
 
     meta_extra = ""
+    if meal_str:
+        meta_extra += '<div class="meta">用餐：%s</div>' % esc(meal_str)
     if customer != "—":
-        meta_extra += '<div class="meta"><span>客户：%s</span></div>' % esc(customer)
+        meta_extra += '<div class="meta">客户：%s</div>' % esc(customer)
     if address:
-        meta_extra += '<div class="meta"><span>地址：%s</span></div>' % esc(address)
+        meta_extra += '<div class="meta">地址：%s</div>' % esc(address)
     deposit_line = ""
     if deposit > 0:
-        deposit_line = '<div class="meta" style="margin-top:2px"><span>押金 ¥%.2f（离场退还）</span></div>' % deposit
+        deposit_line = '<div class="meta" style="margin-top:2px">押金 ¥%.2f（离场退还）</div>' % deposit
+    # 收餐时间那栏常被填成整句话（如"22点后加收每小时50元夜间服务费"），
+    # 单独占一行自动换行，不再和"单号/日期"挤在一起
+    extra_line = ""
+    if pickup_str:
+        extra_line = '<div class="meta">收餐：%s</div>' % esc(pickup_str)
     note_line = ""
     if note:
         note_line = '<div class="sep"></div><div class="item">备注：%s</div>' % esc(note)
@@ -456,12 +535,13 @@ function exportPNG(){
             .replace("__SHOP__", esc(shop))
             .replace("__NO__", esc(no))
             .replace("__OID__", str(oid))
-            .replace("__TIME__", esc(time_str))
+            .replace("__DATE__", esc(date_str))
             .replace("__META_EXTRA__", meta_extra)
             .replace("__ITEMS__", item_rows)
             .replace("__ADJ_LINE__", adj_line)
             .replace("__TOTAL__", esc(total_str))
             .replace("__DEPOSIT_LINE__", deposit_line)
+            .replace("__EXTRA_LINE__", extra_line)
             .replace("__NOTE_LINE__", note_line)
             .replace("__DATA__", _json.dumps(data, ensure_ascii=False)))
     return html
@@ -479,7 +559,7 @@ def order_detail(oid):
     o = dict(r)
     # 套餐
     cur.execute("""
-        SELECT op.*, p.name as pkg_name, p.min_people, p.max_people
+        SELECT op.*, p.name as pkg_name, p.min_people, p.max_people, p.price as std_price
         FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
         WHERE op.order_id = ?
     """, (oid,))
@@ -765,11 +845,20 @@ def edit_order(oid):
             people = p.get("people")
             if people in (None, ""):
                 people = pk["max_people"]
-            rows.append((pid, int(people or 0), qty))
+            # 本单该套餐单价（可空 = 用套餐标准价）
+            price = p.get("price")
+            if price in (None, ""):
+                price = None
+            else:
+                try:
+                    price = float(price)
+                except (TypeError, ValueError):
+                    price = None
+            rows.append((pid, int(people or 0), qty, price))
         cur.execute("DELETE FROM order_packages WHERE order_id=?", (oid,))
-        for pid, people, qty in rows:
-            cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity) "
-                        "VALUES (?,?,?,?)", (oid, pid, people, qty))
+        for pid, people, qty, price in rows:
+            cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity, price) "
+                        "VALUES (?,?,?,?,?)", (oid, pid, people, qty, price))
 
     db.commit()
     return jsonify({"ok": True, "msg": "已保存"})
