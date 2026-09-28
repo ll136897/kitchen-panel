@@ -257,6 +257,23 @@ def init_db():
             )
         """)
 
+        # 订单成本项（利润计算用）：只存"手工改过/额外加"的项，没存的按配置自动算
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS order_costs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,               -- outsource/fuel/labor/consume/other
+                name TEXT,                        -- other 自定义项显示名
+                qty REAL,                         -- 数量（外包单数等）
+                unit_price REAL,                  -- 单价
+                amount REAL NOT NULL DEFAULT 0,   -- 金额
+                note TEXT,
+                updated_at TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_order_costs_oid ON order_costs(order_id)")
+
         # 备餐勾选清单（后厨在线打勾用）
         cur.execute("""
             CREATE TABLE IF NOT EXISTS prep_checklist (

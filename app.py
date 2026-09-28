@@ -2354,6 +2354,95 @@ def finance_order_cost_detail(oid):
     return jsonify({"ok": True, "data": items})
 
 
+# ===== 成本与利润（"这一单赚多少"）=====
+@app.route("/api/cost/config", methods=["GET", "POST"])
+def cost_config():
+    """成本与利润配置：场地单价表、每单默认油费/人工/耗材、固定开销、毛利率警戒线"""
+    from profit import get_config, save_config
+    db = g.db
+    if request.method == "GET":
+        return jsonify({"ok": True, "data": get_config(db)})
+    data = request.get_json(force=True) or {}
+    cfg = save_config(db, data)
+    return jsonify({"ok": True, "data": cfg})
+
+
+@app.route("/api/finance/order/<int:oid>/profit")
+def order_profit_api(oid):
+    """单笔订单利润：收入、成本项明细（食材/搭建回收/油费/人工/耗材/其他）、现金利润、净利、毛利率"""
+    from profit import order_profit
+    p = order_profit(g.db, oid)
+    if not p:
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    return jsonify({"ok": True, "data": p})
+
+
+@app.route("/api/finance/order/<int:oid>/cost", methods=["POST"])
+def set_order_cost(oid):
+    """手工设定某单的成本项（覆盖自动值）；kind=other 时新增一条额外开销。
+    传 id 则改已有的其他项。"""
+    from profit import order_profit
+    data = request.get_json(force=True) or {}
+    db = g.db
+    cur = db.cursor()
+    if not cur.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    kind = (data.get("kind") or "").strip()
+    allowed = ("outsource", "fuel", "labor", "consume", "other")
+    if kind not in allowed:
+        return jsonify({"ok": False, "msg": "成本项不合法"}), 400
+    amount = round(float(data.get("amount") or 0), 2)
+    note = (data.get("note") or "").strip() or None
+    rid = data.get("id")
+    if kind == "other":
+        name = (data.get("name") or "").strip() or "其他开销"
+        if rid:
+            cur.execute("UPDATE order_costs SET name=?,amount=?,note=?,"
+                        "updated_at=datetime('now','localtime') WHERE id=? AND order_id=?",
+                        (name, amount, note, rid, oid))
+        else:
+            cur.execute("INSERT INTO order_costs (order_id,kind,name,amount,note) VALUES (?,?,?,?,?)",
+                        (oid, kind, name, amount, note))
+    else:
+        qty = data.get("qty")
+        up = data.get("unit_price")
+        if kind == "outsource" and (qty is not None or up is not None):
+            qty = float(qty) if qty not in (None, "") else None
+            up = float(up) if up not in (None, "") else None
+        else:
+            qty = up = None
+        cur.execute("DELETE FROM order_costs WHERE order_id=? AND kind=?", (oid, kind))
+        cur.execute("INSERT INTO order_costs (order_id,kind,qty,unit_price,amount,note) VALUES (?,?,?,?,?,?)",
+                    (oid, kind, qty, up, amount, note))
+    db.commit()
+    return jsonify({"ok": True, "data": order_profit(db, oid)})
+
+
+@app.route("/api/finance/order/<int:oid>/cost/clear", methods=["POST"])
+def clear_order_cost(oid):
+    """清除手工设定，回到自动算的值（kind=other 需带 id 指定哪一条）"""
+    from profit import order_profit
+    data = request.get_json(force=True) or {}
+    db = g.db
+    kind = (data.get("kind") or "").strip()
+    if kind == "other" and data.get("id"):
+        db.execute("DELETE FROM order_costs WHERE id=? AND order_id=?", (data["id"], oid))
+    elif kind:
+        db.execute("DELETE FROM order_costs WHERE order_id=? AND kind=?", (oid, kind))
+    else:
+        return jsonify({"ok": False, "msg": "缺少成本项"}), 400
+    db.commit()
+    return jsonify({"ok": True, "data": order_profit(db, oid)})
+
+
+@app.route("/api/finance/profit-overview")
+def finance_profit_overview():
+    """期间利润汇总：现金利润 + 含固定开销摊销的净利，含每单利润与标红"""
+    from profit import period_overview
+    ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"))
+    return jsonify({"ok": True, "data": ov})
+
+
 @app.route("/api/finance/payment/<int:oid>", methods=["POST"])
 def update_payment(oid):
     """更新订单货款状态"""
