@@ -245,6 +245,41 @@
     /* 手机端：说明文字一律藏起来，只留颜色和数字；页面副标题也收掉，把屏幕留给清单 */
     .ka-stat{display:none}
     .prep-sub{display:none}
+    .ord-hint{display:none}
+  }
+  /* 订单行：点一下看"这一单具体要备什么菜" */
+  .orow{cursor:pointer}
+  .orow::after{content:'›';color:var(--muted);font-weight:700;margin-left:auto;font-size:16px;line-height:1}
+  .ord-hint{font-size:12px;color:var(--muted);margin:-4px 0 8px}
+  /* 这一单的菜（手机=底部抽屉，电脑=居中弹窗） */
+  .os-mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60}
+  .os-mask.on{display:block}
+  .os-sheet{display:none;position:fixed;left:0;right:0;bottom:0;z-index:61;background:#fff;
+    border-radius:16px 16px 0 0;max-height:84vh;flex-direction:column;
+    box-shadow:0 -6px 24px rgba(0,0,0,.18)}
+  .os-sheet.on{display:flex}
+  .os-head{display:flex;align-items:center;gap:10px;padding:12px 14px 10px;border-bottom:1px solid var(--border)}
+  .os-title{font-weight:700;font-size:15px;flex:1;min-width:0;line-height:1.4}
+  .os-close{border:none;background:#f1f1f1;border-radius:50%;width:30px;height:30px;
+    font-size:14px;line-height:1;cursor:pointer;flex:0 0 auto}
+  .os-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 14px 12px;flex:1}
+  .os-foot{display:flex;gap:10px;padding:10px 14px calc(12px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--border)}
+  .os-btn{flex:1;padding:11px;border-radius:10px;font-weight:700;font-size:14px;
+    border:1px solid var(--border);cursor:pointer}
+  .os-btn.primary{background:#27ae60;color:#fff;border-color:#27ae60}
+  .os-btn.ghost{background:#fff}
+  .os-sum{font-size:13px;color:var(--muted);line-height:1.7}
+  .os-pack{font-size:14px;font-weight:700;margin:6px 0 4px}
+  .os-note{font-size:13px;color:#8a4b00;background:#fff8ec;border-radius:8px;padding:6px 9px;margin:6px 0}
+  .os-cat{font-size:13px;font-weight:700;margin:12px 0 2px;padding-bottom:3px;border-bottom:1px solid var(--border)}
+  .os-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:14px;border-bottom:1px dashed #eee}
+  .os-row .nm{min-width:0;word-break:break-all}
+  .os-row .qt{color:#c0392b;font-weight:700;white-space:nowrap}
+  .os-row .short{color:#b3261e;font-size:12px}
+  @media(min-width:601px){
+    .os-sheet{left:50%;right:auto;transform:translateX(-50%);width:560px;bottom:auto;top:8vh;
+      border-radius:14px;max-height:80vh}
   }
 </style>
 </head>
@@ -266,7 +301,7 @@
       <div class="sub prep-sub">当天多订单食材汇总给后厨 · 工具装备给装配师傅 · 餐具逐项核对</div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <input type="date" id="datePick" class="date-picker">
+      <input type="date" id="datePick" class="date-picker" onchange="onDatePicked()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
       <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印 / 导出</button>
       <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。
@@ -301,6 +336,7 @@
   <!-- 今日订单概览 -->
   <div class="card" id="ordersCard">
     <h3 id="ordersTitle"><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
+    <div class="ord-hint">点任意一行 → 看这一单具体要备什么菜</div>
     <div id="ordersList"></div>
   </div>
 
@@ -315,6 +351,20 @@
 
   <!-- 按订单视图 -->
   <div id="orderView" style="display:none"></div>
+
+  <!-- 这一单具体要备什么菜（点订单行弹出；手机=底部抽屉，电脑=居中弹窗） -->
+  <div class="os-mask" id="osMask" onclick="closeOrderSheet()"></div>
+  <div class="os-sheet" id="osSheet" role="dialog" aria-modal="true" aria-labelledby="osTitle">
+    <div class="os-head">
+      <div class="os-title" id="osTitle">订单</div>
+      <button class="os-close" onclick="closeOrderSheet()" aria-label="关闭">✕</button>
+    </div>
+    <div class="os-body" id="osBody"></div>
+    <div class="os-foot">
+      <button class="os-btn ghost" onclick="osOpenOrderPage()">📄 订单详情</button>
+      <button class="os-btn primary" onclick="osOpenTicket()">🖨 出餐单</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -352,13 +402,27 @@ const WEEKDAYS = ['周日','周一','周二','周三','周四','周五','周六'
 function weekdayOf(s){ return WEEKDAYS[new Date(s+'T00:00:00Z').getUTCDay()]; }
 function mdOf(s){ const p=s.split('-'); return `${parseInt(p[1],10)}.${parseInt(p[2],10)}`; }
 function dayDiff(a,b){ return Math.round((new Date(a+'T00:00:00Z')-new Date(b+'T00:00:00Z'))/86400000); }
+// 本地"今天"（注意：不能用 toISOString——那是 UTC，北京的 0-8 点会算成昨天）
+function localToday(){
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+}
 // 出餐时间：订单时间与用餐时间视为同一个，只取一个显示（用餐 > 预约 > 收餐）
 function orderTimeOf(o){ return ((o&&(o.meal_time||o.booking_time||o.pickup_time))||'').trim(); }
 
 // 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
-document.getElementById('datePick').value = new Date().toISOString().slice(0,10);
+document.getElementById('datePick').value = localToday();
+
+// 用户在日期选择器里换了日期 → 必须重新取数（以前这里没接事件，选了日期页面没反应）
+function onDatePicked(){
+  const d = document.getElementById('datePick').value;
+  if(!d) return;
+  if(typeof showToast === 'function') showToast('📅 已切到 ' + mdOf(d));
+  loadPrep();
+}
 
 function switchMode(mode){
+  if(typeof closeOrderSheet === 'function') closeOrderSheet();
   currentMode = mode;
   document.getElementById('tabMerged').classList.toggle('active', mode==='merged');
   document.getElementById('tabOrder').classList.toggle('active', mode==='order');
@@ -531,7 +595,7 @@ function loadPrepDates(autoSwitch){
     prepDates = res.dates || [];
     const todayStr = res.today;
     todayDateStr = todayStr;
-    renderDateChips(todayStr);
+    renderDateChips();
     // 首次进入：始终以今天为默认日期（不自动跳到未来/过去，避免混淆）
     if(autoSwitch !== false){
       document.getElementById('datePick').value = todayStr;
@@ -540,7 +604,10 @@ function loadPrepDates(autoSwitch){
   });
 }
 
-function renderDateChips(todayStr){
+function renderDateChips(){
+  // ⚠️ "今天"必须用后端给的 todayDateStr（=真正的今天），不能把"当前选中的日期"当成今天。
+  // 以前 loadPrep() 把选中日期传进来 → 点任何一天，那条日期就会被标成"📍 今天"。
+  const todayStr = todayDateStr || localToday();
   const box = document.getElementById('dateChips');
   if(!prepDates.length){
     box.innerHTML = '<div class="muted" style="padding:6px;font-size:14px">📅 当前无待备订单</div>';
@@ -590,7 +657,7 @@ function loadPrep(){
     prepData = cached.data;
     prepData.__date = d;
     render();
-    renderDateChips(d);
+    renderDateChips();
     const mins = Math.max(1, Math.round((Date.now() - cached.t) / 60000));
     prepStaleNote('⏳ ' + mins + ' 分钟前的数据，正在取最新…');
   }
@@ -613,8 +680,9 @@ function loadPrep(){
     prepData = d2.data;
     prepData.__date = d;
     prepCacheSave(d, d2.data);
+    osClearCache();     // 数据刷新了 -> "这一单的菜"也重新取，别显示旧的
     render();
-    renderDateChips(d);  // 重新渲染 chips 以更新 active 状态
+    renderDateChips();  // 重新渲染 chips 以更新 active 状态
   });
 }
 
@@ -693,7 +761,7 @@ function render(){
     const addr = o.address || '—';
     const nm = o.contact_name || '—';
     const nt = o.note || '';
-    return `<div class="orow">
+    return `<div class="orow" onclick="openOrderSheet(${o.id})" title="点一下 → 看这一单要备的菜">
       <span class="c-addr">📍 ${addr}</span>
       <span class="c-date">${dateText2}</span>
       <span class="c-time">${t}</span>
@@ -905,6 +973,89 @@ function renderByOrder(){
   });
 }
 
+// ===== 点订单行 → 看"这一单具体要备什么菜" =====
+// 合并视图把多单的食材汇总在一起了；后厨想知道"这一单到底要备哪些菜"时点一下就出来。
+// 数据用"按订单视图"同一个接口 /api/orders/<id>/requirements。
+const _osReqCache = {};
+let _osOid = null;
+function openOrderSheet(oid){
+  const o = ((prepData && prepData.orders) || []).find(x=>x.id===oid);
+  if(!o) return;
+  _osOid = oid;
+  const todayStr = todayDateStr || localToday();
+  const oDate = o.booking_date || '';
+  const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
+  let dLabel = '待定';
+  if(oDate){
+    if(oDiff===0) dLabel = '今天';
+    else if(oDiff===1) dLabel = '明天';
+    else if(oDiff===-1) dLabel = '昨天';
+    else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
+  }
+  const t = orderTimeOf(o);
+  document.getElementById('osTitle').textContent = `📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
+  const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
+  document.getElementById('osBody').innerHTML =
+    `<div class="os-sum">👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}</div>` +
+    `<div class="os-pack">🍱 ${pkgs||'套餐未记录'}</div>` +
+    ((o.note && o.note!=='无') ? `<div class="os-note">📝 ${o.note}</div>` : '') +
+    `<div id="osList">${_osReqCache[oid] ? '' : '<div class="os-sum">明细加载中…</div>'}</div>`;
+  document.getElementById('osMask').classList.add('on');
+  document.getElementById('osSheet').classList.add('on');
+  if(_osReqCache[oid]){ osRenderList(oid); return; }
+  fetch('/api/orders/'+oid+'/requirements').then(r=>r.json()).then(res=>{
+    if(!res || !res.ok){ osErr('⚠️ 明细加载失败（系统可能正在启动），点「🔄 刷新」后重试'); return; }
+    _osReqCache[oid] = res.data || {};
+    if(_osOid === oid) osRenderList(oid);
+  }).catch(()=>{ osErr('⚠️ 明细加载失败（网络异常）'); });
+}
+function osClearCache(){ for(const k in _osReqCache) delete _osReqCache[k]; }
+function osErr(msg){
+  const el = document.getElementById('osList');
+  if(el) el.innerHTML = `<div class="os-sum">${msg}</div>`;
+}
+function osRenderList(oid){
+  const el = document.getElementById('osList');
+  const r = _osReqCache[oid];
+  if(!el || !r) return;
+  const byCat = {};
+  for(const it of (r.ingredients||[])){
+    const c = subcatFor(it.name, it.category||'other');
+    (byCat[c] = byCat[c] || []).push(it);
+  }
+  if((r.tools||[]).length){
+    byCat['tool'] = r.tools.map(it=>({name:it.name, unit:TOOL_UNIT[it.name]||'个',
+      need:it.need, shortage:it.shortage}));
+  }
+  let html = '';
+  for(const cat of CAT_ORDER){
+    const items = byCat[cat];
+    if(!items || !items.length) continue;
+    items.sort((a,b)=>{
+      const ia = getFixedIdx(a.name, cat), ib = getFixedIdx(b.name, cat);
+      if(ia !== ib) return ia - ib;
+      return (b.need||0) - (a.need||0);
+    });
+    html += `<div class="os-cat">${CAT_LABEL[cat]||cat}</div>` + items.map(it=>{
+      const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
+      const sw = it.swapped_in ? ' <span style="color:#c0392b;font-weight:700">🔄换</span>' : '';
+      return `<div class="os-row"><span class="nm">${it.name}${sw}</span>` +
+             `<span class="qt">${round(it.need)}${it.unit||''}${short}</span></div>`;
+    }).join('');
+  }
+  el.innerHTML = html || '<div class="os-sum">这一单没有食材明细</div>';
+}
+function closeOrderSheet(){
+  document.getElementById('osMask').classList.remove('on');
+  document.getElementById('osSheet').classList.remove('on');
+  _osOid = null;
+}
+function osOpenTicket(){ if(_osOid) window.open('/orders/'+_osOid+'/ticket','_blank'); }
+function osOpenOrderPage(){ if(_osOid) window.open('/orders/'+_osOid,'_blank'); }
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeOrderSheet();
+});
+
 // 简单子分类（按订单视图用，按名字细分）
 function subcatFor(name, cat){
   const n = name || '';
@@ -1004,7 +1155,7 @@ function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,'')
 // 后厨也能立刻看到上次的备餐清单，不至于对着空白页干等。
 function showCachedFirst(){
   try{
-    const d = document.getElementById('datePick').value || new Date().toISOString().slice(0,10);
+    const d = document.getElementById('datePick').value || localToday();
     const c = prepCacheGet(d);
     if(!c) return;
     prepData = c.data;
