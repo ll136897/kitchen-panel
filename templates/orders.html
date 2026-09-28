@@ -19,10 +19,20 @@
   .order-card.anchor{border-left:4px solid var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.12)}
   .anchor-flag{display:inline-block;background:var(--primary);color:#fff;font-size:11px;font-weight:700;
     padding:1px 8px;border-radius:8px;margin-left:8px;vertical-align:middle}
+  /* 批量选择 */
+  .batch-chk{width:18px;height:18px;margin-right:8px;cursor:pointer;accent-color:var(--primary);flex:0 0 auto}
+  .order-card.selected{border-left:4px solid var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.12)}
+  #batchBtn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  #batchBar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:none;align-items:center;gap:10px;
+    padding:12px 16px;background:#fff;border-top:2px solid var(--primary);box-shadow:0 -4px 16px rgba(0,0,0,.12)}
+  #batchBar .batch-count{font-weight:700;color:var(--primary);white-space:nowrap}
+  #batchActions{margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap}
   @media(max-width:600px){
     .cell.clickable .k::after{content:''}
     #groupBar{gap:6px}
     .scope-chip{padding:5px 10px;font-size:13px}
+    #batchBar{gap:8px;padding:10px 12px}
+    #batchBar .btn{padding:8px 10px;font-size:13px}
   }
 </style>
 </head>
@@ -44,6 +54,7 @@
       <div class="sub">查看、跟踪和管理所有订单</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
+      <button id="batchBtn" class="btn btn-sm btn-refresh" onclick="toggleBatch()">☑️ 批量</button>
       <button id="trashBtn" class="btn btn-sm btn-refresh" onclick="toggleTrash()">🗑 回收站</button>
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadOrders)"><span class="btn-icon">🔄</span> 刷新</button>
     </div>
@@ -87,6 +98,15 @@
   </div>
 </div>
 
+<!-- 批量操作栏 -->
+<div id="batchBar">
+  <span class="batch-count">已选 0 个</span>
+  <button class="btn btn-sm btn-refresh" onclick="selectAll()">全选</button>
+  <button class="btn btn-sm" onclick="clearSel()">清空</button>
+  <span id="batchActions"></span>
+  <button class="btn btn-sm" onclick="toggleBatch()">✕ 退出</button>
+</div>
+
 <script>
 function statusLabel(s){
   const map = {
@@ -101,6 +121,9 @@ function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? 
 
 let showDeleted = false;
 let allOrders = [];
+let selMode = false;          // 是否进入批量选择模式
+let selectedIds = new Set();  // 已勾选的订单 id
+let currentVisibleIds = [];   // 当前渲染出来的订单 id（用于全选）
 let groupField = null;     // 'address' | 'contact_name' | null
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
@@ -163,9 +186,10 @@ function buildCard(o, isAnchor){
   const pkgs = (o.packages||[]).map(p=>`<span class="chip pkg">${p.name}·${p.people}人 × ${p.quantity}</span>`).join('') || '';
   const [stText, stCls] = statusLabel(o.status);
   const anchorFlag = isAnchor ? `<span class="anchor-flag">← 你点的这单</span>` : '';
-  return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}">
+  return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}${selectedIds.has(o.id)?' selected':''}" id="ocard-${o.id}">
     <div class="order-head">
-      <div>
+      <div style="display:flex;align-items:center">
+        ${selMode ? `<input type="checkbox" class="batch-chk" data-oid="${o.id}" ${selectedIds.has(o.id)?'checked':''} onchange="toggleSel(${o.id}, this.checked)">` : ''}
         <b style="font-size:16px">#${o.id}</b>
         <span class="muted" style="margin-left:6px">${o.booking_date||''} ${o.booking_time||''}</span>${anchorFlag}
       </div>
@@ -218,6 +242,7 @@ function renderOrders(){
   if(!groupField){
     document.getElementById('groupBar').style.display='none';
     box.innerHTML = allOrders.map(o=>buildCard(o,false)).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>还没有订单，去 <a href="/">录单页</a> 创建第一笔吧</div>`;
+    finishRender();
     return;
   }
   // 分组视图：按地址/联系人聚合，默认按点击订单的时间排（默认全部时段）
@@ -238,6 +263,13 @@ function renderOrders(){
 
   box.innerHTML = list.map(o=>buildCard(o, o.id===groupAnchorId)).join('') ||
     `<div class="card" style="text-align:center;padding:32px;color:#aaa">该范围内暂无订单</div>`;
+  finishRender();
+}
+
+function finishRender(){
+  const box = document.getElementById('orderList');
+  currentVisibleIds = [...box.querySelectorAll('.order-card')].map(c=>parseInt(c.id.replace('ocard-',''),10));
+  updateBatchBar();
 }
 
 function viewReq(oid){
@@ -278,6 +310,67 @@ function delOrder(oid,name){
       if(d && d.ok){ loadOrders(); showRefreshToast(); }
       else alert((d && d.msg) || '删除失败');
     }).catch(()=>alert('删除失败：网络错误'));
+}
+
+function toggleBatch(){
+  selMode = !selMode;
+  if(!selMode) selectedIds.clear();
+  const b = document.getElementById('batchBtn');
+  if(b) b.classList.toggle('active', selMode);
+  renderOrders();
+}
+function toggleSel(oid, checked){
+  if(checked) selectedIds.add(oid); else selectedIds.delete(oid);
+  const card = document.getElementById('ocard-'+oid);
+  if(card) card.classList.toggle('selected', checked);
+  updateBatchBar();
+}
+function selectAll(){
+  currentVisibleIds.forEach(id=>selectedIds.add(id));
+  syncCheck();
+}
+function clearSel(){ selectedIds.clear(); syncCheck(); }
+function syncCheck(){
+  document.querySelectorAll('.batch-chk').forEach(c=>{
+    const oid = parseInt(c.dataset.oid,10);
+    c.checked = selectedIds.has(oid);
+    const card = document.getElementById('ocard-'+oid);
+    if(card) card.classList.toggle('selected', c.checked);
+  });
+  updateBatchBar();
+}
+function updateBatchBar(){
+  const bar = document.getElementById('batchBar');
+  if(!bar) return;
+  bar.style.display = selMode ? 'flex' : 'none';
+  const cnt = bar.querySelector('.batch-count');
+  if(cnt) cnt.textContent = `已选 ${selectedIds.size} 个`;
+  const list = document.getElementById('orderList');
+  if(list) list.style.paddingBottom = selMode ? '84px' : '';
+  const acts = document.getElementById('batchActions');
+  if(!acts) return;
+  if(showDeleted){
+    acts.innerHTML = `<button class="btn btn-sm btn-success" onclick="batchAction('restore')">♻️ 批量恢复</button>
+      <button class="btn btn-sm btn-danger" onclick="batchAction('purge')">🔥 批量彻底删除</button>`;
+  } else {
+    acts.innerHTML = `<button class="btn btn-sm btn-danger" onclick="batchAction('delete')">🗑 批量删除(进回收站)</button>`;
+  }
+}
+function batchAction(action){
+  const ids = [...selectedIds];
+  if(!ids.length){ alert('请先勾选要操作的订单'); return; }
+  const txt = {
+    delete:  `确定把选中的 ${ids.length} 个订单放进回收站？\n7 天内可在回收站恢复；超过 7 天自动彻底清除。`,
+    restore: `确定恢复选中的 ${ids.length} 个订单？`,
+    purge:   `⚠️ 确定彻底删除选中的 ${ids.length} 个订单？\n此操作不可恢复！`
+  }[action];
+  if(!confirm(txt)) return;
+  fetch('/api/orders/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action,ids})})
+    .then(r=>r.json()).then(d=>{
+      if(d && d.ok){ selectedIds.clear(); toggleBatch(); loadOrders(); showRefreshToast(); }
+      else alert((d&&d.msg)||'操作失败');
+    }).catch(()=>alert('操作失败：网络错误'));
 }
 
 function restoreOrder(oid){

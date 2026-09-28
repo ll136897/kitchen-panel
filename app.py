@@ -1171,6 +1171,36 @@ def edit_order(oid):
     return jsonify({"ok": True, "msg": "已保存"})
 
 
+@app.route("/api/orders/batch", methods=["POST"])
+def batch_orders():
+    """批量操作订单：delete=软删进回收站 / purge=彻底删除 / restore=恢复"""
+    data = request.get_json(force=True)
+    action = data.get("action")
+    ids = data.get("ids") or []
+    if action not in ("delete", "purge", "restore"):
+        return jsonify({"ok": False, "msg": "未知操作"}), 400
+    if not isinstance(ids, list):
+        return jsonify({"ok": False, "msg": "ids 格式错误"}), 400
+    ids = [int(x) for x in ids if str(x).isdigit()]
+    if not ids:
+        return jsonify({"ok": False, "msg": "未选择任何订单"}), 400
+    placeholders = ",".join("?" * len(ids))
+    db = g.db
+    if action == "delete":
+        cur = db.execute(
+            f"UPDATE orders SET deleted_at=datetime('now','localtime') WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+            ids)
+    elif action == "restore":
+        cur = db.execute(
+            f"UPDATE orders SET deleted_at=NULL WHERE id IN ({placeholders})", ids)
+    else:  # purge
+        cur = db.execute(
+            f"DELETE FROM orders WHERE id IN ({placeholders})", ids)
+    affected = cur.rowcount
+    db.commit()
+    return jsonify({"ok": True, "affected": affected, "msg": f"已处理 {affected} 个订单"})
+
+
 @app.route("/api/orders/<int:oid>", methods=["PATCH", "DELETE"])
 def update_order_status(oid):
     db = g.db
