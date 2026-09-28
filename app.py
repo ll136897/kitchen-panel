@@ -1,16 +1,86 @@
 """烤肉店后厨备餐系统 - Flask 主应用"""
 import math
 import os
+
+
+# ===== 线上报错自动上报（不再麻烦用户去翻 Render 日志）=====
+# 2026-09-28 的教训：线上出 500 时，唯一能定位的 Traceback 只有 Render 日志里有，
+# 而让用户去翻日志既慢又容易指错地方。这里把报错直接写回 GitHub 仓库的
+# boot_error.txt（线上配了 GITHUB_TOKEN），我这边拉一下就看到了。
+def report_error(tag, text):
+    try:
+        import base64, json, urllib.request, datetime as _dt
+        tok = os.environ.get("GITHUB_TOKEN", "")
+        if not tok:
+            return False
+        url = "https://api.github.com/repos/ll136897/kitchen-panel/contents/boot_error.txt"
+        body = ("[%s UTC] %s\n%s" % (_dt.datetime.utcnow().isoformat(), tag, text)).encode("utf-8")
+        sha = None
+        try:                                  # 先查原文件 sha（更新要用）
+            rq = urllib.request.Request(url, headers={"Authorization": "token " + tok,
+                                                      "User-Agent": "kitchen-panel"})
+            with urllib.request.urlopen(rq, timeout=15) as r:
+                sha = json.loads(r.read().decode()).get("sha")
+        except Exception:
+            pass
+        data = {"message": "auto: error report", "branch": "main",
+                "content": base64.b64encode(body).decode()}
+        if sha:
+            data["sha"] = sha
+        rq = urllib.request.Request(url, data=json.dumps(data).encode(), method="PUT",
+                                    headers={"Authorization": "token " + tok,
+                                             "Accept": "application/vnd.github.v3+json",
+                                             "User-Agent": "kitchen-panel"})
+        urllib.request.urlopen(rq, timeout=25).read()
+        print("[err-report] 已上报：%s" % tag)
+        return True
+    except Exception as _e:
+        print("[err-report] 上报失败：%r" % (_e,))
+        return False
+
+
 from flask import Flask, request, jsonify, render_template, g
-from models import get_db, init_db
-from addresses import canonical_address
-from parser import parse_order_text, match_packages_in_db
-from calculator import calc_order_requirements, calc_dashboard, preview_parse, calc_merged_prep, calc_prep_urgency
+try:
+    from models import get_db, init_db
+    from addresses import canonical_address
+    from parser import parse_order_text, match_packages_in_db
+    from calculator import (calc_order_requirements, calc_dashboard, preview_parse,
+                            calc_merged_prep, calc_prep_urgency)
+except Exception as _imp_err:                  # 导入期就炸 = 应用根本起不来
+    import traceback as _tb
+    report_error("import", _tb.format_exc())
+    raise
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
 # /api/version 的缓存：{sha: 最新改动标题}，避免每次开页面都去 git fetch（见 api_version）
 _VERSION_MEMO = {}
+
+# 请求里抛的异常自动上报（同一种错只报一次，避免刷屏）；
+# 同时给前端一句人话，别让用户对着 Internal Server Error 发呆。
+_ERROR_REPORTED = set()
+
+
+@app.errorhandler(Exception)
+def _handle_unexpected(e):
+    try:
+        from werkzeug.exceptions import HTTPException
+        if isinstance(e, HTTPException):
+            return e                      # 404/405 这类正常状态码，不上报
+    except Exception:
+        pass
+    try:
+        import traceback as _tb
+        key = "%s|%s" % (type(e).__name__, request.path)
+        if key not in _ERROR_REPORTED:
+            _ERROR_REPORTED.add(key)
+            report_error("request %s" % request.path, _tb.format_exc())
+    except Exception:
+        pass
+    _msg = "服务内部出错了（已自动上报，正在排查）。请稍后刷新重试。"
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "msg": _msg}), 500
+    return _msg, 500
 
 # 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
 init_db()
