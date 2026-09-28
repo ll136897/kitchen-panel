@@ -81,7 +81,9 @@ def http(url, timeout=20):
 # ---------------- 1) git：改动是否都提交并推送 ----------------
 def check_git():
     print("\n[1] 代码是否都已提交并推送")
-    st = run(["git", "status", "--porcelain"]).stdout.strip()
+    raw = run(["git", "status", "--porcelain"]).stdout.strip()
+    # 忽略本脚本自己产生的临时文件，避免自己把自己判失败
+    st = "\n".join(l for l in raw.splitlines() if "_predeploy_" not in l and l.strip())
     if st:
         bad("工作区干净", "还有未提交/未跟踪的文件：\n" + st)
     else:
