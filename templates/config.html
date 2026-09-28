@@ -55,6 +55,14 @@
   .tbl-inv td,.tbl-inv th{padding:4px 3px}
   .tbl-detail{display:none}
   .det-cards{display:block}
+  /* 入库表：给"数量+单位"列固定宽度，否则输入框和单位下拉会被挤到看不见 */
+  #inboundTable{table-layout:fixed}
+  #inboundTable th:nth-child(1),#inboundTable td:nth-child(1){width:30%}
+  #inboundTable th:nth-child(3),#inboundTable td:nth-child(3){width:46%}
+  #inboundTable th:nth-child(4),#inboundTable td:nth-child(4){width:24%}
+  #inboundTable .inbound-input{width:52px;padding:3px 2px;font-size:12px}
+  #inboundTable select.inbound-input{width:58px}
+  #inboundTable .ib-unit-suffix{display:none}
 }
 </style>
 </head>
@@ -140,8 +148,9 @@
       <h3>📥 批量采购入库
         <span class="muted" style="font-weight:400;font-size:12px">成本规则：涨价用新价 · 跌价/持平用加权平均</span>
       </h3>
+      <div class="sub" style="margin-bottom:6px">按<b>你买货的口径</b>填：买了几公斤/几斤/几袋 × 一公斤多少钱。填完自动换算库存并更新单价。</div>
       <table class="tbl tbl-inv" id="inboundTable">
-        <thead><tr><th>食材</th><th class="c-opt">当前库存</th><th>采购数量</th><th>采购单价¥</th><th class="c-opt">供应商</th></tr></thead>
+        <thead><tr><th>食材</th><th class="c-opt">当前库存</th><th>采购数量 × 单位</th><th>采购单价（按单位）</th><th class="c-opt">供应商</th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="btn-row" style="margin-top:8px">
@@ -701,12 +710,12 @@ function loadIngs(){
             <div class="muted" style="font-size:11px">${ING_CAT_LABEL[cat]} · ${x.unit||''}</div></td>
           <td class="c-opt"><select onchange="editIng(${x.id},'category',this.value)" style="border:1px solid #ddd;border-radius:4px;padding:2px;font-size:12px;background:#f9f9f9;max-width:96px">${catOptions}</select></td>
           <td class="c-opt"><input type="text" value="${x.unit||''}" onchange="editIng(${x.id},'unit',this.value)" size="4" style="border:none;background:transparent;text-align:center;width:46px"></td>
-          <td style="text-align:right;font-weight:700">${x.stock}</td>
+          <td style="text-align:right;font-weight:700">${x.stock}${x.unit==='g'?`<div class="muted" style="font-size:10px">${((x.stock||0)/1000).toFixed(2)}公斤${(x.portion_grams>0)?(' ≈'+Math.round((x.stock||0)/x.portion_grams)+'份'):''}</div>`:''}</td>
           <td class="c-opt" style="text-align:right">${x.threshold}</td>
           <td class="cost-cell c-opt">
-            <input type="number" class="cost-input" value="${x.cost||0}" step="0.01"
-              onchange="updateCost('ingredient',${x.id},this.value)" id="cost-ing-${x.id}"
-              oninput="showCostRef('ing',${x.id},this.value,'${x.unit||''}')">
+            <input type="number" class="cost-input" value="${((x.cost||0)*(parseFloat(x.purchase_factor)||1)).toFixed(2)}" step="0.1"
+              onchange="updateCost('ingredient',${x.id},this.value,${JSON.stringify(x.purchase_unit||x.unit||'')},${parseFloat(x.purchase_factor)||1})" id="cost-ing-${x.id}">
+            <div class="muted" style="font-size:10px">¥/${x.purchase_unit||x.unit||''}${(x.portion_grams>0)?('　每份≈¥'+(x.portion_grams*(x.cost||0)).toFixed(2)):''}</div>
           </td>
           <td class="c-opt" style="text-align:right;font-weight:700;color:#c0392b">¥${sub.toFixed(2)}</td>
           <td><input type="number" id="adj-ing-${x.id}" size="4" placeholder="±" class="inbound-input">
@@ -715,7 +724,12 @@ function loadIngs(){
         cards += `<div class="ic ${isLow?'low':''}">
           <div class="ic-hd"><span class="ic-nm">${x.name}</span>${isLow?'<span class="alert-badge">低库存</span>':''}</div>
           <div class="ic-meta">${ING_CAT_LABEL[cat]} · 单位 ${x.unit||''} · 阈值 ${x.threshold}</div>
-          <div class="ic-grid"><span>库存 <b>${x.stock}</b></span><span>成本 ¥${x.cost||0}</span><span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span></div>
+          <div class="ic-grid">
+            <span>库存 <b>${x.stock}${x.unit||''}</b>${x.unit==='g'?`<span class="muted"> (${((x.stock||0)/1000).toFixed(2)}kg${(x.portion_grams>0)?(' ≈'+Math.round((x.stock||0)/x.portion_grams)+'份'):''})</span>`:''}</span>
+            <span>采购 <b>¥${((x.cost||0)*(parseFloat(x.purchase_factor)||1)).toFixed(2)}</b>/${x.purchase_unit||x.unit||''}</span>
+            ${(x.portion_grams>0)?`<span>每份(${x.portion_grams}g) <b style="color:#c0392b">¥${(x.portion_grams*(x.cost||0)).toFixed(2)}</b></span>`:''}
+            <span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span>
+          </div>
           <div class="ic-act"><input type="number" id="adjm-ingredient-${x.id}" class="inbound-input" placeholder="±">
           <button class="btn btn-sm" onclick="adjustStock('ingredient',${x.id},'m')">补/损</button></div>
         </div>`;
@@ -789,17 +803,48 @@ function loadTools(){
   });
 }
 
-function updateCost(type,id,val){
+function updateCost(type,id,val,punit,pfactor){
+  // 食材：界面填的是"采购价"（元/公斤、元/斤、元/袋…），后端换算成基础单位成本
+  const payload = (type === 'ingredient')
+    ? {item_type:'ingredient', purchase_price: parseFloat(val||0),
+       purchase_unit: punit || '', purchase_factor: parseFloat(pfactor||1) || 1}
+    : {item_type:type, cost: parseFloat(val||0)};
   fetch(`/api/ingredients/${id}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({cost:parseFloat(val||0),item_type:type})})
+    body:JSON.stringify(payload)})
     .then(r=>r.json()).then(()=>{
       showRefreshToast();
       if(type=='ingredient'){loadIngs();}else{loadTools();}
     });
 }
 
-// ===== 采购入库 =====
+// ===== 采购入库（按"采购口径"录：买了几公斤/几袋 × 一公斤多少钱）=====
 function toggleInbound(){ showTab('in'); }
+
+const IB_UNITS = ['公斤','斤','克','升','毫升','袋','件','包','瓶','个','份'];
+function ibFactor(unit, base){
+  if(unit === base) return 1;
+  if(unit === '公斤') return base === 'g' ? 1000 : null;
+  if(unit === '斤') return base === 'g' ? 500 : null;
+  if(unit === '克') return 1;
+  if(unit === '升') return base === 'ml' ? 1000 : null;
+  if(unit === '毫升') return 1;
+  if(['瓶','个','份'].indexOf(unit) >= 0) return 1;
+  return null;   // 袋/件/包：规格要用户填（一袋等于多少）
+}
+function ibUnitOptions(cur, base){
+  return IB_UNITS.map(u=>`<option value="${u}"${u===cur?' selected':''}>${u}</option>`).join('');
+}
+function ibUnitChange(id){
+  const sel = document.getElementById('ib-unit-'+id);
+  const spec = document.getElementById('ib-spec-'+id);
+  const punit = document.getElementById('ib-punit-'+id);
+  if(!sel) return;
+  if(punit) punit.textContent = '/' + sel.value;
+  if(spec){
+    const need = ['袋','件','包'].indexOf(sel.value) >= 0;
+    spec.style.display = need ? 'inline-block' : 'none';
+  }
+}
 
 function loadInboundTable(){
   fetch('/api/ingredients').then(r=>r.json()).then(d=>{
@@ -817,12 +862,28 @@ function loadInboundTable(){
         const isLow = (x.stock||0) <= (x.threshold||0);
         const rowClass = isLow ? 'low-stock' : '';
         const alertBadge = isLow ? '<span class="alert-badge">低库存</span>' : '';
+        const pu = x.purchase_unit || x.unit || '';
+        const f = parseFloat(x.purchase_factor||1) || 1;
+        const pp = (parseFloat(x.cost||0) * f);
+        const needSpec = (ibFactor(pu, x.unit) === null);
+        let stockTxt = x.stock + (x.unit||'');
+        if(x.unit === 'g'){
+          stockTxt += `<span class="muted"> ${((x.stock||0)/1000).toFixed(2)}公斤`;
+          if(x.portion_grams) stockTxt += ` ≈${Math.round((x.stock||0)/x.portion_grams)}份`;
+          stockTxt += '</span>';
+        }
         html += `<tr class="${rowClass}">
           <td>${x.name}<span class="muted">(${x.unit})</span>${alertBadge}</td>
-          <td class="c-opt" style="text-align:right">${x.stock}</td>
-          <td><input type="number" class="inbound-input" id="ib-qty-${x.id}" placeholder="0" step="0.1"></td>
-          <td><input type="number" class="inbound-input" id="ib-price-${x.id}" placeholder="¥" step="0.01" value="${x.cost||''}"></td>
-          <td class="c-opt"><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:90px"></td>
+          <td class="c-opt" style="text-align:right">${stockTxt}</td>
+          <td style="white-space:nowrap">
+            <input type="number" class="inbound-input" id="ib-qty-${x.id}" placeholder="数量" step="0.1">
+            <select class="inbound-input" id="ib-unit-${x.id}" style="width:64px;padding:3px 2px"
+              onchange="ibUnitChange(${x.id})">${ibUnitOptions(pu, x.unit)}</select>
+            <input type="number" class="inbound-input" id="ib-spec-${x.id}" placeholder="1${pu}=?"
+              style="width:72px;display:${needSpec?'inline-block':'none'}" value="${needSpec?f:''}">
+          </td>
+          <td style="white-space:nowrap"><input type="number" class="inbound-input" id="ib-price-${x.id}" placeholder="¥" step="0.01" value="${pp?pp.toFixed(2):''}"><span class="muted ib-unit-suffix" id="ib-punit-${x.id}" style="font-size:10px">/${pu}</span></td>
+          <td class="c-opt"><input type="text" class="inbound-input" id="ib-sup-${x.id}" placeholder="供应商" style="width:80px"></td>
         </tr>`;
       }
     }
@@ -838,9 +899,15 @@ function submitInbound(){
       if(!qtyEl) return;
       const qty=parseFloat(qtyEl.value||0);
       if(!(qty>0)) return;
+      const unit=(document.getElementById(`ib-unit-${x.id}`)||{}).value || (x.purchase_unit||x.unit);
       const price=parseFloat((document.getElementById(`ib-price-${x.id}`)||{}).value||0);
       const sup=(document.getElementById(`ib-sup-${x.id}`)||{}).value||'';
-      items.push({item_type:'ingredient',item_id:x.id,qty:qty,unit_price:price,supplier:sup});
+      const spec=parseFloat((document.getElementById(`ib-spec-${x.id}`)||{}).value||0);
+      let f = (spec>0) ? spec : ibFactor(unit, x.unit);
+      if(f === null || !(f>0)) f = parseFloat(x.purchase_factor||1) || 1;
+      items.push({item_type:'ingredient',item_id:x.id,
+                  purchase_qty:qty, purchase_unit:unit, purchase_factor:f,
+                  unit_price:price, supplier:sup});
     });
     if(!items.length){document.getElementById('inboundMsg').innerHTML='<span style="color:#e74c3c">未填写任何采购数量</span>';return;}
     const reason=(document.getElementById('inboundReason').value||'采购入库');
@@ -848,11 +915,11 @@ function submitInbound(){
       body:JSON.stringify({items:items,reason:reason})})
       .then(r=>r.json()).then(res=>{
         if(res.ok){
-          document.getElementById('inboundMsg').innerHTML=`<span style="color:#27ae60">✅ 成功入库 ${res.done} 项</span>`;
+          document.getElementById('inboundMsg').innerHTML=`<span style="color:#27ae60">✅ 成功入库 ${res.done} 项（单价已按最新采购价自动更新）</span>`;
           showRefreshToast();
           loadIngs();
           loadInboundTable();
-          setTimeout(()=>{document.getElementById('inboundMsg').innerHTML='';},3000);
+          setTimeout(()=>{document.getElementById('inboundMsg').innerHTML='';},4000);
         }
       });
   });
@@ -860,14 +927,23 @@ function submitInbound(){
 
 function loadPurchases(){
   fetch('/api/purchases').then(r=>r.json()).then(d=>{
-    const html=(d.data||[]).map(p=>`<tr>
-      <td>${(p.purchased_at||'').slice(5,16)}</td>
-      <td>${p.item_name||'-'}</td>
-      <td style="text-align:right">${p.quantity} ${p.item_unit||''}</td>
-      <td style="text-align:right">¥${p.unit_price}</td>
-      <td style="text-align:right;font-weight:700;color:#c0392b">¥${p.total_cost}</td>
-      <td class="c-opt">${p.supplier||'-'}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted" style="text-align:center">暂无记录</td></tr>';
+    const html=(d.data||[]).map(p=>{
+      // 优先显示当初录入的口径（"5 公斤"），括号里给基础单位
+      const q = (p.purchase_qty && p.purchase_unit)
+        ? `${p.purchase_qty} ${p.purchase_unit}<span class="muted">(${p.quantity}${p.item_unit||''})</span>`
+        : `${p.quantity} ${p.item_unit||''}`;
+      const up = (p.purchase_qty && p.purchase_unit && p.purchase_qty>0)
+        ? `¥${(p.total_cost/p.purchase_qty).toFixed(2)}<span class="muted">/${p.purchase_unit}</span>`
+        : `¥${p.unit_price}`;
+      return `<tr>
+        <td>${(p.purchased_at||'').slice(5,16)}</td>
+        <td>${p.item_name||'-'}</td>
+        <td style="text-align:right">${q}</td>
+        <td style="text-align:right">${up}</td>
+        <td style="text-align:right;font-weight:700;color:#c0392b">¥${p.total_cost}</td>
+        <td class="c-opt">${p.supplier||'-'}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="muted" style="text-align:center">暂无记录</td></tr>';
     document.querySelector('#purchaseTable tbody').innerHTML=html;
   });
 }

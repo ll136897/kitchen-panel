@@ -40,6 +40,12 @@
   .cost-item .ref{font-size:10px;color:#27ae60;font-weight:600;margin-top:3px}
   .cost-item input{width:100%;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:13px;text-align:right;font-weight:700;color:#c0392b;box-sizing:border-box}
   .cost-item input:focus{border-color:#3a2416;outline:none}
+  /* 采购口径那一行：¥ [价格] [单位] —— 价格与单位要窄，能在一行放得下 */
+  .cost-item .prow{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
+  .cost-item .prow span{color:#c0392b;font-weight:800;font-size:13px;flex:0 0 auto}
+  .cost-item .prow input{width:72px;flex:0 0 auto}
+  .cost-item .prow select{flex:1 1 auto;min-width:0;padding:4px 2px;font-size:12px;border:1px solid #ddd;
+    border-radius:5px;background:#fff;font-weight:700;color:#3a2416;box-sizing:border-box}
   .cost-item.saved{background:#e8f5e9;border-color:#a5d6a7}
   /* 利润 */
   .pf-tag{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700}
@@ -151,7 +157,7 @@
       <div class="sec-title" style="margin:0"><span class="dot" style="background:#2471a3"></span>⚙️ 成本与利润设置</div>
       <button class="btn btn-primary btn-sm" onclick="saveCfg()">💾 保存设置</button>
     </div>
-    <div class="sub" style="margin:6px 0 4px">改这里=以后自动按新价算（手改过的单不变）</div>
+    <div class="sub" style="margin:6px 0 4px">按<b>采购价</b>填（元/公斤、元/斤、元/袋都行）· 改这里=以后自动按新价算</div>
 
     <div style="margin-top:10px">
       <div style="font-weight:700;font-size:13px;margin-bottom:2px">🏕️ 场地单价（搭建/回收，按单算）</div>
@@ -234,7 +240,7 @@
       <div id="pfBody"></div>
       <div style="margin-top:10px;display:none" id="pfFoodBox">
         <div style="font-weight:700;font-size:13px;margin-bottom:4px">食材明细（改单价会影响所有订单）</div>
-        <table class="fin-tbl"><thead><tr><th>食材</th><th>用量</th><th>单价</th><th>成本</th><th>改单价</th></tr></thead>
+        <table class="fin-tbl"><thead><tr><th>食材</th><th>用量</th><th>采购价</th><th>成本</th><th>改采购价</th></tr></thead>
         <tbody id="pfFoodTbody"></tbody></table>
       </div>
     </div>
@@ -553,16 +559,32 @@ function loadPfFood(oid){
     let total = 0;
     document.getElementById('pfFoodTbody').innerHTML = items.map(i=>{
       total += i.total_cost;
+      const f = parseFloat(i.purchase_factor||1) || 1;
+      const pu = i.purchase_unit || i.unit || '';
+      const pp = (parseFloat(i.purchase_price||0) || (i.unit_cost||0)*f);
+      const pg = parseFloat(i.portion_grams||0);
+      const perP = pg > 0 ? (pg * (i.unit_cost||0)) : null;
       return `<tr>
-        <td style="text-align:left">${i.name}</td>
+        <td style="text-align:left">${i.name}${perP!==null?`<span class="muted" style="font-size:10px"> 每份${pg}g≈¥${perP.toFixed(2)}</span>`:''}</td>
         <td>${i.total_amount}${i.unit}</td>
-        <td>¥${i.unit_cost}</td>
+        <td>¥${pp.toFixed(2)}<span class="muted" style="font-size:10px">/${pu}</span></td>
         <td style="font-weight:700;color:#c0392b">¥${i.total_cost.toFixed(2)}</td>
-        <td><input type="number" class="select-mini" style="width:68px" value="${i.unit_cost}" step="0.001"
-          onchange="editIngCost(${i.ingredient_id}, this.value, true)"></td>
+        <td><input type="number" class="select-mini" style="width:72px" value="${pp.toFixed(2)}" step="0.1"
+          onchange="editPPrice(${i.ingredient_id}, this.value, '${pu}', ${f}, true)"></td>
       </tr>`;
     }).join('') || '<tr><td colspan="5" class="muted" style="text-align:center">无</td></tr>';
   });
+}
+// 在利润弹窗里直接改某食材的采购价（改的是全局单价，影响所有订单）
+function editPPrice(iid, val, unit, factor, inModal){
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:'ingredient', purchase_price: parseFloat(val||0),
+                         purchase_unit: unit, purchase_factor: factor})})
+    .then(r=>r.json()).then(()=>{
+      showRefreshToast();
+      if(inModal && pfOid){ loadPf(pfOid); loadPfFood(pfOid); loadCostItems(); }
+      loadAll();
+    });
 }
 
 function pfSaveOut(){
@@ -686,20 +708,118 @@ function loadCostItems(){
     renderCostItems(allCostItems);
   });
 }
+// ===== 食材单价：按"采购口径"录入，同时显示每份成本 =====
+// 为什么这么做：用户脑子里是"牛肋条 105 一公斤"，系统里却存 0.105 元/克
+// —— 按克填既难核对也容易错。这里统一按"采购单位"填（公斤/斤/袋…），
+// 后端换算成基础单位存起来，所有成本计算口径完全不变。
+const PURCH_UNITS = [
+  {u:'公斤', f:1000}, {u:'斤', f:500}, {u:'克', f:1}, {u:'升', f:1000}, {u:'毫升', f:1},
+  {u:'袋', f:null}, {u:'件', f:null}, {u:'包', f:null}, {u:'瓶', f:1}, {u:'个', f:1}, {u:'份', f:1}
+];
+function purchFactor(unit, base){
+  if(unit === base) return 1;
+  const hit = PURCH_UNITS.filter(x=>x.u===unit)[0];
+  if(hit && hit.f) return hit.f;
+  if(hit && hit.f === null) return null;      // 袋/件/包：规格得问用户
+  return 1;
+}
+// 库存换算成人话：2300g → 2.3 公斤（≈23 份）
+function stockHuman(i){
+  const s = parseFloat(i.stock||0);
+  const u = i.unit;
+  let txt;
+  if(u === 'g') txt = (s/1000).toFixed(s>=1000?2:3) + ' 公斤';
+  else if(u === 'ml') txt = (s/1000).toFixed(2) + ' 升';
+  else txt = s + ' ' + (u||'');
+  const pg = parseFloat(i.portion_grams||0);
+  if(pg > 0 && u === 'g') txt += '（≈' + Math.round(s/pg) + ' 份）';
+  return txt;
+}
+// 每份成本（一份 = 固定克数，来自配方）
+function portionCost(i){
+  const c = parseFloat(i.cost||0);
+  const pg = parseFloat(i.portion_grams||0);
+  if(!c) return null;
+  if(pg > 0) return pg * c;
+  if(i.unit === '份') return c;
+  return null;
+}
+
 function renderCostItems(items){
   const grid = document.getElementById('costGrid');
   if(!items.length){ grid.innerHTML = '<div class="muted" style="padding:20px">暂无食材</div>'; return; }
   grid.innerHTML = items.map(i=>{
-    const ref = costRefText(i.cost, i.unit);
+    const f = parseFloat(i.purchase_factor||1) || 1;
+    const pp = (parseFloat(i.cost||0) * f);
+    const pUnit = i.purchase_unit || i.unit || '';
+    const pc = portionCost(i);
+    const pg = parseFloat(i.portion_grams||0);
+    const opts = PURCH_UNITS.map(x=>'<option value="'+x.u+'"'+(x.u===pUnit?' selected':'')+'>'+x.u+'</option>').join('');
+    const needSpec = (purchFactor(pUnit, i.unit) === null);
     return `<div class="cost-item" id="costItem-${i.id}">
       <div class="nm">${i.name}</div>
-      <div class="cat">${CAT_LABEL[i.category]||i.category} · ${i.unit}</div>
-      <input type="number" value="${i.cost||0}" step="0.001" min="0"
-        onchange="saveCost(${i.id}, this.value, '${i.unit}')"
-        oninput="liveRef(this, '${i.unit}', ${i.id})">
-      <div class="ref" id="costRef-${i.id}">${ref}</div>
+      <div class="cat">${CAT_LABEL[i.category]||i.category} · 基础单位 ${i.unit||'-'}</div>
+      <div class="prow">
+        <span>¥</span>
+        <input type="number" id="pprice-${i.id}" value="${pp?pp.toFixed(2):''}" step="0.1" min="0"
+          onchange="savePPrice(${i.id}, this.value)">
+        <select id="pselect-${i.id}" onchange="setPUnit(${i.id}, this.value)">${opts}</select>
+      </div>
+      <div class="prow" id="pspecRow-${i.id}" style="display:${needSpec?'flex':'none'};margin-top:4px">
+        <span style="color:#8a7364;font-weight:600;font-size:11px">1${pUnit}=</span>
+        <input type="number" id="pspec-${i.id}" value="${needSpec?f:''}" step="1" placeholder="?">
+        <span style="color:#8a7364;font-weight:600;font-size:11px">${i.unit||''}</span>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="applySpec(${i.id})">存规格</button>
+      </div>
+      <div class="ref">${pc!==null ? ('≈ 每份'+(pg?('('+pg+'g)'):'')+' <b>¥'+pc.toFixed(2)+'</b>') : ''}</div>
+      <div class="ref" style="color:#8a7364">库存 ${stockHuman(i)}</div>
     </div>`;
   }).join('');
+}
+// 保存"采购价"（元/采购单位）。内部仍换算成基础单位成本，所有计算口径不变。
+function savePPrice(iid, val){
+  const it = (allCostItems||[]).filter(x=>String(x.id)===String(iid))[0] || {};
+  const f = parseFloat(it.purchase_factor||1) || 1;
+  const pUnit = it.purchase_unit || it.unit || '';
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:'ingredient', purchase_price: parseFloat(val||0),
+                         purchase_unit: pUnit, purchase_factor: f})})
+    .then(r=>r.json()).then(()=>{
+      const item = document.getElementById('costItem-'+iid);
+      if(item){ item.classList.add('saved'); setTimeout(()=>item.classList.remove('saved'), 1200); }
+      showRefreshToast();
+      if(pfOid){ loadPf(pfOid); loadPfFood(pfOid); }
+      loadAll();
+    });
+}
+// 切换采购单位（公斤/斤/克/袋…）。切换后"物理单价"不变，只是换算口径变了。
+function setPUnit(iid, unit){
+  const it = (allCostItems||[]).filter(x=>String(x.id)===String(iid))[0] || {};
+  const base = it.unit || '';
+  let f = purchFactor(unit, base);
+  if(f === null){
+    // 袋/件/包 这类要问清楚"一个是多少"
+    const spec = prompt('1 ' + unit + ' = 多少' + (base||'个') + '？（例如一袋 500 克就填 500）', '');
+    f = parseFloat(spec||0) || 1;
+    const row = document.getElementById('pspecRow-'+iid);
+    if(row) row.style.display = 'flex';
+  }
+  if(!f || f <= 0) f = 1;
+  const keepPrice = parseFloat(it.cost||0) * f;   // 保持物理单价不变，换个口径显示
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:'ingredient', purchase_unit: unit, purchase_factor: f,
+                         purchase_price: keepPrice})})
+    .then(r=>r.json()).then(()=>{ showRefreshToast(); loadAll(); });
+}
+function applySpec(iid){
+  const it = (allCostItems||[]).filter(x=>String(x.id)===String(iid))[0] || {};
+  const unit = it.purchase_unit || it.unit || '';
+  const f = parseFloat((document.getElementById('pspec-'+iid)||{}).value||0) || 1;
+  const keepPrice = parseFloat(it.cost||0) * f;
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:'ingredient', purchase_unit: unit, purchase_factor: f,
+                         purchase_price: keepPrice})})
+    .then(r=>r.json()).then(()=>{ showRefreshToast(); loadAll(); });
 }
 function filterCostItems(){
   const kw = document.getElementById('costSearch').value.trim().toLowerCase();
