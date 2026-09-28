@@ -128,6 +128,10 @@ let groupField = null;     // 'address' | 'contact_name' | null
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
 
+// 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
+// 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
+function addrKey(o){ return o.address_key || o.address || ''; }
+
 function toggleTrash(){
   showDeleted = !showDeleted;
   loadOrders();
@@ -246,16 +250,23 @@ function renderOrders(){
     return;
   }
   // 分组视图：按地址/联系人聚合，默认按点击订单的时间排（默认全部时段）
+  // 地址用"归一后的地址"（青龙湖二期 → 青龙湖），同一个地方的不同写法算一个地方
   const anchor = allOrders.find(o=>o.id===groupAnchorId) || {};
-  const val = (groupField==='address' ? (anchor.address||'') : (anchor.contact_name||''));
-  let list = allOrders.filter(o=> (groupField==='address' ? (o.address||'') : (o.contact_name||'')) === val);
+  const val = (groupField==='address' ? addrKey(anchor) : (anchor.contact_name||''));
+  let list = allOrders.filter(o=> (groupField==='address' ? addrKey(o) : (o.contact_name||'')) === val);
   if(groupScope!=='all') list = list.filter(o=> inScope(o.booking_date, anchor.booking_date, groupScope));
   list = list.slice().sort((a,b)=> { const da=orderDt(a), db=orderDt(b); return db<da?-1:(db>da?1:0); });
 
   const gb = document.getElementById('groupBar');
   gb.style.display = 'flex';
   const tagIcon = groupField==='address' ? '📍' : '👤';
-  document.getElementById('groupTag').textContent = `${tagIcon} ${val || '（空）'}`;
+  // 合并了不同写法的场地时，把其它写法标注出来——解释"为什么这两个也算同一个地方"
+  let tagTxt = `${tagIcon} ${val || '（空）'}`;
+  if(groupField==='address'){
+    const variants = [...new Set(list.map(o=>(o.address||'（空）')).filter(a=>a!==val))];
+    if(variants.length) tagTxt += ` · 含${variants.slice(0,2).join('/')}${variants.length>2?'等':''}`;
+  }
+  document.getElementById('groupTag').textContent = tagTxt;
   const sumAmt = list.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
   const scopeTxt = groupScope==='all' ? '全部时段' : (groupScope==='week' ? '本周' : '本月');
   document.getElementById('groupSummary').textContent = `· 共 ${list.length} 单 · 合计 ¥${sumAmt} · ${scopeTxt}`;

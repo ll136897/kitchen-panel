@@ -92,8 +92,13 @@ def save_config(db, patch):
 
 
 def match_place(address, cfg):
-    """按地址文字匹配场地（'青龙湖二期' → 青龙湖）；匹配不到返回 None"""
-    addr = (address or "").strip()
+    """按地址文字匹配场地（'青龙湖二期' → 青龙湖）；匹配不到返回 None
+
+    先走『地址归一』（addresses.canonical_address），保证和订单页筛选、
+    备餐页用的是同一套规则：同一个地方的不同写法算一个地方。
+    """
+    from addresses import canonical_address
+    addr = canonical_address((address or "").strip())
     if not addr:
         return None
     for p in cfg.get("places", []):

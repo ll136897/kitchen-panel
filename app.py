@@ -3,6 +3,7 @@ import math
 import os
 from flask import Flask, request, jsonify, render_template, g
 from models import get_db, init_db
+from addresses import canonical_address
 from parser import parse_order_text, match_packages_in_db
 from calculator import calc_order_requirements, calc_dashboard, preview_parse, calc_merged_prep, calc_prep_urgency
 
@@ -948,20 +949,29 @@ def _dup_key_of(parsed):
 
 
 def _find_duplicate_order(cur, parsed):
-    """找一条「完全重复」的现存订单（同日期+时间+地址+电话，且未取消、未删除）"""
+    """找一条「完全重复」的现存订单（同日期+时间+地址+电话，且未取消、未删除）
+
+    地址按"归一"规则比：青龙湖二期 = 青龙湖，写法不同也算同一单。"""
     key = _dup_key_of(parsed)
     if not key:
         return None
-    return cur.execute("""
+    bd, bt, addr, phone = key
+    # 日期 + 时间 + 电话先筛出候选（这几个条件已经很紧了），
+    # 地址再按"归一"规则比：青龙湖二期 = 青龙湖，写法不同也算同一单，避免重复建单。
+    rows = cur.execute("""
         SELECT id, booking_date, booking_time, address, contact_name, contact_phone
         FROM orders
         WHERE deleted_at IS NULL AND status != 'cancelled'
           AND booking_date = ?
           AND COALESCE(booking_time,'') = ?
-          AND COALESCE(address,'') = ?
           AND COALESCE(contact_phone,'') = ?
-        ORDER BY id DESC LIMIT 1
-    """, key).fetchone()
+        ORDER BY id DESC
+    """, (bd, bt, phone)).fetchall()
+    from addresses import same_address
+    for r in rows:
+        if same_address(r["address"], addr):
+            return r
+    return None
 
 
 @app.route("/api/orders", methods=["POST"])
@@ -1054,6 +1064,10 @@ def list_orders():
             FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 100
         """)
     orders = [dict(r) for r in cur.fetchall()]
+    # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。
+    # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
+    for o in orders:
+        o["address_key"] = canonical_address(o.get("address"))
     # 加套餐明细
     for o in orders:
         cur.execute("""
