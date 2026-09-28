@@ -82,6 +82,29 @@ def _handle_unexpected(e):
         return jsonify({"ok": False, "msg": _msg}), 500
     return _msg, 500
 
+# WSGI 最外层兜底：如果错误发生在 Flask 处理链之外（连 errorhandler 都够不到），
+# 在这里抓住并上报 —— 2026-09-28 线上"所有请求 500 但 errorhandler 不触发"的坑。
+_wsgi_orig = app.wsgi_app
+
+
+def _wsgi_with_report(environ, start_response):
+    try:
+        return _wsgi_orig(environ, start_response)
+    except Exception:
+        import traceback as _tb
+        try:
+            _path = environ.get("PATH_INFO", "?")
+            _key = "wsgi|%s" % _path
+            if _key not in _ERROR_REPORTED:
+                _ERROR_REPORTED.add(_key)
+                report_error("wsgi %s" % _path, _tb.format_exc())
+        except Exception:
+            pass
+        raise
+
+
+app.wsgi_app = _wsgi_with_report
+
 # 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
 init_db()
 
