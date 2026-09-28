@@ -1032,6 +1032,11 @@ function loadVersion(){
     const el = document.getElementById('verLine');
     if(el){
       let s = '📦 库存管理 · 本版本部署于 ' + (d.deployed_at||'?');
+      // 连续运行时长：一直变大 = 系统这段时间没休眠过（休眠会重启进程、时长归零）
+      if(d.uptime_hours){
+        const h = d.uptime_hours;
+        s += ' · 已连续运行 ' + (h >= 1 ? h.toFixed(1) + ' 小时' : Math.round(h*60) + ' 分钟');
+      }
       if(d.latest_change){
         let t = d.latest_change;
         if(t.length > 34) t = t.slice(0, 34) + '…';

@@ -40,6 +40,15 @@ try:
 except Exception as _e:
     print(f"[init] auto_backup skipped: {_e}")
 
+# 启动云端自保活：营业时段定时请求自己的 /api/ping，让 Render 免费实例不进入休眠。
+# 为什么不只靠 GitHub Actions 的定时任务：GitHub 官方明确 schedule 事件在高峰期
+# 可能延迟、**最坏情况根本不运行**（实测提交后近 2 小时一次都没跑）。
+try:
+    from keepalive import start_self_keepalive
+    start_self_keepalive()
+except Exception as _e:
+    print(f"[init] self_keepalive skipped: {_e}")
+
 # 迁移：去掉"刷子"工具（用户要求菜单无刷子，兼容已有数据库）
 try:
     _db = get_db()
@@ -223,9 +232,34 @@ def api_ping():
     3. 心跳/定时任务打这里最省资源（不碰 SQLite）。
     """
     import time as _t
-    resp = jsonify({"ok": True, "t": int(_t.time())})
+    up = 0
+    try:
+        from keepalive import _state as _kst
+        up = int(_t.time() - _kst["boot_ts"])
+    except Exception:
+        pass
+    # up = 进程已连续运行的秒数。它一直涨说明**这段时间从没睡过**（睡过会重启进程、归零）
+    resp = jsonify({"ok": True, "t": int(_t.time()), "up": up})
     resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
+
+
+@app.route("/api/keepalive/status", methods=["GET"])
+def keepalive_status():
+    """云端自保活状态。uptime_hours 一直增长 = 这段时间没睡过。"""
+    import keepalive
+    return jsonify({"ok": True, "data": keepalive.status()})
+
+
+@app.route("/api/keepalive/config", methods=["GET", "POST"])
+def keepalive_config():
+    """读/改自保活配置：enabled、start_hour、end_hour、interval_min"""
+    import keepalive
+    if request.method == "GET":
+        return jsonify({"ok": True, "data": keepalive.load_cfg()})
+    data = request.get_json(force=True) or {}
+    cfg = keepalive.save_cfg(data)
+    return jsonify({"ok": True, "data": cfg, "status": keepalive.status()})
 
 
 @app.route("/api/backup/status", methods=["GET"])
@@ -262,6 +296,7 @@ def api_version():
     latest = ""
     try:
         import subprocess as _sp
+        import re as _re
         sha = _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=here,
                                stderr=_sp.DEVNULL).decode().strip()
 
@@ -284,24 +319,64 @@ def api_version():
             latest = _log_latest()
             if not latest:
                 # Render 是浅克隆（--depth 1），历史里只剩一条 auto: 备份提交
-                # → 拉深一点再读；成功后缓存，避免每次开页面都去 fetch
+                # → 拉深一点再读。用 blob:none（不要文件内容，只要提交信息），
+                #   仓库里有 kitchen.db 这种二进制大文件，blobless 快很多。
+                for _args in (["fetch", "--depth=30", "--filter=blob:none", "origin"],
+                              ["fetch", "--depth=30", "origin"]):
+                    try:
+                        _sp.check_output(["git"] + _args, cwd=here,
+                                         stderr=_sp.DEVNULL, timeout=60)
+                        latest = _log_latest()
+                        if latest:
+                            break
+                    except Exception:
+                        continue
+            if not latest:
+                # 兜底：直接问 GitHub 公共接口（仓库是公开的，不需要令牌）
                 try:
-                    _sp.check_output(["git", "fetch", "--depth=60", "origin"], cwd=here,
-                                     stderr=_sp.DEVNULL, timeout=25)
-                    latest = _log_latest()
+                    import urllib.request as _u
+                    import json as _json
+                    _repo = "ll136897/kitchen-panel"
+                    try:
+                        _origin = _sp.check_output(["git", "remote", "get-url", "origin"],
+                                                   cwd=here, stderr=_sp.DEVNULL).decode().strip()
+                        _m = _re.match(r".*[:/]([^/:]+/[^/]+?)(?:\.git)?$", _origin)
+                        if _m:
+                            _repo = _m.group(1)
+                    except Exception:
+                        pass
+                    _req = _u.Request("https://api.github.com/repos/%s/commits?per_page=30" % _repo,
+                                      headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": "kitchen-panel"})
+                    _data = _json.loads(_u.urlopen(_req, timeout=30).read().decode("utf-8", "replace"))
+                    for _c in _data:
+                        _msg = (_c.get("commit", {}).get("message", "") or "").strip().splitlines()[0]
+                        if _msg and not _msg.lower().startswith("auto:"):
+                            latest = _msg
+                            break
                 except Exception:
                     pass
             if latest and sha:
                 _VERSION_MEMO[sha] = latest
         # 去掉 feat/fix(范围): 这类技术前缀，显示成"出餐单：xxx"这样的大白话
-        import re as _re
         m = _re.match(r"^(feat|fix|refactor|chore|perf|docs|style|test)\s*(?:\(([^)]*)\))?\s*[:：]\s*(.+)$", latest)
         if m:
             latest = ((m.group(2) + "：") if m.group(2) else "") + m.group(3)
     except Exception:
         pass
+    # 连续运行时长：一直变大 = 这段时间**从没睡过**（休眠会重启进程、时间归零）
+    boot_at, uptime_hours = "", 0
+    try:
+        from keepalive import _state as _kst
+        import time as _t2
+        import datetime as _dt2
+        boot_at = _dt2.datetime.fromtimestamp(_kst["boot_ts"]).strftime("%Y-%m-%d %H:%M")
+        uptime_hours = round((_t2.time() - _kst["boot_ts"]) / 3600.0, 1)
+    except Exception:
+        pass
     return jsonify({"ok": True, "deployed_at": deployed_at, "sha": sha,
-                    "latest_change": latest})
+                    "latest_change": latest, "boot_at": boot_at,
+                    "uptime_hours": uptime_hours})
 
 
 # ===== 页面 =====
