@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>财务分析 · 刘和牛备餐系统</title>
+<title>成本利润 · 刘和牛备餐系统</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
   .fin-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:16px;margin:10px 0}
@@ -12,8 +12,8 @@
   .fin-kpi-item .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
   .fin-kpi-item .val{font-size:18px;font-weight:800}
   .fin-kpi-item .sub{font-size:10px;color:var(--muted);margin-top:2px}
-  .fin-kpi-item.positive .val{color:var(--green,#27ae60)}
-  .fin-kpi-item.negative .val{color:var(--primary)}
+  .fin-kpi-item.positive .val{color:#27ae60}
+  .fin-kpi-item.negative .val{color:#c0392b}
   .fin-kpi-item.neutral .val{color:var(--accent)}
   .fin-tbl{width:100%;border-collapse:collapse;font-size:12px}
   .fin-tbl th{background:#3a2416;color:#fff;padding:7px 6px;text-align:center;font-size:11px;position:sticky;top:0;z-index:1}
@@ -29,12 +29,10 @@
   .select-mini{padding:3px 4px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:#fff}
   .sec-title{font-size:15px;font-weight:700;margin:16px 0 8px;display:flex;align-items:center;gap:6px}
   .sec-title .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
-  /* 日期维度切换 */
   .range-tabs{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:3px;gap:2px}
   .range-tab{padding:6px 14px;border:none;background:transparent;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;color:#6b4f3a;transition:all .15s}
   .range-tab.active{background:#3a2416;color:#fff;box-shadow:0 2px 4px rgba(0,0,0,.15)}
   .range-date{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff}
-  /* 成本管理卡 */
   .cost-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
   .cost-item{background:#faf6ef;border:1px solid #f0ebe3;border-radius:8px;padding:8px 10px}
   .cost-item .nm{font-size:12px;font-weight:700;color:#3a2416;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -43,12 +41,48 @@
   .cost-item input{width:100%;padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:13px;text-align:right;font-weight:700;color:#c0392b;box-sizing:border-box}
   .cost-item input:focus{border-color:#3a2416;outline:none}
   .cost-item.saved{background:#e8f5e9;border-color:#a5d6a7}
+  /* 利润 */
+  .pf-tag{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700}
+  .pf-ok{background:#e8f5e9;color:#1b7a43}
+  .pf-warn{background:#fff4e5;color:#b95c00}
+  .pf-loss{background:#fdecea;color:#b3261e}
+  .v-ok{color:#1b7a43}.v-warn{color:#b95c00}.v-loss{color:#b3261e}
+  /* 利润明细弹窗 */
+  .pf-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px dashed #efe7dc;flex-wrap:wrap}
+  .pf-row .nm{font-size:13px;font-weight:700;color:#3a2416;flex:1 1 120px;min-width:0}
+  .pf-row .hint{font-size:10px;color:#999;flex:1 1 100%;line-height:1.4}
+  .pf-row input{width:76px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:13px;text-align:right;font-weight:700;box-sizing:border-box}
+  .pf-row input.name{width:96px;text-align:left;font-weight:600}
+  .pf-row .eq{font-size:12px;color:#8a7364}
+  .pf-total{display:flex;justify-content:space-between;padding:7px 0;font-size:13px}
+  .pf-total.big{font-size:16px;font-weight:800;border-top:2px solid #3a2416;margin-top:6px;padding-top:9px}
+  .pf-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .place-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed #efe7dc}
+  .place-row input.pname{flex:1 1 110px;min-width:0;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+  .place-row input.pnum{width:74px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;text-align:right}
+  .place-row .lb{font-size:11px;color:#8a7364}
+  .cfg-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px dashed #efe7dc}
+  .cfg-row .nm{flex:1 1 150px;font-size:13px;font-weight:600;color:#3a2416;min-width:0}
+  .cfg-row .hint{font-size:10px;color:#999;flex:1 1 100%}
+  .cfg-row input{width:84px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;text-align:right}
+  .cfg-row input.wide{width:110px;text-align:left}
+  .pf-cards{display:none}
+  .pf-card{border:1px solid #f0ebe3;border-radius:10px;padding:9px 10px;margin-bottom:8px;background:#fdfbf8}
+  .pf-card .top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .pf-card .who{font-size:13px;font-weight:700;color:#3a2416;min-width:0;flex:1 1 90px}
+  .pf-card .when{font-size:11px;color:#999}
+  .pf-card .line{display:flex;justify-content:space-between;font-size:12px;color:#5c6670;margin-top:5px;gap:8px;flex-wrap:wrap}
+  .pf-card .line b{font-size:14px}
+  .pf-card .acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
   @media(max-width:600px){
     .fin-kpi{grid-template-columns:repeat(2,1fr)}
     .fin-kpi-item .val{font-size:16px}
     .fin-tbl{font-size:11px}
     .fin-tbl th,.fin-tbl td{padding:5px 3px}
     .cost-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+    .tbl-profit{display:none}
+    .pf-cards{display:block}
+    .pf-row input{width:66px}
   }
 </style>
 </head>
@@ -65,21 +99,22 @@
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
     <div>
-      <div class="title">📈 财务分析</div>
-      <div class="sub">收入·成本·毛利·押金·应收账款</div>
+      <div class="title">📈 成本利润</div>
+      <div class="sub">一单收多少、花在哪、到底赚多少</div>
     </div>
     <div class="toolbar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <div class="range-tabs">
         <button class="range-tab active" data-range="day" onclick="setRange('day')">📅 日</button>
         <button class="range-tab" data-range="week" onclick="setRange('week')">🗓️ 周</button>
         <button class="range-tab" data-range="month" onclick="setRange('month')">📊 月</button>
+        <button class="range-tab" data-range="all" onclick="setRange('all')">🗂️ 全部</button>
       </div>
       <input type="date" id="rangeDate" class="range-date" onchange="onDateChange()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon">🔄</span> 刷新</button>
     </div>
   </div>
 
-  <!-- KPI总览 -->
+  <!-- 利润总览 -->
   <div class="fin-card">
     <div class="fin-kpi" id="kpiBox"></div>
   </div>
@@ -89,24 +124,97 @@
     <div class="fin-kpi" id="payBox"></div>
   </div>
 
-  <!-- 订单财务明细 -->
-  <div class="fin-card">
-    <div class="sec-title"><span class="dot" style="background:#3a2416"></span>📋 订单财务明细</div>
-    <table class="fin-tbl" id="finTable">
-      <thead>
-        <tr>
-          <th>日期</th><th>客户</th><th>金额</th><th>食材成本</th><th>损耗</th>
-          <th>毛利</th><th>毛利率</th><th>货款</th><th>押金</th><th></th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <!-- 食材成本管理（改价后全局同步到所有菜单/订单） -->
+  <!-- 每单利润 -->
   <div class="fin-card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-      <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>💰 食材成本管理</div>
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#3a2416"></span>📋 每单赚多少</div>
+      <div style="font-size:11px;color:#888">点「明细」可改这一单的成本（比如临时多请人、少搭一个天幕）</div>
+    </div>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table class="fin-tbl tbl-profit" id="profitTable">
+        <thead>
+          <tr>
+            <th>日期</th><th>客户</th><th>收入</th><th class="c-opt">成本</th><th>利润</th><th>毛利率</th>
+            <th class="c-opt">货款</th><th class="c-opt">押金</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <!-- 手机版：卡片（表格列多会要左右滑，改成卡片一眼看完） -->
+    <div id="profitCards" class="pf-cards"></div>
+  </div>
+
+  <!-- 成本与利润设置 -->
+  <div class="fin-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#2471a3"></span>⚙️ 成本与利润设置</div>
+      <button class="btn btn-primary btn-sm" onclick="saveCfg()">💾 保存设置</button>
+    </div>
+    <div class="sub" style="margin:6px 0 4px">改这里 = 以后每单自动按新价算（已手改过的单不受影响）</div>
+
+    <div style="margin-top:10px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:2px">🏕️ 场地单价（搭建/回收，按单算）</div>
+      <div class="sub" style="margin-bottom:4px">每 10 人算 1 单，不足 10 人也算 1 单（13 人 = 10+3 = 2 单）</div>
+      <div id="placeBox"></div>
+      <div style="margin-top:8px" class="pf-acts">
+        <button class="btn btn-sm" onclick="addPlace()">＋ 加一个场地</button>
+        <span class="lb" style="font-size:11px;color:#8a7364">每 <input type="number" id="cfgPerUnit" style="width:56px;padding:5px;border:1px solid #ddd;border-radius:6px;text-align:right"> 人算 1 单</span>
+      </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">💸 每单默认开销（可被单笔订单覆盖）</div>
+      <div class="cfg-row">
+        <span class="nm">往返油费</span>
+        <input type="number" id="cfgFuel" step="1" placeholder="0"> <span class="lb">元/单</span>
+        <div class="hint">车、油、过路费，跑一趟的钱</div>
+      </div>
+      <div class="cfg-row">
+        <span class="nm">人工</span>
+        <input type="number" id="cfgLabor" step="1" placeholder="0"> <span class="lb">元/单</span>
+        <div class="hint">小时工工钱 + 自己人时间折算</div>
+      </div>
+      <div class="cfg-row">
+        <span class="nm">额外耗材</span>
+        <input type="number" id="cfgConsume" step="1" placeholder="0"> <span class="lb">元/单</span>
+        <div class="hint">只填炭、气罐这类；<b>一次性餐具、打包盒已经算在食材成本里</b>，别重复填</div>
+      </div>
+      <div class="cfg-row">
+        <span class="nm">地址没匹配到场地时</span>
+        <input type="number" id="cfgDefaultOut" step="1" placeholder="100"> <span class="lb">元/单</span>
+        <div class="hint">比如新场地还没登记，先用这个价</div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">🏗️ 固定开销摊销（装备折旧、工具添置等）</div>
+      <div class="cfg-row">
+        <span class="nm">每月固定开销</span>
+        <input type="number" id="cfgFixedMonthly" step="10" placeholder="0" oninput="showAlloc()"> <span class="lb">元/月</span>
+        <div class="hint">不算这里的话，看到的是"现金利润"；算上就是"净利"</div>
+      </div>
+      <div class="cfg-row">
+        <span class="nm">预计每月单数</span>
+        <input type="number" id="cfgFixedOrders" step="1" placeholder="0" oninput="showAlloc()"> <span class="lb">单/月</span>
+        <div class="hint">留 0 = 按当期实际单数摊（单少的时候每单摊得多）</div>
+      </div>
+      <div class="cfg-row" style="border:none">
+        <span class="nm">＝ 每单摊销</span>
+        <b id="cfgAllocShow" style="color:#c0392b">¥0</b>
+      </div>
+      <div class="cfg-row" style="border:none">
+        <span class="nm">⚠️ 毛利率警戒线</span>
+        <input type="number" id="cfgAlert" step="1" placeholder="40"> <span class="lb">%</span>
+        <div class="hint">低于这条线标黄，亏本标红（你设的是 40%）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 食材成本管理（改价后全局同步） -->
+  <div class="fin-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>🥩 食材单价管理</div>
       <div style="font-size:11px;color:#888">改价后自动同步到所有菜单/订单成本</div>
     </div>
     <div style="margin:8px 0">
@@ -115,19 +223,20 @@
     <div class="cost-grid" id="costGrid"></div>
   </div>
 
-  <!-- 成本明细弹窗 -->
-  <div id="costModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:16px">
-    <div class="fin-card" style="max-width:600px;width:100%;max-height:85vh;overflow:auto;margin:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <h3 style="margin:0">🥩 订单 <span id="costOid"></span> 成本明细</h3>
-        <button class="btn btn-sm" onclick="closeCostModal()">✖</button>
+  <!-- 订单利润明细弹窗 -->
+  <div id="pfModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;align-items:center;justify-content:center;padding:12px">
+    <div class="fin-card" style="max-width:620px;width:100%;max-height:88vh;overflow:auto;margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="margin:0">💰 单 <span id="pfOid"></span> 赚多少</h3>
+        <button class="btn btn-sm" onclick="closePf()">✖</button>
       </div>
-      <table class="fin-tbl" id="costTable">
-        <thead><tr><th>食材</th><th>用量</th><th>单价</th><th>成本</th><th>编辑单价</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div style="margin-top:8px;text-align:right;font-weight:700;font-size:14px" id="costTotal"></div>
-      <div style="margin-top:4px;font-size:11px;color:var(--muted)">修改单价会更新该食材的全局成本（影响所有后续订单）</div>
+      <div id="pfHead" class="sub" style="margin-bottom:8px"></div>
+      <div id="pfBody"></div>
+      <div style="margin-top:10px;display:none" id="pfFoodBox">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">食材明细（改单价会影响所有订单）</div>
+        <table class="fin-tbl"><thead><tr><th>食材</th><th>用量</th><th>单价</th><th>成本</th><th>改单价</th></tr></thead>
+        <tbody id="pfFoodTbody"></tbody></table>
+      </div>
     </div>
   </div>
 </div>
@@ -135,56 +244,43 @@
 <script>
 const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
-const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',other:'其他'};
+const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
 
-let currentRange = 'day'; // day / week / month
+let currentRange = 'month';
+let cfgData = null;
 
-// ===== 日期范围计算 =====
-function fmtDate(d){
-  return d.toISOString().slice(0,10);
-}
+// ===== 日期范围 =====
+function fmtDate(d){ return d.toISOString().slice(0,10); }
 function getRangeDates(){
+  if(currentRange === 'all') return {from:'', to:''};
   const picked = document.getElementById('rangeDate').value;
   const base = picked ? new Date(picked) : new Date();
-  // 防止时区偏移
   const y = base.getFullYear(), m = base.getMonth(), d = base.getDate();
   if(currentRange === 'day'){
     const day = new Date(y,m,d);
     return {from: fmtDate(day), to: fmtDate(day)};
   } else if(currentRange === 'week'){
-    // 周一到周日
     const dow = base.getDay() || 7;
-    const monday = new Date(y,m,d - dow + 1);
-    const sunday = new Date(y,m,d - dow + 7);
-    return {from: fmtDate(monday), to: fmtDate(sunday)};
-  } else { // month
-    const first = new Date(y,m,1);
-    const last = new Date(y,m+1,0);
-    return {from: fmtDate(first), to: fmtDate(last)};
+    return {from: fmtDate(new Date(y,m,d - dow + 1)), to: fmtDate(new Date(y,m,d - dow + 7))};
+  } else {
+    return {from: fmtDate(new Date(y,m,1)), to: fmtDate(new Date(y,m+1,0))};
   }
 }
 function setRange(r){
   currentRange = r;
-  document.querySelectorAll('.range-tab').forEach(b=>{
-    b.classList.toggle('active', b.dataset.range === r);
-  });
+  document.querySelectorAll('.range-tab').forEach(b=>b.classList.toggle('active', b.dataset.range === r));
   loadAll();
 }
-function onDateChange(){
-  loadAll();
-}
-// 初始化日期为今天
+function onDateChange(){ loadAll(); }
 document.getElementById('rangeDate').value = fmtDate(new Date());
 
-// 带自动重试的取数：Render 免费实例休眠后冷启动，首次请求可能失败/超时，
-// 自动重试可避免"页面空白、要手动刷新"。
 async function fetchJSONRetry(url, tries){
   tries = tries || 4;
   for(let i=1;i<=tries;i++){
     try{
       const r = await fetch(url, {cache:'no-store'});
       if(r.ok) return await r.json();
-    }catch(e){ /* 网络失败：继续重试 */ }
+    }catch(e){}
     if(i < tries) await new Promise(s=>setTimeout(s, 1200));
   }
   return null;
@@ -192,62 +288,72 @@ async function fetchJSONRetry(url, tries){
 
 function loadAll(){
   const r = getRangeDates();
-  const qs = `date_from=${r.from}&date_to=${r.to}`;
+  const qs = (r.from ? `date_from=${r.from}&date_to=${r.to}` : '');
   Promise.all([
-    fetchJSONRetry('/api/finance/summary?'+qs),
-    fetchJSONRetry('/api/finance/orders?'+qs)
-  ]).then(([sumRes, ordRes])=>{
-    if(!sumRes || !ordRes){
+    fetchJSONRetry('/api/finance/profit-overview' + (qs ? '?'+qs : '')),
+    fetchJSONRetry('/api/finance/summary' + (qs ? '?'+qs : ''))
+  ]).then(([pfRes, sumRes])=>{
+    if(!pfRes){
       const box = document.getElementById('kpiBox');
       if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
         '⚠️ 数据加载失败（网络异常或系统正在启动）<br><br>'+
         '<button class="btn btn-primary btn-sm" onclick="loadAll()">🔄 重新加载</button></div>';
       return;
     }
-    renderKpi(sumRes.data||{});
-    renderOrders(ordRes.data||[]);
+    renderProfitKpi(pfRes.data.totals||{});
+    renderProfitOrders(pfRes.data.orders||[]);
+    if(sumRes) renderPayKpi(sumRes.data||{});
   });
+  loadCfg();
   loadCostItems();
 }
 
 function fmtY(n){
   n = n || 0;
-  return '¥' + (Math.abs(n) < 100 ? n.toFixed(1) : Math.round(n).toLocaleString());
+  const a = Math.abs(n);
+  return (n<0?'-¥':'¥') + (a < 100 ? a.toFixed(1) : Math.round(a).toLocaleString());
 }
+function pfTagCls(alert){ return alert==='loss' ? 'pf-loss' : (alert==='warn' ? 'pf-warn' : 'pf-ok'); }
+function pfTxt(alert){ return alert==='loss' ? '亏本' : (alert==='warn' ? '偏低' : '正常'); }
 
-function renderKpi(s){
+function renderProfitKpi(t){
+  const rev = t.revenue||0, cost = t.cost||0, profit = t.profit||0;
+  const alertCnt = (t.loss||0) + (t.warn||0);
   document.getElementById('kpiBox').innerHTML = `
-    <div class="fin-kpi-item positive">
-      <div class="lbl">💰 总收入</div>
-      <div class="val">${fmtY(s.total_revenue)}</div>
-      <div class="sub">${s.order_cnt||0}单</div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">💵 收入</div>
+      <div class="val">${fmtY(rev)}</div>
+      <div class="sub">${t.order_cnt||0} 单</div>
     </div>
     <div class="fin-kpi-item negative">
-      <div class="lbl">🥬 食材成本</div>
-      <div class="val">${fmtY(s.food_cost)}</div>
-      <div class="sub">含摆盘损耗</div>
+      <div class="lbl">💸 成本合计</div>
+      <div class="val">${fmtY(cost)}</div>
+      <div class="sub">食材 ${fmtY(t.food||0)} + 其他 ${fmtY(t.other||0)}</div>
     </div>
-    <div class="fin-kpi-item negative">
-      <div class="lbl">🔧 工具损耗</div>
-      <div class="val">${fmtY(s.tool_loss_cost)}</div>
-      <div class="sub">丢失/损坏</div>
+    <div class="fin-kpi-item ${profit>=0?'positive':'negative'}">
+      <div class="lbl">✅ 现金利润</div>
+      <div class="val">${fmtY(profit)}</div>
+      <div class="sub">毛利率 ${t.margin||0}%</div>
     </div>
-    <div class="fin-kpi-item positive">
-      <div class="lbl">📊 毛利</div>
-      <div class="val">${fmtY(s.gross_profit)}</div>
-      <div class="sub">毛利率 ${s.margin||0}%</div>
-    </div>
-    <div class="fin-kpi-item neutral">
-      <div class="lbl">📦 库存价值</div>
-      <div class="val">${fmtY(s.stock_value)}</div>
-      <div class="sub">食材库存</div>
+    <div class="fin-kpi-item ${(t.net||0)>=0?'positive':'negative'}">
+      <div class="lbl">🏗️ 含固定开销净利</div>
+      <div class="val">${fmtY(t.net||0)}</div>
+      <div class="sub">${t.fixed_monthly>0 ? ('每单摊 ¥'+(t.fixed_alloc_per_order||0)) : '未设固定开销'}</div>
     </div>
     <div class="fin-kpi-item neutral">
-      <div class="lbl">🚚 配送费收入</div>
-      <div class="val">${fmtY(s.delivery_revenue)}</div>
-      <div class="sub">含在总价内</div>
+      <div class="lbl">📊 平均毛利率</div>
+      <div class="val">${t.avg_margin||0}%</div>
+      <div class="sub">警戒线 ${t.margin_alert||40}%</div>
+    </div>
+    <div class="fin-kpi-item ${alertCnt?'negative':'positive'}">
+      <div class="lbl">⚠️ 需要留意</div>
+      <div class="val">${alertCnt} 单</div>
+      <div class="sub">亏本 ${t.loss||0} · 偏低 ${t.warn||0}</div>
     </div>
   `;
+}
+
+function renderPayKpi(s){
   document.getElementById('payBox').innerHTML = `
     <div class="fin-kpi-item positive">
       <div class="lbl">✅ 已收货款</div>
@@ -277,40 +383,62 @@ function renderKpi(s){
   `;
 }
 
-function renderOrders(orders){
-  const tb = document.querySelector('#finTable tbody');
+function renderProfitOrders(orders){
+  const tb = document.querySelector('#profitTable tbody');
+  const cards = document.getElementById('profitCards');
   if(!orders.length){
-    tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:20px">暂无订单数据</td></tr>';
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">这个区间没有订单</td></tr>';
+    cards.innerHTML = '<div class="muted" style="padding:16px;text-align:center">这个区间没有订单</div>';
     return;
   }
   tb.innerHTML = orders.map(o=>{
-    const profitColor = o.profit > 0 ? 'var(--green,#27ae60)' : 'var(--primary)';
-    const payBadge = `<span class="badge badge-${o.payment_status}">${PAY_LABEL[o.payment_status]||o.payment_status}</span>`;
-    const depBadge = `<span class="badge badge-${o.deposit_status}">${DEP_LABEL[o.deposit_status]||o.deposit_status}</span>`;
+    const depBadge = `<span class="badge badge-${o.deposit_status||'pending'}">${DEP_LABEL[o.deposit_status]||'待退'}</span>`;
     return `<tr>
       <td>${(o.booking_date||'').slice(5)}</td>
       <td style="text-align:left">${o.contact_name||'-'}</td>
-      <td>${fmtY(o.amount)}</td>
-      <td><a href="javascript:void(0)" onclick="showCostDetail(${o.id})" style="color:#c0392b;font-weight:600">${fmtY(o.food_cost)}</a></td>
-      <td>${fmtY(o.tool_loss)}</td>
-      <td style="color:${profitColor};font-weight:700">${fmtY(o.profit)}</td>
-      <td style="font-weight:600">${o.margin_pct}%</td>
-      <td>
+      <td>${fmtY(o.revenue)}</td>
+      <td class="c-opt">${fmtY(o.cost_total)}</td>
+      <td class="v-${o.alert==='loss'?'loss':(o.alert==='warn'?'warn':'ok')}" style="font-weight:700">${fmtY(o.profit)}</td>
+      <td><span class="pf-tag ${pfTagCls(o.alert)}">${o.margin}%</span></td>
+      <td class="c-opt">
         <select class="select-mini" onchange="setPay(${o.id}, this.value)">
           <option value="unpaid" ${o.payment_status==='unpaid'?'selected':''}>未收</option>
           <option value="partial" ${o.payment_status==='partial'?'selected':''}>部分</option>
           <option value="paid" ${o.payment_status==='paid'?'selected':''}>已收</option>
         </select>
       </td>
-      <td>
-        <select class="select-mini" onchange="setDep(${o.id}, this.value)">
-          <option value="pending" ${o.deposit_status==='pending'?'selected':''}>待退</option>
-          <option value="returned" ${o.deposit_status==='returned'?'selected':''}>已退</option>
-          <option value="forfeited" ${o.deposit_status==='forfeited'?'selected':''}>扣留</option>
-        </select>
-      </td>
-      <td><button class="btn btn-sm" onclick="showCostDetail(${o.id})" style="font-size:10px;padding:2px 6px">明细</button></td>
+      <td class="c-opt">${depBadge}</td>
+      <td><button class="btn btn-sm" onclick="openPf(${o.id})" style="font-size:10px;padding:2px 7px">明细</button></td>
     </tr>`;
+  }).join('');
+  cards.innerHTML = orders.map(o=>{
+    const cls = o.alert==='loss' ? 'loss' : (o.alert==='warn' ? 'warn' : 'ok');
+    const pay = PAY_LABEL[o.payment_status]||o.payment_status||'-';
+    const zeroNote = (o.revenue<=0) ? '（没填金额）' : '';
+    return `<div class="pf-card">
+      <div class="top">
+        <span class="who">${o.contact_name||'（无联系人）'}</span>
+        <span class="when">${o.booking_date||''}</span>
+      </div>
+      <div class="line"><span>收入 ${fmtY(o.revenue)}${zeroNote}</span><span>成本 ${fmtY(o.cost_total)}</span></div>
+      <div class="line">
+        <span class="v-${cls}" style="font-weight:800">${o.alert==='loss'?'🚨 亏本 ':'赚 '}${fmtY(o.profit)}</span>
+        <span><span class="pf-tag ${pfTagCls(o.alert)}">毛利率 ${o.margin}%</span></span>
+      </div>
+      <div class="acts">
+        <select class="select-mini" onchange="setPay(${o.id}, this.value)">
+          <option value="unpaid" ${o.payment_status==='unpaid'?'selected':''}>货款未收</option>
+          <option value="partial" ${o.payment_status==='partial'?'selected':''}>货款部分</option>
+          <option value="paid" ${o.payment_status==='paid'?'selected':''}>货款已收</option>
+        </select>
+        <select class="select-mini" onchange="setDep(${o.id}, this.value)">
+          <option value="pending" ${o.deposit_status!=='returned' && o.deposit_status!=='forfeited'?'selected':''}>押金待退</option>
+          <option value="returned" ${o.deposit_status==='returned'?'selected':''}>押金已退</option>
+          <option value="forfeited" ${o.deposit_status==='forfeited'?'selected':''}>押金扣留</option>
+        </select>
+        <button class="btn btn-sm" onclick="openPf(${o.id})" style="font-size:11px;padding:3px 9px">改成本 / 看明细</button>
+      </div>
+    </div>`;
   }).join('');
 }
 
@@ -318,59 +446,236 @@ function setPay(oid, status){
   fetch(`/api/finance/payment/${oid}`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({payment_status: status})
-  }).then(()=>showRefreshToast());
+  }).then(()=>{ showRefreshToast(); loadAll(); });
 }
 function setDep(oid, status){
   fetch(`/api/finance/deposit/${oid}`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({deposit_status: status})
-  }).then(()=>showRefreshToast());
+  }).then(()=>{ showRefreshToast(); loadAll(); });
 }
 
-// ===== 成本明细弹窗 =====
-function showCostDetail(oid){
-  document.getElementById('costOid').textContent = '#' + oid;
-  const modal = document.getElementById('costModal');
-  modal.style.display = 'flex';
+// ===== 单笔利润弹窗 =====
+let pfOid = null;
+function openPf(oid){
+  pfOid = oid;
+  document.getElementById('pfOid').textContent = '#' + oid;
+  document.getElementById('pfModal').style.display = 'flex';
+  document.getElementById('pfFoodBox').style.display = 'none';
+  loadPf(oid);
+  loadPfFood(oid);
+}
+function closePf(){ document.getElementById('pfModal').style.display = 'none'; }
+
+function loadPf(oid){
+  fetch(`/api/finance/order/${oid}/profit`).then(r=>r.json()).then(res=>{
+    if(!res.ok){ document.getElementById('pfBody').innerHTML = '<div class="muted">读取失败</div>'; return; }
+    renderPf(res.data);
+  });
+}
+
+function renderPf(p){
+  document.getElementById('pfHead').innerHTML =
+    `${p.booking_date||''} · ${p.address||'（没填地址）'} · ${p.contact_name||''}`
+    + (p.deposit ? ` · 押金${fmtY(p.deposit)}（离场退还，不算收入）` : '');
+
+  let html = `<div class="pf-total big" style="border-top:none;padding-top:0">
+      <span>💵 收入（实收货款）</span><span>${fmtY(p.revenue)}</span></div>`;
+  html += `<div style="font-weight:700;font-size:13px;margin:6px 0 2px">💸 这单花在哪</div>`;
+
+  p.items.forEach(it=>{
+    if(it.kind === 'food'){
+      html += `<div class="pf-row">
+        <span class="nm">🥩 ${it.name}</span>
+        <b style="color:#c0392b">${fmtY(it.amount)}</b>
+        <button class="btn btn-sm" onclick="toggleFood()" style="font-size:11px;padding:3px 8px">看明细</button>
+        <div class="hint">${it.hint}</div>
+      </div>`;
+    } else if(it.kind === 'outsource'){
+      html += `<div class="pf-row">
+        <span class="nm">🏕️ ${it.name} ${it.overridden?'<span class="pf-tag pf-warn">手改</span>':'<span class="pf-tag pf-ok">自动</span>'}</span>
+        <input type="number" step="1" id="pfQty" value="${it.qty!=null?it.qty:''}" title="单数"
+          onchange="pfSaveOut()">
+        <span class="eq">单 ×</span>
+        <input type="number" step="1" id="pfUp" value="${it.unit_price!=null?it.unit_price:''}" title="单价"
+          onchange="pfSaveOut()">
+        <span class="eq">＝ <b style="color:#c0392b">${fmtY(it.amount)}</b></span>
+        ${it.overridden?`<button class="btn btn-sm" onclick="pfClear('outsource')" style="font-size:11px;padding:3px 8px">恢复自动</button>`:''}
+        <div class="hint">${it.detail||it.hint}</div>
+      </div>`;
+    } else if(it.kind === 'other'){
+      html += `<div class="pf-row">
+        <span class="nm">📌 ${it.name}</span>
+        <input type="number" step="1" value="${it.amount}" onchange="pfSave('other',{id:${it.id},name:'${(it.name||'').replace(/'/g,'')}',amount:this.value})">
+        <button class="btn btn-sm" onclick="pfClear('other',${it.id})" style="font-size:11px;padding:3px 8px">删除</button>
+        <div class="hint">${it.detail||it.hint}</div>
+      </div>`;
+    } else {
+      html += `<div class="pf-row">
+        <span class="nm">${it.kind==='fuel'?'🚚':(it.kind==='labor'?'👷':'🔥')} ${it.name} ${it.overridden?'<span class="pf-tag pf-warn">手改</span>':'<span class="pf-tag pf-ok">自动</span>'}</span>
+        <input type="number" step="1" value="${it.amount}" onchange="pfSave('${it.kind}',{amount:this.value})">
+        ${it.overridden?`<button class="btn btn-sm" onclick="pfClear('${it.kind}')" style="font-size:11px;padding:3px 8px">恢复默认</button>`:''}
+        <div class="hint">${it.hint}</div>
+      </div>`;
+    }
+  });
+
+  html += `<div style="margin-top:8px" class="pf-acts">
+      <button class="btn btn-sm" onclick="addOther()">＋ 再加一项开销</button>
+      <span class="hint" style="font-size:11px;color:#999">（临时帮工、罚款、加买的东西…）</span>
+    </div>`;
+  html += `<div class="pf-total big"><span>成本合计</span><span style="color:#c0392b">${fmtY(p.cost_total)}</span></div>`;
+  html += `<div class="pf-total big"><span>现金利润</span><span class="v-${p.alert==='loss'?'loss':(p.alert==='warn'?'warn':'ok')}">${fmtY(p.cash_profit)}　<span class="pf-tag ${pfTagCls(p.alert)}">毛利率 ${p.margin}% · ${pfTxt(p.alert)}</span></span></div>`;
+  if(p.fixed_alloc > 0){
+    html += `<div class="pf-total"><span>固定开销摊销（每单）</span><span>-${fmtY(p.fixed_alloc)}</span></div>`;
+    html += `<div class="pf-total big"><span>净利（含固定开销）</span><span class="v-${p.net_profit<0?'loss':'ok'}">${fmtY(p.net_profit)}</span></div>`;
+  } else {
+    html += `<div class="hint" style="font-size:11px;color:#999;margin-top:4px">没设固定开销，所以净利=现金利润。想算装备折旧/添置的钱，去下面「固定开销摊销」填一个月度数。</div>`;
+  }
+  if(p.margin < p.margin_alert && p.cash_profit >= 0){
+    html += `<div style="margin-top:8px;font-size:12px;color:#b95c00;background:#fff4e5;border-radius:8px;padding:8px">
+      ⚠️ 这单毛利率 ${p.margin}% 低于你设的 ${p.margin_alert}% 警戒线。可以看看：是不是套餐价偏低、搭建单数多算了一单、或者食材成本该更新了。</div>`;
+  }
+  if(p.cash_profit < 0){
+    html += `<div style="margin-top:8px;font-size:12px;color:#b3261e;background:#fdecea;border-radius:8px;padding:8px">
+      🚨 这单是亏的（${fmtY(p.cash_profit)}）。优先核查：成本项有没有填错、套餐价格是否低于成本线、这一单是不是送了太多东西。</div>`;
+  }
+  document.getElementById('pfBody').innerHTML = html;
+}
+
+function toggleFood(){
+  const b = document.getElementById('pfFoodBox');
+  b.style.display = (b.style.display === 'none') ? 'block' : 'none';
+}
+function loadPfFood(oid){
   fetch(`/api/finance/order/${oid}/cost-detail`).then(r=>r.json()).then(d=>{
     const items = d.data||[];
     let total = 0;
-    const html = items.map(i=>{
+    document.getElementById('pfFoodTbody').innerHTML = items.map(i=>{
       total += i.total_cost;
       return `<tr>
         <td style="text-align:left">${i.name}</td>
         <td>${i.total_amount}${i.unit}</td>
         <td>¥${i.unit_cost}</td>
         <td style="font-weight:700;color:#c0392b">¥${i.total_cost.toFixed(2)}</td>
-        <td>
-          <input type="number" class="select-mini" style="width:70px" value="${i.unit_cost}" step="0.01"
-            onchange="editIngCost(${i.ingredient_id}, this.value)" id="edit-cost-${i.ingredient_id}">
-        </td>
+        <td><input type="number" class="select-mini" style="width:68px" value="${i.unit_cost}" step="0.001"
+          onchange="editIngCost(${i.ingredient_id}, this.value, true)"></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="5" class="muted" style="text-align:center">无成本数据</td></tr>';
-    document.querySelector('#costTable tbody').innerHTML = html;
-    document.getElementById('costTotal').innerHTML = `食材成本合计: <span style="color:#c0392b">¥${total.toFixed(2)}</span>`;
+    }).join('') || '<tr><td colspan="5" class="muted" style="text-align:center">无</td></tr>';
   });
 }
 
-function closeCostModal(){
-  document.getElementById('costModal').style.display = 'none';
+function pfSaveOut(){
+  const qty = document.getElementById('pfQty');
+  const up  = document.getElementById('pfUp');
+  pfSave('outsource', {qty: qty?qty.value:'', unit_price: up?up.value:''});
+}
+function pfSave(kind, payload){
+  fetch(`/api/finance/order/${pfOid}/cost`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({kind:kind}, payload))
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok){ renderPf(res.data); showRefreshToast(); loadAll(); }
+    else alert(res.msg||'保存失败');
+  });
+}
+function pfClear(kind, id){
+  fetch(`/api/finance/order/${pfOid}/cost/clear`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(id ? {kind:kind, id:id} : {kind:kind})
+  }).then(r=>r.json()).then(res=>{
+    if(res.ok){ renderPf(res.data); showRefreshToast(); loadAll(); }
+  });
+}
+function addOther(){
+  const name = prompt('这项开销叫什么？（例：临时帮工）');
+  if(!name) return;
+  const amt = prompt('多少钱？', '0');
+  if(amt === null) return;
+  pfSave('other', {name: name, amount: parseFloat(amt||0)});
 }
 
-function editIngCost(iid, val){
-  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({cost:parseFloat(val||0),item_type:'ingredient'})})
-    .then(r=>r.json()).then(()=>{
-      showRefreshToast();
-      loadCostItems(); // 同步成本管理卡
+// ===== 成本与利润设置 =====
+function loadCfg(){
+  fetchJSONRetry('/api/cost/config').then(res=>{
+    if(!res || !res.ok) return;
+    cfgData = res.data;
+    renderCfg();
+  });
+}
+function renderCfg(){
+  const c = cfgData || {};
+  document.getElementById('placeBox').innerHTML = (c.places||[]).map((p,i)=>`
+    <div class="place-row">
+      <input class="pname" value="${p.name||''}" placeholder="场地名（如 青龙湖）">
+      <span class="lb">搭建</span>
+      <input class="pnum" type="number" step="10" value="${p.outsource!=null?p.outsource:''}" placeholder="0">
+      <span class="lb">元/单</span>
+      <span class="lb">油费</span>
+      <input class="pnum" type="number" step="10" value="${p.fuel!=null?p.fuel:''}" placeholder="0">
+      <button class="btn btn-sm" onclick="delPlace(${i})" style="font-size:11px;padding:3px 8px">🗑</button>
+    </div>`).join('');
+  document.getElementById('cfgPerUnit').value = c.people_per_unit != null ? c.people_per_unit : 10;
+  document.getElementById('cfgFuel').value = (c.defaults||{}).fuel || 0;
+  document.getElementById('cfgLabor').value = (c.defaults||{}).labor || 0;
+  document.getElementById('cfgConsume').value = (c.defaults||{}).consume || 0;
+  document.getElementById('cfgDefaultOut').value = c.default_outsource != null ? c.default_outsource : 100;
+  document.getElementById('cfgFixedMonthly').value = c.fixed_monthly || 0;
+  document.getElementById('cfgFixedOrders').value = c.fixed_orders_per_month || 0;
+  document.getElementById('cfgAlert').value = c.margin_alert != null ? c.margin_alert : 40;
+  showAlloc();
+}
+function showAlloc(){
+  const m = parseFloat(document.getElementById('cfgFixedMonthly').value||0) || 0;
+  const n = parseFloat(document.getElementById('cfgFixedOrders').value||0) || 0;
+  const el = document.getElementById('cfgAllocShow');
+  if(m <= 0){ el.textContent = '¥0（没设月固定开销 → 只看现金利润）'; return; }
+  el.textContent = n > 0 ? ('¥' + (m/n).toFixed(2) + ' / 单') : ('¥' + m.toFixed(0) + ' ÷ 当期实际单数');
+}
+function addPlace(){
+  if(!cfgData) cfgData = {places:[]};
+  cfgData.places = cfgData.places || [];
+  cfgData.places.push({name:'', outsource:100, fuel:0});
+  renderCfg();
+}
+function delPlace(i){
+  if(!cfgData || !cfgData.places) return;
+  cfgData.places.splice(i,1);
+  renderCfg();
+}
+function saveCfg(){
+  const places = [];
+  document.querySelectorAll('#placeBox .place-row').forEach(r=>{
+    const nm = r.querySelector('.pname').value.trim();
+    const nums = r.querySelectorAll('.pnum');
+    if(!nm) return;
+    places.push({name:nm, outsource: parseFloat(nums[0].value||0)||0, fuel: parseFloat(nums[1].value||0)||0});
+  });
+  const patch = {
+    places: places,
+    people_per_unit: parseFloat(document.getElementById('cfgPerUnit').value||10) || 10,
+    default_outsource: parseFloat(document.getElementById('cfgDefaultOut').value||100) || 0,
+    defaults: {
+      fuel: parseFloat(document.getElementById('cfgFuel').value||0)||0,
+      labor: parseFloat(document.getElementById('cfgLabor').value||0)||0,
+      consume: parseFloat(document.getElementById('cfgConsume').value||0)||0
+    },
+    fixed_monthly: parseFloat(document.getElementById('cfgFixedMonthly').value||0)||0,
+    fixed_orders_per_month: parseFloat(document.getElementById('cfgFixedOrders').value||0)||0,
+    margin_alert: parseFloat(document.getElementById('cfgAlert').value||40)||40
+  };
+  fetch('/api/cost/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)})
+    .then(r=>r.json()).then(res=>{
+      if(res.ok){ cfgData = res.data; renderCfg(); showRefreshToast(); loadAll(); }
+      else alert('保存失败');
     });
 }
 
-// ===== 食材成本管理 =====
+// ===== 食材单价 =====
 let allCostItems = [];
 function loadCostItems(){
   fetchJSONRetry('/api/ingredients').then(d=>{
-    if(!d || !d.ok) return;   // 失败时静默，避免干扰主财务数据展示
+    if(!d || !d.ok) return;
     allCostItems = (d.data||[]).filter(i=>i.category !== 'packaging' && i.category !== 'utensil');
     const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
     allCostItems.sort((a,b)=>{
@@ -383,10 +688,7 @@ function loadCostItems(){
 }
 function renderCostItems(items){
   const grid = document.getElementById('costGrid');
-  if(!items.length){
-    grid.innerHTML = '<div class="muted" style="padding:20px">暂无食材</div>';
-    return;
-  }
+  if(!items.length){ grid.innerHTML = '<div class="muted" style="padding:20px">暂无食材</div>'; return; }
   grid.innerHTML = items.map(i=>{
     const ref = costRefText(i.cost, i.unit);
     return `<div class="cost-item" id="costItem-${i.id}">
@@ -417,7 +719,7 @@ function liveRef(input, unit, id){
   const el = document.getElementById('costRef-'+id);
   if(el) el.textContent = costRefText(input.value, unit);
 }
-function saveCost(iid, val, unit){
+function saveCost(iid, val, unit, inModal){
   const c = parseFloat(val||0);
   fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({cost:c,item_type:'ingredient'})})
@@ -425,12 +727,11 @@ function saveCost(iid, val, unit){
       const item = document.getElementById('costItem-'+iid);
       if(item){ item.classList.add('saved'); setTimeout(()=>item.classList.remove('saved'), 1200); }
       showRefreshToast();
-      // 刷新财务总览和订单（成本变化影响毛利）
-      const r = getRangeDates();
-      fetch('/api/finance/summary?date_from='+r.from+'&date_to='+r.to).then(x=>x.json()).then(d=>renderKpi(d.data||{}));
-      fetch('/api/finance/orders?date_from='+r.from+'&date_to='+r.to).then(x=>x.json()).then(d=>renderOrders(d.data||[]));
+      if(inModal){ if(pfOid) { loadPf(pfOid); loadPfFood(pfOid); } }
+      loadAll();
     });
 }
+function editIngCost(iid, val, inModal){ saveCost(iid, val, '', inModal); }
 
 loadAll();
 

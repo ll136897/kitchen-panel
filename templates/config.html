@@ -267,12 +267,13 @@
   <!-- ================= 设置 ================= -->
   <div class="tabpane" id="pane-set">
     <div class="card">
-      <h3>💰 65%毛利定价计算</h3>
+      <h3>💰 定价计算（按食材成本倒推售价）</h3>
       <div class="inline-form">
         <input id="cost" type="number" placeholder="食材成本" step="0.01">
         <button class="btn btn-primary" onclick="calcPrice()">算售价</button>
       </div>
       <div id="priceResult" class="price-result"></div>
+      <div class="muted" id="priceRealHint" style="font-size:12px;margin-top:8px;line-height:1.6"></div>
     </div>
     <div class="card">
       <h3>🚚 全局设置</h3>
@@ -643,6 +644,23 @@ function calcPrice(){
     });
 }
 
+// 把"真实毛利率"贴在定价器旁边：只按食材倒推容易定价偏低
+function loadPriceHint(){
+  const el = document.getElementById('priceRealHint');
+  if(!el) return;
+  fetch('/api/finance/profit-overview').then(r=>r.json()).then(res=>{
+    if(!res || !res.ok) return;
+    const t = (res.data||{}).totals||{};
+    if(!t.order_cnt || !t.revenue) return;
+    const foodPct = (t.food/t.revenue*100).toFixed(0);
+    const costPct = (t.cost/t.revenue*100).toFixed(0);
+    el.innerHTML = '⚠️ 上面这个算式<b>只算了食材</b>（按食材占售价 35% 倒推）。<br>'
+      + `你最近 ${t.order_cnt} 单的真实情况：食材占收入 <b>${foodPct}%</b>、`
+      + `含搭建回收/油费/人工/耗材后成本占收入 <b>${costPct}%</b>、真实毛利率 <b>${t.margin}%</b>。<br>`
+      + '定价时建议按"真实成本"再留余量，具体每单赚多少去「📈 财务」页看。';
+  }).catch(()=>{});
+}
+
 // 食材分类顺序与菜单页一致
 const ING_CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other'];
 const ING_CAT_LABEL = {
@@ -951,6 +969,7 @@ function loadVersion(){
 // 首屏：加载总览 + 版本
 loadOverview();
 loadVersion();
+loadPriceHint();
 </script>
 </body>
 </html>

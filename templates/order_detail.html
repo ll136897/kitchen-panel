@@ -71,6 +71,15 @@
     </div>
   </div>
 
+  <!-- 这单赚多少 -->
+  <div class="detail-card" id="profitCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <h3 style="margin:0">💰 这单赚多少</h3>
+      <a href="/finance" style="font-size:12px;color:#c0392b;font-weight:600">去财务页改成本 →</a>
+    </div>
+    <div id="profitBox" style="margin-top:8px;font-size:13px;color:var(--muted)">加载中…</div>
+  </div>
+
   <!-- 基本信息 -->
   <div class="detail-card">
     <h3 style="margin:0 0 10px">📝 订单信息</h3>
@@ -346,6 +355,40 @@ function showRefreshToast(){
 }
 loadDetail();
 loadPkgs();
+loadProfit();
+
+// ===== 这单赚多少 =====
+function loadProfit(){
+  const oid = {{ oid }};
+  fetch(`/api/finance/order/${oid}/profit`).then(r=>r.json()).then(res=>{
+    const box = document.getElementById('profitBox');
+    if(!res || !res.ok){ box.textContent = '暂时读不到利润数据'; return; }
+    const p = res.data;
+    const cls = p.alert==='loss' ? 'loss' : (p.alert==='warn' ? 'warn' : 'ok');
+    const color = cls==='loss' ? '#b3261e' : (cls==='warn' ? '#b95c00' : '#1b7a43');
+    const rows = p.items.filter(x=>x.amount>0).map(x=>{
+      const nm = (x.kind==='other') ? ('📌 ' + x.name) : x.name;
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">
+        <span>${nm}${x.overridden?' <span style="font-size:10px;color:#b95c00">（手改）</span>':''}</span>
+        <b style="color:#c0392b">-¥${x.amount.toFixed(x.amount%1?2:0)}</b></div>`;
+    }).join('');
+    const zeroNote = p.items.filter(x=>x.amount===0).length ? 
+      `<div style="font-size:11px;color:#999;margin-top:4px">尚未填：${p.items.filter(x=>x.amount===0).map(x=>x.name).join('、')}（去财务页设置默认值）</div>` : '';
+    box.innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700">
+        <span>💵 收入</span><span>¥${p.revenue.toFixed(2)}</span></div>
+      <div style="margin-top:6px">${rows || '<div style="color:#999">没有成本项</div>'}</div>
+      <div style="display:flex;justify-content:space-between;border-top:1px dashed #ddd;margin-top:6px;padding-top:6px">
+        <span>成本合计</span><b style="color:#c0392b">-¥${p.cost_total.toFixed(2)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;color:${color};margin-top:4px">
+        <span>${p.alert==='loss'?'🚨 亏本':'✅ 赚'}</span>
+        <span>¥${p.cash_profit.toFixed(2)}　<span style="font-size:12px">毛利率 ${p.margin}%</span></span></div>
+      ${p.fixed_alloc>0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#666;margin-top:3px">
+        <span>含固定开销摊销 ${'¥'+p.fixed_alloc}/单</span><b style="color:${p.net_profit<0?'#b3261e':'#1b7a43'}">净利 ¥${p.net_profit.toFixed(2)}</b></div>` : ''}
+      ${zeroNote}
+    `;
+  }).catch(()=>{ document.getElementById('profitBox').textContent = '暂时读不到利润数据'; });
+}
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
 </body>
