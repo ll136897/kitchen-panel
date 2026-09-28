@@ -277,8 +277,9 @@ async function ocrFromFile(inputEl){
       progress.innerHTML = '<span style="color:var(--red)">❌ 没识别到文字，请换张清晰的照片</span>';
       return;
     }
-    document.getElementById('rawText').value = text;
-    progress.innerHTML = `<span style="color:var(--green)">✅ 识别成功，${text.length} 个字符</span> （可手动修改后继续）`;
+    // 照片识别出来的也追加，不覆盖已经粘进去的内容（要重来就点「🗑️ 清空」）
+    appendToRaw(document.getElementById('rawText'), text);
+    progress.innerHTML = `<span style="color:var(--green)">✅ 识别成功，${text.length} 个字符</span> （已追加到录入框，可手动修改后继续）`;
     setTimeout(parseCurrent, 600);
   } catch(e){
     progress.innerHTML = '<span style="color:var(--red)">❌ 识别失败：' + (e.message||'未知错误') + '</span><div class="muted" style="font-size:11px;margin-top:4px">可能原因：图片太模糊、光线太暗、或者网络问题（首次需下载语言包）</div>';
