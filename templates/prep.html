@@ -218,6 +218,24 @@
     padding:8px 12px;font-size:14px;
   }
   .summary-chip b{color:var(--primary);font-size:16px}
+
+  /* 备餐保活条 */
+  .ka-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+  .ka-btn{background:#fff;border:1px solid var(--border);color:#3a2416;font-weight:700}
+  .ka-btn.on{background:#1b7a43;border-color:#1b7a43;color:#fff}
+  .ka-stat{font-size:12px;color:var(--muted);line-height:1.4;flex:1 1 150px;min-width:0}
+  .ka-stat.on{color:#1b7a43;font-weight:600}
+  .ka-stat.err{color:#b3261e;font-weight:600}
+  /* 系统正在启动的提示条 */
+  .wake-banner{display:none;align-items:center;gap:8px;flex-wrap:wrap;
+    background:#fff4e5;border:1px solid #f0c98a;color:#8a4b00;border-radius:10px;
+    padding:9px 12px;font-size:13px;font-weight:600;margin:0 0 12px}
+  .wake-banner.on{display:flex}
+  .wake-spin{display:inline-block;width:14px;height:14px;border:2px solid #e0a94f;
+    border-top-color:#8a4b00;border-radius:50%;animation:wkspin .8s linear infinite}
+  @keyframes wkspin{to{transform:rotate(360deg)}}
+  .stale-tag{display:inline-block;background:#fff4e5;color:#8a4b00;border-radius:8px;
+    padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px}
 </style>
 </head>
 <body>
@@ -244,8 +262,24 @@
     </div>
   </div>
 
+  <!-- 系统唤醒提示（冷启动时显示，避免以为是卡死） -->
+  <div class="wake-banner" id="wakeBanner">
+    <span class="wake-spin"></span>
+    <span id="wakeTxt">系统正在启动，约需 30-60 秒…</span>
+    <span style="font-weight:400;font-size:12px">（页面会自动等它起来，不用刷新、不用关）</span>
+  </div>
+
+  <!-- 备餐保活：防手机锁屏 + 每 5 分钟给系统发心跳，避免它休眠 -->
+  <div class="ka-bar">
+    <button id="kaBtn" class="btn btn-sm ka-btn" onclick="toggleKeepAlive()">🔆 备餐保活</button>
+    <span class="ka-stat" id="kaStat">备餐时点一下：屏幕不自动灭、系统不进入休眠，点别的套餐不用等</span>
+  </div>
+
   <!-- 有备餐订单的日期快捷切换条 -->
   <div class="date-chips" id="dateChips"></div>
+
+  <!-- 用的是"上次缓存的数据"时在这里说明（系统唤醒期间也能先干活） -->
+  <div id="prepStale" style="font-size:12px;color:#8a4b00;font-weight:600;margin:-4px 0 10px"></div>
 
   <!-- 模式切换 -->
   <div class="mode-tab" style="margin-bottom:14px">
@@ -320,18 +354,138 @@ function switchMode(mode){
   render();
 }
 
-// 带自动重试的取数：Render 免费实例休眠后冷启动，首次请求可能失败/超时，
-// 自动重试可避免"页面空白、要手动刷新"。
-async function fetchJSONRetry(url, tries){
-  tries = tries || 4;
-  for(let i=1;i<=tries;i++){
+// ===== 取数：Render 免费实例休眠后冷启动要 30-60 秒 =====
+// 原来只重试 4 次 × 1.2 秒（约 5 秒）就放弃 → 冷启动必然"加载失败"。
+// 现在给足耐心（默认约 100 秒），并在等待时明确告诉用户"系统正在启动"。
+let _wakeTimer = null, _wakeSec = 0;
+function showWake(){
+  if(_wakeSec < 3) return;      // 普通慢请求（1-2 秒）不闪这个提示
+  const b = document.getElementById('wakeBanner');
+  const t = document.getElementById('wakeTxt');
+  if(!b) return;
+  b.classList.add('on');
+  if(t) t.textContent = '系统正在启动（已等 ' + _wakeSec + ' 秒，通常 30-60 秒）…';
+}
+function hideWake(){
+  _wakeSec = 0;
+  if(_wakeTimer){ clearInterval(_wakeTimer); _wakeTimer = null; }
+  const b = document.getElementById('wakeBanner');
+  if(b) b.classList.remove('on');
+}
+// 同一个地址只保留一个在飞的请求（避免 60 秒轮询和手点刷新叠在一起）
+const _inflight = {};
+async function fetchJSONRetry(url, tries, gapMs){
+  if(_inflight[url]) return _inflight[url];
+  tries = tries || 40;        // 40 × 2.5s ≈ 100 秒，足够覆盖冷启动
+  gapMs = gapMs || 2500;
+  _inflight[url] = (async function(){
     try{
-      const r = await fetch(url, {cache:'no-store'});
-      if(r.ok) return await r.json();
-    }catch(e){ /* 网络失败：继续重试 */ }
-    if(i < tries) await new Promise(s=>setTimeout(s, 1200));
+      if(!_wakeTimer){ _wakeTimer = setInterval(()=>{ _wakeSec++; showWake(); }, 1000); }
+      for(let i=1;i<=tries;i++){
+        try{
+          const r = await fetch(url, {cache:'no-store'});
+          if(r.ok){ hideWake(); return await r.json(); }
+        }catch(e){ /* 网络还没通：继续等 */ }
+        if(i*gapMs >= 3000 && _wakeSec === 0) showWake();
+        if(i < tries) await new Promise(s=>setTimeout(s, gapMs));
+      }
+      hideWake();
+      return null;
+    } finally {
+      delete _inflight[url];
+    }
+  })();
+  return _inflight[url];
+}
+
+// ===== 备餐保活：防手机锁屏 + 每 5 分钟给系统发心跳（关键是别让 Render 实例休眠）=====
+// 只打 /api/ping（极轻量、不碰数据库）。注意别打 /robots.txt——服务睡着时
+// Render 会自己拦截那个路径，请求到不了应用、也就唤不醒它。
+const KA_KEY = 'ka_keepalive_on';
+const KA_WINDOW = [8, 24];     // 与 GitHub 定时保活一致：北京 08:00-23:59，避开凌晨省额度
+let _kaTimer = null, _kaStart = 0, _kaLock = null;
+
+function kaInServiceWindow(){
+  const h = new Date().getHours();
+  return h >= KA_WINDOW[0] && h < KA_WINDOW[1];
+}
+function kaStatus(cls, txt){
+  const el = document.getElementById('kaStat');
+  if(!el) return;
+  el.className = 'ka-stat' + (cls ? ' ' + cls : '');
+  el.textContent = txt;
+}
+function kaSetBtn(on){
+  const b = document.getElementById('kaBtn');
+  if(!b) return;
+  b.classList.toggle('on', !!on);
+  b.textContent = on ? '🔆 备餐保活：已开启' : '🔆 备餐保活';
+}
+async function kaWakeLock(){
+  try{
+    if(navigator.wakeLock && document.visibilityState === 'visible'){
+      _kaLock = await navigator.wakeLock.request('screen');
+      _kaLock.addEventListener('release', function(){ _kaLock = null; });
+      return true;
+    }
+  }catch(e){ /* 不支持/被拒绝：不影响心跳 */ }
+  return false;
+}
+function kaPing(){
+  return fetch('/api/ping', {cache:'no-store'}).then(r=>r.ok).catch(()=>false);
+}
+function kaBeat(){
+  if(!kaInServiceWindow()){
+    kaStatus('', '现在是休息时段（凌晨），心跳暂停以节省免费额度；营业时段会自动开始。');
+    return;
   }
-  return null;
+  kaPing().then(ok=>{
+    if(!ok){ kaStatus('err', '⚠️ 暂时连不上（可能正在唤醒），会自动重试…'); return; }
+    const mins = Math.round((Date.now() - _kaStart) / 60000);
+    kaStatus('on', '系统在线 · 已保活 ' + (mins < 1 ? '不到 1' : mins) + ' 分钟 · 每 5 分钟自动心跳');
+  });
+  if(!_kaLock) kaWakeLock();   // 切到别的 App 再回来，常亮会失效 → 重新申请
+}
+function startKeepAlive(silent){
+  if(_kaTimer) clearInterval(_kaTimer);
+  _kaStart = Date.now();
+  try{ localStorage.setItem(KA_KEY, '1'); }catch(e){}
+  kaSetBtn(true);
+  kaWakeLock().then(hasLock=>{
+    kaStatus('on', '已开启（' + (hasLock ? '屏幕不会自动灭' : '本浏览器不支持常亮，请别锁屏') + '）· 正在发心跳…');
+  });
+  kaBeat();
+  _kaTimer = setInterval(kaBeat, 5 * 60 * 1000);
+  if(!silent && typeof showRefreshToast === 'function') showRefreshToast();
+}
+function stopKeepAlive(silent){
+  if(_kaTimer){ clearInterval(_kaTimer); _kaTimer = null; }
+  try{ if(_kaLock){ _kaLock.release(); _kaLock = null; } }catch(e){}
+  try{ localStorage.removeItem(KA_KEY); }catch(e){}
+  kaSetBtn(false);
+  if(!silent) kaStatus('', '已关闭。备餐时建议开启：这样点别的套餐不用等系统启动。');
+}
+function toggleKeepAlive(){ if(_kaTimer) stopKeepAlive(); else startKeepAlive(); }
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible' && _kaTimer) kaBeat();
+});
+
+// ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
+function prepCacheKey(d){ return 'prep_cache_' + d; }
+function prepCacheSave(d, data){
+  try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
+}
+function prepCacheGet(d){
+  try{
+    const s = localStorage.getItem(prepCacheKey(d));
+    if(!s) return null;
+    const o = JSON.parse(s);
+    return (o && o.data) ? o : null;
+  }catch(e){ return null; }
+}
+function prepStaleNote(txt){
+  const el = document.getElementById('prepStale');
+  if(el) el.innerHTML = txt || '';
 }
 
 function loadPrepDates(autoSwitch){
@@ -399,15 +553,35 @@ function pickDate(dateStr){
 
 function loadPrep(){
   const d = document.getElementById('datePick').value;
+  // 先用上次缓存把画面撑起来（系统睡着时也不至于空白）
+  const cached = prepCacheGet(d);
+  if(cached && (!prepData || prepData.__date !== d)){
+    prepData = cached.data;
+    prepData.__date = d;
+    render();
+    renderDateChips(d);
+    const mins = Math.max(1, Math.round((Date.now() - cached.t) / 60000));
+    prepStaleNote('⏳ 先显示 ' + mins + ' 分钟前的缓存数据，正在向服务器取最新的…');
+  }
   return fetchJSONRetry('/api/prep/merged?date='+d).then(d2=>{
     if(!d2 || !d2.ok){
       const box = document.getElementById('ordersList');
-      if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
-        '⚠️ 数据加载失败（网络异常或系统正在启动）<br><br>'+
-        '<button class="btn btn-primary btn-sm" onclick="loadPrep()">🔄 重新加载</button></div>';
+      const haveCache = !!cached;
+      prepStaleNote(haveCache
+        ? '⚠️ 暂时连不上服务器（可能正在唤醒）。上面是 ' +
+          Math.max(1, Math.round((Date.now() - cached.t)/60000)) + ' 分钟前的缓存数据，点「🔄 刷新」重试。'
+        : '');
+      if(box && !haveCache){
+        box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
+          '⚠️ 数据加载失败（网络异常）<br><br>'+
+          '<button class="btn btn-primary btn-sm" onclick="loadPrep()">🔄 重新加载</button></div>';
+      }
       return;
     }
+    prepStaleNote('');
     prepData = d2.data;
+    prepData.__date = d;
+    prepCacheSave(d, d2.data);
     render();
     renderDateChips(d);  // 重新渲染 chips 以更新 active 状态
   });
@@ -795,8 +969,27 @@ function checkAllOrder(oid, checked){
 
 function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
 
+// 先用本地缓存把画面撑起来：万一系统正在冷启动（日期接口也要等 30-60 秒），
+// 后厨也能立刻看到上次的备餐清单，不至于对着空白页干等。
+function showCachedFirst(){
+  try{
+    const d = document.getElementById('datePick').value || new Date().toISOString().slice(0,10);
+    const c = prepCacheGet(d);
+    if(!c) return;
+    prepData = c.data;
+    prepData.__date = d;
+    render();
+    const mins = Math.max(1, Math.round((Date.now() - c.t) / 60000));
+    prepStaleNote('⏳ 正在唤醒系统，先显示 ' + mins + ' 分钟前的数据；连上后会自动更新。');
+  }catch(e){ /* 缓存坏了不影响正常流程 */ }
+}
+
+showCachedFirst();
 loadPrepDates(true);   // 首次加载，自动切到有订单的日期
 setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged') loadPrep(); }, 60000);
+
+// 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）
+try{ if(localStorage.getItem(KA_KEY) === '1') startKeepAlive(true); }catch(e){}
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){

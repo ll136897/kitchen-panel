@@ -206,6 +206,23 @@ def manual_backup():
     return jsonify({"ok": False, "msg": "备份失败（未配置 GITHUB_TOKEN 或网络错误）"})
 
 
+# ===== 保活端点（专给"定时保活"和页面心跳用）=====
+@app.route("/api/ping")
+def api_ping():
+    """极轻量：不查数据库、不做任何计算，只证明"服务是醒着的"。
+
+    为什么要专门做一个：
+    1. Render 免费实例「15 分钟没有入站请求」就会休眠，唤醒要 30-60 秒。
+    2. **别拿 /robots.txt 当保活地址**——服务休眠时 Render 自己拦截这个路径并回
+       disallow-all，请求根本到不了我们的服务，也就唤不醒它。
+    3. 心跳/定时任务打这里最省资源（不碰 SQLite）。
+    """
+    import time as _t
+    resp = jsonify({"ok": True, "t": int(_t.time())})
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
 @app.route("/api/backup/status", methods=["GET"])
 def backup_status():
     """查询备份配置状态"""
