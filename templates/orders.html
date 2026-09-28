@@ -5,6 +5,26 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>订单列表 · 刘和牛户外烤肉</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  .cell.clickable{cursor:pointer;transition:color .12s}
+  .cell.clickable:hover .v{text-decoration:underline;color:var(--primary)}
+  .cell.clickable .k::after{content:' 🔗';font-size:11px;opacity:.5}
+  /* 分组筛选条 */
+  #groupBar{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+    padding:12px 14px;background:linear-gradient(90deg,#fff7ed,#fff);border:1px solid #fed7aa}
+  .scope-chip{padding:6px 14px;border-radius:10px;font-size:14px;font-weight:700;border:1px solid var(--border);
+    background:#fff;color:#5a4a3a;cursor:pointer;line-height:1}
+  .scope-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .scope-chip:hover{filter:brightness(.97)}
+  .order-card.anchor{border-left:4px solid var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.12)}
+  .anchor-flag{display:inline-block;background:var(--primary);color:#fff;font-size:11px;font-weight:700;
+    padding:1px 8px;border-radius:8px;margin-left:8px;vertical-align:middle}
+  @media(max-width:600px){
+    .cell.clickable .k::after{content:''}
+    #groupBar{gap:6px}
+    .scope-chip{padding:5px 10px;font-size:13px}
+  }
+</style>
 </head>
 <body>
 <nav class="nav">
@@ -31,6 +51,18 @@
 
   <div id="trashTip" class="card" style="display:none;margin-bottom:14px;padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px">
     ♻️ <b>回收站</b>：被删除的订单会在 7 天内保留，可随时「恢复」；超过 7 天会被自动彻底清除。点「彻底删除」可立即永久清除（不可恢复）。
+  </div>
+
+  <!-- 按地址/联系人分组筛选条（点订单的地址或联系人时出现） -->
+  <div id="groupBar" class="card">
+    <button class="btn btn-sm btn-refresh" onclick="clearGroup()">← 返回全部</button>
+    <span id="groupTag" style="font-weight:700;font-size:15px;color:var(--primary)"></span>
+    <span id="groupSummary" class="muted" style="font-size:13px"></span>
+    <span style="margin-left:auto;display:inline-flex;gap:6px">
+      <button class="scope-chip active" data-scope="all" onclick="setScope('all')">全部</button>
+      <button class="scope-chip" data-scope="week" onclick="setScope('week')">本周</button>
+      <button class="scope-chip" data-scope="month" onclick="setScope('month')">本月</button>
+    </span>
   </div>
 
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
@@ -68,87 +100,144 @@ function statusLabel(s){
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
 
 let showDeleted = false;
+let allOrders = [];
+let groupField = null;     // 'address' | 'contact_name' | null
+let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
+let groupScope = 'all';    // 'all' | 'week' | 'month'
+
 function toggleTrash(){
   showDeleted = !showDeleted;
   loadOrders();
 }
+
+// 排序键： booking_date + 用餐/预订时间
+function orderDt(o){
+  const t = (o.meal_time || o.booking_time || o.pickup_time || '');
+  return (o.booking_date || '0000-00-00') + ' ' + (t || '00:00');
+}
+// date 是否落在以 anchorDate 为基准的 周/月 范围内
+function inScope(dateStr, anchorDate, scope){
+  if(!dateStr || !anchorDate) return false;
+  if(scope==='month') return dateStr.slice(0,7) === anchorDate.slice(0,7);
+  if(scope==='week'){
+    const w = (s)=>{ const d=new Date(s+'T00:00:00Z'); const day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day); return d.toISOString().slice(0,10); };
+    return w(dateStr) === w(anchorDate);
+  }
+  return true;
+}
+
+function groupBy(field, anchorId){
+  groupField = field; groupAnchorId = anchorId; groupScope = 'all';
+  renderOrders(); window.scrollTo(0,0);
+}
+function clearGroup(){
+  groupField = null; groupAnchorId = null; groupScope = 'all';
+  renderOrders(); window.scrollTo(0,0);
+}
+function setScope(s){
+  groupScope = s;
+  document.querySelectorAll('.scope-chip').forEach(b=>b.classList.toggle('active', b.dataset.scope===s));
+  renderOrders();
+}
+
 function loadOrders(){
   const url = showDeleted ? '/api/orders?deleted=1' : '/api/orders';
-  fetch(url).then(r=>r.json()).then(d=>{
+  return fetch(url).then(r=>r.json()).then(d=>{
     if(!d.ok) return;
-    const orders = d.data || [];
-    // 回收站开关
+    allOrders = d.data || [];
     const nDel = d.deleted_count || 0;
     const btn = document.getElementById('trashBtn');
     if(btn){
       btn.textContent = showDeleted ? '← 返回订单列表' : `🗑 回收站${nDel?`（${nDel}）`:''}`;
-      btn.className = showDeleted ? 'btn btn-sm btn-refresh' : 'btn btn-sm btn-refresh';
       btn.style.background = showDeleted ? '#6b7280' : (nDel ? '#c0392b' : '');
       btn.style.color = (showDeleted || nDel) ? '#fff' : '';
     }
     const tip = document.getElementById('trashTip');
     if(tip) tip.style.display = showDeleted ? 'block' : 'none';
-
-    // ---- 顶部 KPI ----
-    const count = {pending:0,preparing:0,done:0,cancelled:0};
-    let totalAmt = 0;
-    orders.forEach(o=>{
-      count[o.status] = (count[o.status]||0) + 1;
-      if(o.status!=='cancelled') totalAmt += (o.amount||0);
-    });
-    document.getElementById('orderKPIs').innerHTML = [
-      {cls:'kpi-dark',    icon:'📋', num:orders.length, lbl:'全部订单'},
-      {cls:'kpi-red',     icon:'⏳', num:count.pending,  lbl:'待备'},
-      {cls:'kpi-orange',  icon:'🔥', num:count.preparing,lbl:'备餐中'},
-      {cls:'kpi-green',   icon:'✅', num:count.done,     lbl:'已完成'},
-    ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div>
-      <div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
-
-    // ---- 订单卡片 ----
-    const html = orders.map(o=>{
-      const pkgs = (o.packages||[]).map(p=>`<span class="chip pkg">${p.name}·${p.people}人 × ${p.quantity}</span>`).join('') || '';
-      const [stText, stCls] = statusLabel(o.status);
-      return `<div class="order-card ${cardClass(o.status)}">
-        <div class="order-head">
-          <div>
-            <b style="font-size:16px">#${o.id}</b>
-            <span class="muted" style="margin-left:6px">${o.booking_date||''} ${o.booking_time||''}</span>
-          </div>
-          <span class="tag ${stCls} tag-lg">${stText}</span>
-        </div>
-
-        <div class="preview-grid" style="margin:8px 0">
-          <div class="cell"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
-          <div class="cell"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
-          <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone?`<a href="tel:${o.contact_phone}">${o.contact_phone}</a>`:'-'}</div></div>
-          <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
-        </div>
-
-        <div class="chips">${pkgs}</div>
-        ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
-
-        <div class="btn-row">
-          ${showDeleted ? `
-            <button class="btn btn-sm btn-success" onclick="restoreOrder(${o.id})">♻️ 恢复</button>
-            <button class="btn btn-sm btn-danger" onclick="purgeOrder(${o.id},'${o.contact_name||''}')">🔥 彻底删除</button>
-          ` : `
-          <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
-          <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
-          ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
-          ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
-          ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
-          ${(o.status==='done'||o.status==='cancelled') ? `<button class="btn btn-sm btn-danger" onclick="delOrder(${o.id},'${o.contact_name||''}')">🗑 删除</button>` : ''}
-          ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
-          `}
-        </div>
-        <div id="req-${o.id}" class="req-box" style="display:none"></div>
-      </div>`;
-    }).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa">
-      <div style="font-size:40px;margin-bottom:12px">🍖</div>
-      还没有订单，去 <a href="/">录单页</a> 创建第一笔吧
-    </div>`;
-    document.getElementById('orderList').innerHTML = html;
+    renderOrders();
   });
+}
+
+// 单张订单卡片（分组时 anchor=true 会高亮并打标）
+function buildCard(o, isAnchor){
+  const pkgs = (o.packages||[]).map(p=>`<span class="chip pkg">${p.name}·${p.people}人 × ${p.quantity}</span>`).join('') || '';
+  const [stText, stCls] = statusLabel(o.status);
+  const anchorFlag = isAnchor ? `<span class="anchor-flag">← 你点的这单</span>` : '';
+  return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}">
+    <div class="order-head">
+      <div>
+        <b style="font-size:16px">#${o.id}</b>
+        <span class="muted" style="margin-left:6px">${o.booking_date||''} ${o.booking_time||''}</span>${anchorFlag}
+      </div>
+      <span class="tag ${stCls} tag-lg">${stText}</span>
+    </div>
+
+    <div class="preview-grid" style="margin:8px 0">
+      <div class="cell clickable" onclick="groupBy('address', ${o.id})"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
+      <div class="cell clickable" onclick="groupBy('contact_name', ${o.id})"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
+      <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone?`<a href="tel:${o.contact_phone}">${o.contact_phone}</a>`:'-'}</div></div>
+      <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
+    </div>
+
+    <div class="chips">${pkgs}</div>
+    ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
+
+    <div class="btn-row">
+      ${showDeleted ? `
+        <button class="btn btn-sm btn-success" onclick="restoreOrder(${o.id})">♻️ 恢复</button>
+        <button class="btn btn-sm btn-danger" onclick="purgeOrder(${o.id},'${o.contact_name||''}')">🔥 彻底删除</button>
+      ` : `
+      <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
+      <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
+      <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="location.href='/prep?focus=${o.id}'">🍱 备餐核对</button>
+      ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
+      ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
+      ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
+      ${(o.status==='done'||o.status==='cancelled') ? `<button class="btn btn-sm btn-danger" onclick="delOrder(${o.id},'${o.contact_name||''}')">🗑 删除</button>` : ''}
+      ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
+      `}
+    </div>
+    <div id="req-${o.id}" class="req-box" style="display:none"></div>
+  </div>`;
+}
+
+function renderOrders(){
+  const box = document.getElementById('orderList');
+  const kpis = document.getElementById('orderKPIs');
+  // 顶部 KPI 始终按全部订单统计
+  const count = {pending:0,preparing:0,done:0,cancelled:0};
+  let totalAmt = 0;
+  allOrders.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
+  if(kpis) kpis.innerHTML = [
+    {cls:'kpi-dark',icon:'📋',num:allOrders.length,lbl:'全部订单'},
+    {cls:'kpi-red',icon:'⏳',num:count.pending,lbl:'待备'},
+    {cls:'kpi-orange',icon:'🔥',num:count.preparing,lbl:'备餐中'},
+    {cls:'kpi-green',icon:'✅',num:count.done,lbl:'已完成'},
+  ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
+
+  if(!groupField){
+    document.getElementById('groupBar').style.display='none';
+    box.innerHTML = allOrders.map(o=>buildCard(o,false)).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>还没有订单，去 <a href="/">录单页</a> 创建第一笔吧</div>`;
+    return;
+  }
+  // 分组视图：按地址/联系人聚合，默认按点击订单的时间排（默认全部时段）
+  const anchor = allOrders.find(o=>o.id===groupAnchorId) || {};
+  const val = (groupField==='address' ? (anchor.address||'') : (anchor.contact_name||''));
+  let list = allOrders.filter(o=> (groupField==='address' ? (o.address||'') : (o.contact_name||'')) === val);
+  if(groupScope!=='all') list = list.filter(o=> inScope(o.booking_date, anchor.booking_date, groupScope));
+  list = list.slice().sort((a,b)=> { const da=orderDt(a), db=orderDt(b); return db<da?-1:(db>da?1:0); });
+
+  const gb = document.getElementById('groupBar');
+  gb.style.display = 'flex';
+  const tagIcon = groupField==='address' ? '📍' : '👤';
+  document.getElementById('groupTag').textContent = `${tagIcon} ${val || '（空）'}`;
+  const sumAmt = list.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
+  const scopeTxt = groupScope==='all' ? '全部时段' : (groupScope==='week' ? '本周' : '本月');
+  document.getElementById('groupSummary').textContent = `· 共 ${list.length} 单 · 合计 ¥${sumAmt} · ${scopeTxt}`;
+  document.querySelectorAll('.scope-chip').forEach(b=>b.classList.toggle('active', b.dataset.scope===groupScope));
+
+  box.innerHTML = list.map(o=>buildCard(o, o.id===groupAnchorId)).join('') ||
+    `<div class="card" style="text-align:center;padding:32px;color:#aaa">该范围内暂无订单</div>`;
 }
 
 function viewReq(oid){
@@ -249,7 +338,15 @@ function submitReturn(){
     });
 }
 
-loadOrders();
+// 深度联动：从备餐页点"📋 看该订单"跳过来时，自动按这单的地址分组
+const _op = new URLSearchParams(location.search).get('focus');
+const _oid = _op ? parseInt(_op, 10) : null;
+loadOrders().then(()=>{
+  if(_oid){
+    const fo = allOrders.find(o=>o.id===_oid);
+    if(fo) groupBy('address', fo.id);
+  }
+});
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){

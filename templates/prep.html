@@ -350,6 +350,15 @@
     <div id="prepList"></div>
   </div>
 
+  <!-- 单订单核对清单模式：点订单行进入，整页式核对 -->
+  <div id="focusBar" style="display:none;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-refresh" onclick="exitFocus()">← 返回备餐列表</button>
+      <div id="focusMeta" style="font-size:15px;font-weight:700;flex:1;min-width:0"></div>
+    </div>
+    <div id="focusSub" class="muted" style="font-size:13px;margin-top:5px;line-height:1.6"></div>
+  </div>
+
   <!-- 按订单视图 -->
   <div id="orderView" style="display:none"></div>
 
@@ -650,7 +659,78 @@ function pickDate(dateStr){
   });
 }
 
+// ===== 单订单"整页核对清单"模式 =====
+// 点订单行 → 调 /api/prep/merged?ids=<oid>（返回结构与合并视图完全一致，只是只含这一单）
+// 因此可以直接复用 renderMerged / toggleItem / checkCat / checkAll 这一整套勾选逻辑。
+let focusOid = null;
+let savedPrepData = null;
+
+function enterFocus(oid){
+  if(!oid) return;
+  savedPrepData = prepData;
+  focusOid = oid;
+  document.getElementById('dateChips').style.display='none';
+  document.getElementById('ordersCard').style.display='none';
+  document.getElementById('orderView').style.display='none';
+  const tab = document.querySelector('.mode-tab');
+  if(tab) tab.style.display='none';
+  document.getElementById('focusBar').style.display='block';
+  loadPrep();
+}
+
+function renderFocusHeader(o){
+  const el = document.getElementById('focusMeta');
+  const sub = document.getElementById('focusSub');
+  const todayStr = todayDateStr || localToday();
+  const oDate = o.booking_date || '';
+  const diff = oDate ? dayDiff(oDate, todayStr) : null;
+  let dLabel = '待定';
+  if(oDate){
+    if(diff===0) dLabel = '今天';
+    else if(diff===1) dLabel = '明天';
+    else if(diff===-1) dLabel = '昨天';
+    else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
+  }
+  const t = orderTimeOf(o) || '';
+  const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
+  el.innerHTML = `📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
+  sub.innerHTML = `👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''} · 🍱 ${pkgs||'套餐未记录'}` +
+    (o.note && o.note!=='无' ? ` · 📝 ${o.note}` : '') +
+    ` <a href="/orders?focus=${o.id}" style="color:var(--primary);font-weight:700">📋 看该订单 →</a>`;
+}
+
+function exitFocus(){
+  focusOid = null;
+  prepData = savedPrepData;
+  document.getElementById('focusBar').style.display='none';
+  document.getElementById('dateChips').style.display='';
+  document.getElementById('ordersCard').style.display='';
+  document.getElementById('orderView').style.display = currentMode==='order' ? '' : 'none';
+  const tab = document.querySelector('.mode-tab');
+  if(tab) tab.style.display='';
+  render();
+}
+
 function loadPrep(){
+  // 单订单核对清单模式：只取这一单的数据，并复用合并视图的渲染与勾选逻辑
+  if(focusOid){
+    return fetchJSONRetry('/api/prep/merged?ids='+focusOid).then(d2=>{
+      if(!d2 || !d2.ok){
+        const box = document.getElementById('prepList');
+        if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">⚠️ 加载失败（系统可能正在启动），点「🔄 刷新」重试</div>';
+        return;
+      }
+      prepData = d2.data;
+      prepData.__date = 'focus';
+      const o = (prepData.orders||[]).find(x=>x.id===focusOid);
+      if(o) renderFocusHeader(o);
+      document.getElementById('ordersCard').style.display='none';
+      document.getElementById('orderView').style.display='none';
+      document.getElementById('focusBar').style.display='block';
+      document.getElementById('prepCard').style.display='';
+      renderMerged();
+    });
+  }
   const d = document.getElementById('datePick').value;
   // 先用上次缓存把画面撑起来（系统睡着时也不至于空白）
   const cached = prepCacheGet(d);
@@ -762,7 +842,7 @@ function render(){
     const addr = o.address || '—';
     const nm = o.contact_name || '—';
     const nt = o.note || '';
-    return `<div class="orow" onclick="openOrderSheet(${o.id})" title="点一下 → 看这一单要备的菜">
+    return `<div class="orow" onclick="enterFocus(${o.id})" title="点一下 → 打开这单的备餐核对清单（整页）">
       <span class="c-addr">📍 ${addr}</span>
       <span class="c-date">${dateText2}</span>
       <span class="c-time">${t}</span>
@@ -1194,8 +1274,15 @@ function showCachedFirst(){
 }
 
 showCachedFirst();
-loadPrepDates(true);   // 首次加载，自动切到有订单的日期
-setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged') loadPrep(); }, 60000);
+loadPrepDates(true).then(()=>{
+  // 深度联动：从订单页点"🍱 备餐核对"跳过来时，直接打开这单的整页核对清单
+  const fp = new URLSearchParams(location.search).get('focus');
+  if(fp){
+    const foid = parseInt(fp, 10);
+    if(!isNaN(foid)) enterFocus(foid);
+  }
+});   // 首次加载，自动切到有订单的日期
+setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）
 try{ if(localStorage.getItem(KA_KEY) === '1') startKeepAlive(true); }catch(e){}
