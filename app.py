@@ -8,6 +8,9 @@ from calculator import calc_order_requirements, calc_dashboard, preview_parse, c
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
+# /api/version 的缓存：{sha: 最新改动标题}，避免每次开页面都去 git fetch（见 api_version）
+_VERSION_MEMO = {}
+
 # 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
 init_db()
 
@@ -239,14 +242,35 @@ def api_version():
         import subprocess as _sp
         sha = _sp.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=here,
                                stderr=_sp.DEVNULL).decode().strip()
-        # 最新一条**非自动备份**的提交标题 —— 直接看出这一版包含什么改动
-        out = _sp.check_output(["git", "log", "-n", "60", "--pretty=%s"], cwd=here,
-                               stderr=_sp.DEVNULL).decode("utf-8", "replace").splitlines()
-        for ln in out:
-            ln = (ln or "").strip()
-            if ln and not ln.lower().startswith("auto:"):
-                latest = ln
-                break
+
+        def _log_latest():
+            """最新一条**非自动备份**的提交标题 —— 直接看出这一版包含什么改动"""
+            try:
+                out = _sp.check_output(["git", "log", "-n", "60", "--pretty=%s"], cwd=here,
+                                       stderr=_sp.DEVNULL).decode("utf-8", "replace").splitlines()
+            except Exception:
+                return ""
+            for ln in out:
+                ln = (ln or "").strip()
+                if ln and not ln.lower().startswith("auto:"):
+                    return ln
+            return ""
+
+        if sha and sha in _VERSION_MEMO:
+            latest = _VERSION_MEMO[sha]
+        else:
+            latest = _log_latest()
+            if not latest:
+                # Render 是浅克隆（--depth 1），历史里只剩一条 auto: 备份提交
+                # → 拉深一点再读；成功后缓存，避免每次开页面都去 fetch
+                try:
+                    _sp.check_output(["git", "fetch", "--depth=60", "origin"], cwd=here,
+                                     stderr=_sp.DEVNULL, timeout=25)
+                    latest = _log_latest()
+                except Exception:
+                    pass
+            if latest and sha:
+                _VERSION_MEMO[sha] = latest
         # 去掉 feat/fix(范围): 这类技术前缀，显示成"出餐单：xxx"这样的大白话
         import re as _re
         m = _re.match(r"^(feat|fix|refactor|chore|perf|docs|style|test)\s*(?:\(([^)]*)\))?\s*[:：]\s*(.+)$", latest)
