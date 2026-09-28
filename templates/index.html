@@ -98,6 +98,7 @@
     <div class="muted" style="font-size:12px;margin-top:6px">
       一次粘多单不需要加分隔号：微信聊天记录按「昵称+时间」自动拆，空行隔开的多段也会自动拆。
     </div>
+    <div id="pasteCount" class="muted" style="font-size:12px;color:#8a7364"></div>
   </div>
 
   <div id="preview" class="preview-area"></div>
@@ -109,13 +110,31 @@ let parsedItems = [];      // 后端解析结果（每段一单）
 let parseBusy = false;
 let _timer = null;
 
-// 粘贴后自动识别：省掉一次点按钮（首次粘贴也能自动跑，不用先点页面）
-document.getElementById('raw').addEventListener('paste', ()=>{
+// 粘贴 = 累积追加：每次粘的都排到下一行，**绝不覆盖**已经粘进去的内容。
+// （以前粘到选中区域上会把已有内容替换掉，等于白粘；现在一律追加到末尾）
+document.getElementById('raw').addEventListener('paste', function(e){
+  const ta = e.target;
+  const txt = (e.clipboardData || window.clipboardData).getData('text') || '';
+  if(!txt.trim()) return;
+  e.preventDefault();
+  const cur = ta.value.replace(/\s+$/, '');
+  ta.value = (cur ? cur + '\n\n' : '') + txt.trim() + '\n';
+  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  ta.scrollTop = ta.scrollHeight;
+  updatePasteCount();
   if(document.getElementById('autoPaste') && document.getElementById('autoPaste').checked){
     clearTimeout(_timer); _timer = setTimeout(()=>parseOrder(), 600);
   }
 });
 function syncAuto(){ /* 勾选状态由 paste 事件读取，这里留空以便以后扩展 */ }
+
+// 已经粘了多少内容（让"累积"看得见）
+function updatePasteCount(){
+  const el = document.getElementById('pasteCount');
+  if(!el) return;
+  const v = document.getElementById('raw').value.trim();
+  el.textContent = v ? `已粘 ${v.length} 字 · 再粘下一单会接着往下排` : '';
+}
 
 // chunks 为空则让后端按原文自动拆；传了就按人工调整后的段来
 function parseOrder(chunks){

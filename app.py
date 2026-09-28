@@ -948,7 +948,8 @@ def api_parse():
         p["_split_reason"] = reason
         items.append(p)
     reasons = sorted({r for _, r in parts})
-    return jsonify({"ok": True, "batch": True, "count": len(items),
+    # batch 只在真的多单时为 true：单条时订单页/首页仍走"完整明细预览"那条老路
+    return jsonify({"ok": True, "batch": len(items) > 1, "count": len(items),
                     "items": items, "data": (items[0] if items else None),
                     "split_by": (reasons[0] if len(reasons) == 1 else "mixed")})
 
@@ -3055,6 +3056,90 @@ def prep_dates():
         d["is_past"] = (r["booking_date"] < today)
         dates.append(d)
     return jsonify({"ok": True, "dates": dates, "today": today})
+
+
+@app.route("/api/stats/packages")
+def stats_packages():
+    """按套餐分类统计：某个时间范围里，每种套餐各多少单 / 多少份。
+
+    给订单页、备餐页的「套餐分类」用：一眼看出"今天有几个 10 人餐"。
+      scope : day(当天) / week(本周) / month(本月) / all(全部)
+      date  : 基准日期（默认今天）
+      detail: 传 1 时连"是哪几单"一起返回（点套餐看明细）
+    """
+    from calculator import today_cst as _today_cst
+    import datetime as _dt
+    base_s = request.args.get("date") or _today_cst().isoformat()
+    try:
+        base = _dt.date.fromisoformat(base_s)
+    except Exception:
+        base = _today_cst()
+    scope = (request.args.get("scope") or "day").lower()
+    frm = to = None
+    if scope == "week":
+        frm = base - _dt.timedelta(days=base.weekday())
+        to = frm + _dt.timedelta(days=6)
+    elif scope == "month":
+        frm = base.replace(day=1)
+        nxt = (frm.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
+        to = nxt - _dt.timedelta(days=1)
+    elif scope == "all":
+        pass
+    else:                       # day
+        scope = "day"
+        frm = to = base
+
+    db = g.db
+    cur = db.cursor()
+    where = ("FROM order_packages op JOIN orders o ON o.id = op.order_id "
+             "LEFT JOIN packages p ON p.id = op.package_id "
+             "WHERE o.deleted_at IS NULL AND o.status != 'cancelled' "
+             "AND o.booking_date IS NOT NULL AND o.booking_date != ''")
+    args = []
+    if frm:
+        where += " AND o.booking_date >= ? AND o.booking_date <= ?"
+        args += [frm.isoformat(), to.isoformat()]
+    rows = [dict(r) for r in cur.execute(
+        "SELECT COALESCE(p.name,'未匹配套餐') AS name, op.people, "
+        "COUNT(DISTINCT o.id) AS order_cnt, SUM(op.quantity) AS qty " +
+        where + " GROUP BY COALESCE(p.name,'未匹配套餐'), op.people "
+                "ORDER BY op.people, order_cnt DESC", args).fetchall()]
+
+    cnt_sql = ("SELECT COUNT(*) AS c FROM orders o WHERE o.deleted_at IS NULL "
+               "AND o.status != 'cancelled' AND o.booking_date IS NOT NULL "
+               "AND o.booking_date != ''")
+    if frm:
+        cnt_sql += " AND o.booking_date >= ? AND o.booking_date <= ?"
+    total_orders = cur.execute(cnt_sql, args).fetchone()["c"]
+
+    if request.args.get("detail") == "1":
+        by_name = {}
+        for r in cur.execute(
+                "SELECT COALESCE(p.name,'未匹配套餐') AS name, o.id, o.booking_date, "
+                "o.booking_time, o.address, o.contact_name, op.quantity, op.people " +
+                where + " ORDER BY o.booking_date, o.booking_time", args).fetchall():
+            d = dict(r)
+            by_name.setdefault(d["name"], []).append({
+                "id": d["id"], "booking_date": d["booking_date"],
+                "booking_time": d["booking_time"], "address": d["address"],
+                "contact_name": d["contact_name"], "quantity": d["quantity"],
+                "people": d["people"],
+            })
+        for r in rows:
+            r["orders"] = by_name.get(r["name"], [])
+
+    label = {"day": "%d月%d日" % (base.month, base.day),
+             "week": ("%d月%d日-%d月%d日" % (frm.month, frm.day, to.month, to.day)) if frm else "",
+             "month": "%d月" % base.month,
+             "all": "全部"}[scope]
+    return jsonify({
+        "ok": True, "scope": scope, "label": label,
+        "range": {"from": frm.isoformat() if frm else "", "to": to.isoformat() if to else ""},
+        "total_orders": total_orders,
+        "qty_total": sum((r["qty"] or 0) for r in rows),
+        "people_total": sum((r["people"] or 0) * (r["qty"] or 0) for r in rows),
+        "items": rows,
+    })
 
 
 # ===== 备餐勾选 =====

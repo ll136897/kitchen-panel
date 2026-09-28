@@ -65,7 +65,7 @@
     </div>
 
     <input type="file" id="imgInput" accept="image/*" style="display:none" onchange="ocrFromFile(this)">
-    <textarea id="rawText" placeholder="📋 粘贴微信客户确认订单文字，或选照片识别&#10;&#10;批量粘贴：多个订单之间用 --- 分隔&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元&#10;---&#10;预约时间:9.16 18.00&#10;预约项目:&#10;5-6人餐 （搭建）&#10;预约地址:..."></textarea>
+    <textarea id="rawText" placeholder="📋 粘贴微信客户确认订单文字，或选照片识别&#10;&#10;可以连着粘好几单：微信聊天记录会自动拆，空行隔开的多段也会拆，不用加分隔号&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元&#10;---&#10;预约时间:9.16 18.00&#10;预约项目:&#10;5-6人餐 （搭建）&#10;预约地址:..."></textarea>
     <div class="btn-row">
       <button class="btn btn-accent" onclick="pasteFromClipboard()">📋 粘贴</button>
       <button class="btn btn-accent" onclick="document.getElementById('imgInput').click()">📷 选照片</button>
@@ -73,6 +73,7 @@
       <button class="btn" id="btnSample" onclick="loadSample()">📝 示例</button>
       <button class="btn" onclick="clearText()">🗑️ 清空</button>
     </div>
+    <div id="pasteCount" class="muted" style="font-size:12px;margin-top:6px"></div>
     <div id="ocrStatus" style="display:none;margin:8px 0;padding:10px;background:#fff7e6;border-radius:8px;border:1px dashed var(--accent);font-size:13px">
       <span id="ocrProgress">🔄 正在识别图片文字...</span>
     </div>
@@ -195,6 +196,21 @@ function showStockToast(msg){
   setTimeout(()=>t.remove(), 2500);
 }
 
+// 往录入框里追加一段（多单连着粘时，后来的排在下一行，前面的不动）
+function appendToRaw(ta, text){
+  const cur = ta.value.replace(/\s+$/, '');
+  ta.value = (cur ? cur + '\n\n' : '') + String(text || '').trim() + '\n';
+  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  ta.scrollTop = ta.scrollHeight;
+  updatePasteCount();
+}
+function updatePasteCount(){
+  const el = document.getElementById('pasteCount');
+  if(!el) return;
+  const v = (document.getElementById('rawText').value || '').trim();
+  el.textContent = v ? `已粘 ${v.length} 字 · 再粘下一单会接着往下排（不会覆盖）` : '';
+}
+
 // 点按钮后聚焦 textarea，闪烁边框提示，用户长按会弹系统粘贴菜单
 async function pasteFromClipboard(){
   const ta = document.getElementById('rawText');
@@ -203,17 +219,18 @@ async function pasteFromClipboard(){
     if(navigator.clipboard && window.isSecureContext){
       const text = await navigator.clipboard.readText();
       if(text){
-        ta.value = text;
-        ta.scrollTop = 0;
+        // 累积粘贴：**追加**到已有内容后面，绝不覆盖上一单
+        // （以前是 ta.value = text，粘第二单就把第一单冲掉了）
+        appendToRaw(ta, text);
         parseCurrent();
         return;
       }
     }
   }catch(e){}
 
-  // 退化成：聚焦 + 闪烁 + 提示用户长按粘贴
+  // 退化成：聚焦 + 闪烁 + 提示用户长按粘贴（光标放到末尾，不选中已有内容，避免被覆盖）
   ta.focus();
-  ta.select();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
   // 闪烁边框 3 次
   let n = 0;
   const orig = ta.style.border;

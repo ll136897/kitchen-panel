@@ -16,6 +16,13 @@
     background:#fff;color:#5a4a3a;cursor:pointer;line-height:1}
   .scope-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .scope-chip:hover{filter:brightness(.97)}
+  /* 套餐分类 chips */
+  .pkg-chip{padding:7px 12px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--border);
+    background:#fff;color:#5a4a3a;cursor:pointer;line-height:1;display:inline-flex;align-items:center;gap:4px}
+  .pkg-chip .n{color:var(--primary);font-weight:800}
+  .pkg-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .pkg-chip.active .n{color:#fff}
+  @media(max-width:600px){ .pkg-chip{padding:6px 10px;font-size:12px} }
   .order-card.anchor{border-left:4px solid var(--primary);box-shadow:0 0 0 2px rgba(192,57,43,.12)}
   .anchor-flag{display:inline-block;background:var(--primary);color:#fff;font-size:11px;font-weight:700;
     padding:1px 8px;border-radius:8px;margin-left:8px;vertical-align:middle}
@@ -76,6 +83,21 @@
     </span>
   </div>
 
+  <!-- 按套餐分类筛选（当天/本周/本月/全部 + 每种套餐多少单） -->
+  <div class="card" id="pkgCard" style="margin-bottom:14px;padding:12px 14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div style="font-weight:800;font-size:14px">🍱 按套餐看</div>
+      <span style="display:inline-flex;gap:6px;flex-wrap:wrap">
+        <button class="scope-chip active" data-pscope="day"   onclick="setPkgScope('day')">当天</button>
+        <button class="scope-chip" data-pscope="week"  onclick="setPkgScope('week')">本周</button>
+        <button class="scope-chip" data-pscope="month" onclick="setPkgScope('month')">本月</button>
+        <button class="scope-chip" data-pscope="all"   onclick="setPkgScope('all')">全部</button>
+      </span>
+    </div>
+    <div id="pkgChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
+    <div id="pkgSummary" class="muted" style="font-size:12px;margin-top:6px"></div>
+  </div>
+
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
   <div class="kpi-row" id="orderKPIs" style="margin-bottom:16px"></div>
 
@@ -127,6 +149,11 @@ let currentVisibleIds = [];   // 当前渲染出来的订单 id（用于全选�
 let groupField = null;     // 'address' | 'contact_name' | null
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
+
+// 套餐分类筛选：pkgScope=时间范围，pkgFilter=选中哪个套餐（null=不选）
+let pkgScope = 'day';
+let pkgFilter = null;
+let pkgStats = null;
 
 // 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
 // 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
@@ -182,7 +209,58 @@ function loadOrders(){
     const tip = document.getElementById('trashTip');
     if(tip) tip.style.display = showDeleted ? 'block' : 'none';
     renderOrders();
+    loadPkgStats();
   });
+}
+
+// ===== 套餐分类：当天/本周/本月/全部 各有多少个几人餐 =====
+function hasPkg(o, name){
+  return (o.packages||[]).some(p=>(p.name||'未匹配套餐')===name);
+}
+function loadPkgStats(){
+  fetch('/api/stats/packages?scope='+pkgScope)
+    .then(r=>r.json()).then(d=>{
+      if(!d || !d.ok) return;
+      pkgStats = d;
+      // 兜底：当天没订单就自动往上看本周→本月→全部，别一进来是空的
+      if(!(d.items||[]).length && pkgScope !== 'all'){
+        const next = {day:'week', week:'month', month:'all'}[pkgScope];
+        if(next){ setPkgScope(next); return; }
+      }
+      const box = document.getElementById('pkgChips');
+      const sum = document.getElementById('pkgSummary');
+      const items = d.items || [];
+      if(!items.length){
+        box.innerHTML = `<span class="muted" style="font-size:13px">${d.label||''}没有套餐订单</span>`;
+        sum.textContent = '';
+        return;
+      }
+      box.innerHTML = items.map(it=>`
+        <button class="pkg-chip ${pkgFilter===it.name?'active':''}" onclick="pickPkg('${String(it.name).replace(/'/g,"\\'")}')">
+          ${it.name} <span class="n">${it.order_cnt}单</span>·${it.qty}份
+        </button>`).join('');
+      sum.textContent = `${d.label || ''} · 共 ${d.total_orders} 单 · 套餐 ${d.qty_total} 份 · 涉及约 ${d.people_total} 人`
+        + (pkgFilter ? ' · 点亮的套餐再点一下取消' : ' · 点套餐只看那一种');
+    }).catch(()=>{});
+}
+function setPkgScope(s){
+  pkgScope = s;
+  document.querySelectorAll('.scope-chip[data-pscope]').forEach(b=>b.classList.toggle('active', b.dataset.pscope===s));
+  loadPkgStats();
+  if(pkgFilter) renderOrders();
+}
+function pickPkg(name){
+  pkgFilter = (pkgFilter===name) ? null : name;
+  loadPkgStats();
+  renderOrders();
+  window.scrollTo(0,0);
+}
+function clearPkg(){ pkgFilter = null; loadPkgStats(); renderOrders(); }
+// 套餐模式下把分组条的"全部/本周/本月"藏起来了，退出套餐模式要恢复
+function gbShowScopeChips(){
+  const gb = document.getElementById('groupBar');
+  if(!gb) return;
+  gb.querySelectorAll('.scope-chip[data-scope]').forEach(b=>b.style.display='');
 }
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
@@ -243,6 +321,33 @@ function renderOrders(){
     {cls:'kpi-green',icon:'✅',num:count.done,lbl:'已完成'},
   ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
 
+  // 套餐分类筛选（优先级最高：点了某个套餐就只看这种套餐的订单）
+  if(pkgFilter){
+    const range = (pkgStats && pkgStats.range) || {from:'',to:''};
+    let list = allOrders.filter(o=> hasPkg(o, pkgFilter));
+    if(range.from) list = list.filter(o=> o.booking_date && o.booking_date>=range.from && o.booking_date<=range.to);
+    list = list.slice().sort((a,b)=>{ const da=orderDt(a), db=orderDt(b); return db<da?-1:(db>da?1:0); });
+    const gb = document.getElementById('groupBar');
+    gb.style.display = 'flex';
+    const label = (pkgStats && pkgStats.label) || '';
+    document.getElementById('groupTag').textContent = `🍱 ${pkgFilter}`;
+    const sumAmt = list.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
+    let qty = 0;
+    list.forEach(o=> (o.packages||[]).forEach(p=>{ if((p.name||'未匹配套餐')===pkgFilter) qty += (p.quantity||0); }));
+    document.getElementById('groupSummary').textContent =
+      `· ${label} · 共 ${list.length} 单 ${qty} 份 · 合计 ¥${sumAmt}`;
+    gb.querySelector('.btn').textContent = '← 返回全部';
+    gb.querySelector('.btn').onclick = clearPkg;
+    // 分组范围 chips 在套餐模式下不显示（避免和"全部/本周/本月"混淆）
+    gb.querySelectorAll('.scope-chip[data-scope]').forEach(b=>b.style.display='none');
+    box.innerHTML = list.map(o=>buildCard(o,false)).join('') ||
+      `<div class="card" style="text-align:center;padding:32px;color:#aaa">${label}没有「${pkgFilter}」的订单</div>`;
+    finishRender();
+    return;
+  }
+  // 套餐模式下隐藏过的范围 chips 要恢复
+  gbShowScopeChips();
+
   if(!groupField){
     document.getElementById('groupBar').style.display='none';
     box.innerHTML = allOrders.map(o=>buildCard(o,false)).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>还没有订单，去 <a href="/">录单页</a> 创建第一笔吧</div>`;
@@ -270,7 +375,7 @@ function renderOrders(){
   const sumAmt = list.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
   const scopeTxt = groupScope==='all' ? '全部时段' : (groupScope==='week' ? '本周' : '本月');
   document.getElementById('groupSummary').textContent = `· 共 ${list.length} 单 · 合计 ¥${sumAmt} · ${scopeTxt}`;
-  document.querySelectorAll('.scope-chip').forEach(b=>b.classList.toggle('active', b.dataset.scope===groupScope));
+  document.querySelectorAll('.scope-chip[data-scope]').forEach(b=>b.classList.toggle('active', b.dataset.scope===groupScope));
 
   box.innerHTML = list.map(o=>buildCard(o, o.id===groupAnchorId)).join('') ||
     `<div class="card" style="text-align:center;padding:32px;color:#aaa">该范围内暂无订单</div>`;
