@@ -14,6 +14,17 @@ def get_db():
     return conn
 
 
+def purchase_defaults(unit):
+    """食材"采购口径"的默认值：克→公斤、毫升→升（1:1000），其余单位 1:1。
+    新建食材时用它填默认值，保证界面永远有合理的采购单位可显示。"""
+    u = (unit or "").strip()
+    if u == "g":
+        return "公斤", 1000.0
+    if u == "ml":
+        return "升", 1000.0
+    return u, 1.0
+
+
 def init_db():
     """初始化表结构"""
     with closing(get_db()) as conn:
@@ -34,6 +45,21 @@ def init_db():
         cols = [r[1] for r in cur.execute("PRAGMA table_info(ingredients)").fetchall()]
         if "category" not in cols:
             cur.execute("ALTER TABLE ingredients ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
+
+        # 迁移：食材"采购口径"（按公斤/斤/袋填价）+ "每份克数"
+        #   为什么加这三个：
+        #     · 用户脑子里是采购价（"牛肋条 105 一公斤"），而系统里存的是元/克（0.105），
+        #       录入和核对都不顺手 → 记下采购单位与折算系数，界面按采购口径录入/显示。
+        #     · "份"是固定克数（配方里 用量=份数×每份克数，同一食材各套餐一致），
+        #       把每份克数显式存下来，才能显示"每份成本""库存≈几份"。
+        #   注意：**基础单位（unit/cost）保持不变**，全部换算都在这层之上做，不影响任何计算。
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(ingredients)").fetchall()]
+        if "purchase_unit" not in cols:
+            cur.execute("ALTER TABLE ingredients ADD COLUMN purchase_unit TEXT")
+        if "purchase_factor" not in cols:
+            cur.execute("ALTER TABLE ingredients ADD COLUMN purchase_factor REAL")
+        if "portion_grams" not in cols:
+            cur.execute("ALTER TABLE ingredients ADD COLUMN portion_grams REAL")
 
         # 工具库
         cur.execute("""
@@ -56,14 +82,22 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 item_type TEXT NOT NULL,              -- ingredient/tool
                 item_id INTEGER NOT NULL,
-                quantity REAL NOT NULL,               -- 采购数量
-                unit_price REAL NOT NULL,             -- 采购单价
+                quantity REAL NOT NULL,               -- 采购数量（基础单位：克/个）
+                unit_price REAL NOT NULL,             -- 采购单价（基础单位）
                 total_cost REAL NOT NULL,             -- 总金额 = quantity * unit_price
                 supplier TEXT,                        -- 供应商
                 note TEXT,
-                purchased_at TEXT DEFAULT (datetime('now','localtime'))
+                purchased_at TEXT DEFAULT (datetime('now','localtime')),
+                purchase_qty REAL,                    -- 原始录入口径的数量（如 5 公斤）
+                purchase_unit TEXT                    -- 原始录入口径的单位（公斤/斤/袋）
             )
         """)
+        # 迁移：老库补"原始采购口径"两列（只用于显示，算账仍用上面的基础单位）
+        cols = [r[1] for r in cur.execute("PRAGMA table_info(purchases)").fetchall()]
+        if "purchase_qty" not in cols:
+            cur.execute("ALTER TABLE purchases ADD COLUMN purchase_qty REAL")
+        if "purchase_unit" not in cols:
+            cur.execute("ALTER TABLE purchases ADD COLUMN purchase_unit TEXT")
 
         # 全局设置（配送费等）
         cur.execute("""
@@ -290,6 +324,25 @@ def init_db():
 
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
+
+        # ---- 收尾回填（必须放在所有表都建好之后）----
+        # 食材的采购口径：g→公斤、ml→升（系数 1000），其余（个/瓶/包/份…）1:1
+        cur.execute("""UPDATE ingredients SET purchase_unit =
+                         CASE WHEN unit='g' THEN '公斤' WHEN unit='ml' THEN '升' ELSE unit END
+                       WHERE purchase_unit IS NULL OR purchase_unit=''""")
+        cur.execute("""UPDATE ingredients SET purchase_factor =
+                         CASE WHEN unit='g' THEN 1000 WHEN unit='ml' THEN 1000 ELSE 1 END
+                       WHERE purchase_factor IS NULL OR purchase_factor<=0""")
+        # 每份克数：取配方里"套餐用量 ÷ 份数"（同一食材各套餐一致）
+        cur.execute("""
+            UPDATE ingredients SET portion_grams = (
+                SELECT ROUND(pi.per_package * 1.0 / NULLIF(pi.portion_count, 0), 2)
+                FROM package_ingredients pi
+                WHERE pi.ingredient_id = ingredients.id AND pi.portion_count > 0
+                ORDER BY pi.id LIMIT 1
+            )
+            WHERE unit='g' AND (portion_grams IS NULL OR portion_grams<=0)
+        """)
 
         conn.commit()
     print(f"[OK] 数据库已初始化: {DB_PATH}")

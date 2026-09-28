@@ -20,6 +20,11 @@ try:
     restored = restore_from_github()
     if restored:
         print("[init] 已从 GitHub 恢复数据库")
+        # 关键：恢复会整体替换 kitchen.db（用的是"上次那份备份"的表结构），
+        # 所以必须**再跑一次表结构迁移**，否则新版本新增的字段在恢复后不复存在，
+        # 新代码一查就报 "no such column"。init_db 是幂等的，重跑安全。
+        init_db()
+        print("[init] 恢复后已重新执行表结构迁移")
 except Exception as _e:
     print(f"[init] restore_from_github skipped: {_e}")
 
@@ -1164,10 +1169,30 @@ def api_stock_inbound():
     for it in items:
         iid = it.get("item_id")
         itype = it.get("item_type", "ingredient")
-        qty = float(it.get("qty", 0))
-        unit_price = float(it.get("unit_price", 0) or 0)
         supplier = it.get("supplier", "")
         note = it.get("note", "") or reason
+        # ---- 采购口径换算 ----
+        # 界面上用户填的是"买了几公斤 × 一公斤多少钱"，这里换算成基础单位（克/个）再入库。
+        # 传法二选一：{purchase_qty, purchase_unit, purchase_factor, unit_price(元/采购单位)}
+        #            或直接 {qty, unit_price}（基础单位，老调用方）
+        p_qty = it.get("purchase_qty")
+        p_unit = (it.get("purchase_unit") or "").strip() or None
+        p_factor = None
+        try:
+            p_factor = float(it.get("purchase_factor")) if it.get("purchase_factor") not in (None, "") else None
+        except (TypeError, ValueError):
+            p_factor = None
+        unit_price_raw = float(it.get("unit_price", 0) or 0)
+        if p_qty not in (None, "") and float(p_qty or 0) > 0:
+            f = p_factor or 1
+            if f <= 0:
+                f = 1
+            qty = round(float(p_qty) * f, 4)
+            unit_price = round(unit_price_raw / f, 6) if unit_price_raw > 0 else 0
+        else:
+            qty = float(it.get("qty", 0))
+            unit_price = unit_price_raw
+            p_qty, p_unit = None, None
         if not iid or qty <= 0:
             continue
         table = "ingredients" if itype == "ingredient" else "tools"
@@ -1203,9 +1228,14 @@ def api_stock_inbound():
         # 采购记录（有单价才记）
         if unit_price > 0:
             db.execute("""
-                INSERT INTO purchases (item_type, item_id, quantity, unit_price, total_cost, supplier, note)
-                VALUES (?,?,?,?,?,?,?)
-            """, (itype, iid, qty, unit_price, round(qty * unit_price, 2), supplier, note))
+                INSERT INTO purchases (item_type, item_id, quantity, unit_price, total_cost,
+                                       supplier, note, purchase_qty, purchase_unit)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (itype, iid, qty, unit_price, round(qty * unit_price, 2), supplier, note, p_qty, p_unit))
+            # 顺便记住这个食材的采购口径（下次默认带出来）
+            if itype == "ingredient" and p_unit:
+                db.execute("UPDATE ingredients SET purchase_unit=?, purchase_factor=? WHERE id=?",
+                           (p_unit, p_factor or 1, iid))
         done += 1
     db.commit()
     return jsonify({"ok": True, "done": done})
@@ -1596,15 +1626,54 @@ def stock_stocktake():
 
 @app.route("/api/ingredients/<int:iid>/cost", methods=["POST"])
 def update_ingredient_cost(iid):
-    """手动修改食材/工具成本单价"""
+    """修改食材成本单价。两种传法都支持：
+
+    · 按**采购单位**（推荐，用户在界面上填的就是这个）：
+        {purchase_price: 75, purchase_unit: '公斤', purchase_factor: 1000}
+        → 后端换算成基础单位成本（75 ÷ 1000 = 0.075 元/克）
+    · 按**基础单位**（老调用方兼容）：{cost: 0.075}
+    另可附带 portion_grams（每份克数）。
+    """
     data = request.get_json(force=True)
-    cost = float(data.get("cost", 0))
     itype = data.get("item_type", "ingredient")
-    table = "ingredients" if itype == "ingredient" else "tools"
     db = g.db
-    db.execute(f"UPDATE {table} SET cost = ? WHERE id = ?", (cost, iid))
+    if itype != "ingredient":
+        db.execute("UPDATE tools SET cost = ? WHERE id = ?", (float(data.get("cost") or 0), iid))
+        db.commit()
+        return jsonify({"ok": True})
+
+    row = db.execute("SELECT * FROM ingredients WHERE id=?", (iid,)).fetchone()
+    if not row:
+        return jsonify({"ok": False, "msg": "食材不存在"}), 404
+    cur = dict(row)
+
+    def _num(v, default=None):
+        try:
+            if v in (None, ""):
+                return default
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    factor = _num(data.get("purchase_factor"), _num(cur.get("purchase_factor"), 1)) or 1
+    if factor <= 0:
+        factor = 1
+    punit = (data.get("purchase_unit") or cur.get("purchase_unit") or cur.get("unit") or "").strip()
+    pprice = _num(data.get("purchase_price"))
+    if pprice is not None:
+        cost = pprice / factor
+    else:
+        cost = _num(data.get("cost"), _num(cur.get("cost"), 0)) or 0
+    sets, vals = ["cost=?", "purchase_unit=?", "purchase_factor=?"], [round(cost, 6), punit, factor]
+    pg = _num(data.get("portion_grams"))
+    if pg is not None and pg > 0:
+        sets.append("portion_grams=?")
+        vals.append(pg)
+    vals.append(iid)
+    db.execute("UPDATE ingredients SET %s WHERE id=?" % ",".join(sets), vals)
     db.commit()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "cost": round(cost, 6), "purchase_price": round(cost * factor, 4),
+                    "purchase_unit": punit, "purchase_factor": factor})
 
 
 # ===== 配置管理 =====
@@ -1619,11 +1688,23 @@ def manage_ingredients():
         items = sort_ingredients(items)
         return jsonify({"ok": True, "data": items})
     data = request.get_json(force=True)
+    unit = data.get("unit", "")
+    from models import purchase_defaults
+    dpu, dpf = purchase_defaults(unit)
+    pu = (data.get("purchase_unit") or "").strip() or dpu
+    try:
+        pf = float(data.get("purchase_factor"))
+    except (TypeError, ValueError):
+        pf = dpf
+    if not pf or pf <= 0:
+        pf = dpf
     db.execute("""
-        INSERT INTO ingredients (name, unit, stock, threshold, cost, category)
-        VALUES (?,?,?,?,?,?)
-    """, (data["name"], data.get("unit", ""), data.get("stock", 0),
-          data.get("threshold", 0), data.get("cost", 0), data.get("category", "other")))
+        INSERT INTO ingredients (name, unit, stock, threshold, cost, category,
+                                 purchase_unit, purchase_factor)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (data["name"], unit, data.get("stock", 0),
+          data.get("threshold", 0), data.get("cost", 0), data.get("category", "other"),
+          pu, pf))
     db.commit()
     return jsonify({"ok": True})
 
@@ -2369,7 +2450,8 @@ def finance_order_cost_detail(oid):
     rows = cur.execute("""
         SELECT pi.per_package, pi.portion_count, pi.cost_only,
                op.quantity as order_qty,
-               i.id as ingredient_id, i.name, i.unit, i.cost, i.category
+               i.id as ingredient_id, i.name, i.unit, i.cost, i.category,
+               i.purchase_unit, i.purchase_factor, i.portion_grams
         FROM order_packages op
         JOIN package_ingredients pi ON pi.package_id = op.package_id
         JOIN ingredients i ON pi.ingredient_id = i.id
@@ -2380,6 +2462,7 @@ def finance_order_cost_detail(oid):
     for r in rows:
         total_amount = r["per_package"] * r["order_qty"]
         total_cost = total_amount * (r["cost"] or 0)
+        factor = float(r["purchase_factor"] or 1) or 1
         items.append({
             "ingredient_id": r["ingredient_id"],
             "name": r["name"], "unit": r["unit"],
@@ -2389,6 +2472,10 @@ def finance_order_cost_detail(oid):
             "cost_only": r["cost_only"],
             "total_amount": round(total_amount, 2),
             "unit_cost": r["cost"] or 0,
+            "purchase_price": round((r["cost"] or 0) * factor, 4),
+            "purchase_unit": r["purchase_unit"] or r["unit"],
+            "purchase_factor": factor,
+            "portion_grams": r["portion_grams"],
             "total_cost": round(total_cost, 2),
             "category": r["category"],
         })
