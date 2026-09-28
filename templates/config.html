@@ -665,7 +665,7 @@ function loadPriceHint(){
     const costPct = (t.cost/t.revenue*100).toFixed(0);
     el.innerHTML = '⚠️ 上面这个算式<b>只算了食材</b>（按食材占售价 35% 倒推）。<br>'
       + `你最近 ${t.order_cnt} 单的真实情况：食材占收入 <b>${foodPct}%</b>、`
-      + `含搭建回收/油费/人工/耗材后成本占收入 <b>${costPct}%</b>、真实毛利率 <b>${t.margin}%</b>。<br>`
+      + `含搭建回收/配送费/人工/耗材后成本占收入 <b>${costPct}%</b>、真实毛利率 <b>${t.margin}%</b>。<br>`
       + '定价时建议按"真实成本"再留余量，具体每单赚多少去「📈 财务」页看。';
   }).catch(()=>{});
 }

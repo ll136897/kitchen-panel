@@ -219,7 +219,20 @@ except Exception as _e:
 
 @app.before_request
 def before():
-    g.db = get_db()
+    # /api/ping 承诺"极轻量、不碰数据库"——必须跳过连库。
+    # 这样哪怕数据库出问题，探活依然是好的，能从外部判断"应用活着、库挂了"，
+    # 而不是全站一起 500、连诊断入口都没有。
+    if request.path == "/api/ping":
+        return
+    try:
+        g.db = get_db()
+    except Exception:
+        # 连不上库（磁盘满/文件损坏/权限等）：完整报错打进日志（Render Logs 可见），
+        # 给前端一个可读的 503，而不是满屏 Internal Server Error。
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False,
+                        "msg": "系统数据库暂时打不开，正在自动恢复，请 1 分钟后刷新重试"}), 503
 
 
 @app.teardown_request
@@ -2639,7 +2652,7 @@ def finance_order_cost_detail(oid):
 # ===== 成本与利润（"这一单赚多少"）=====
 @app.route("/api/cost/config", methods=["GET", "POST"])
 def cost_config():
-    """成本与利润配置：场地单价表、每单默认油费/人工/耗材、固定开销、毛利率警戒线"""
+    """成本与利润配置：场地单价表、每单默认配送费/人工/耗材、固定开销、毛利率警戒线"""
     from profit import get_config, save_config
     db = g.db
     if request.method == "GET":
@@ -2651,7 +2664,7 @@ def cost_config():
 
 @app.route("/api/finance/order/<int:oid>/profit")
 def order_profit_api(oid):
-    """单笔订单利润：收入、成本项明细（食材/搭建回收/油费/人工/耗材/其他）、现金利润、净利、毛利率"""
+    """单笔订单利润：收入、成本项明细（食材/搭建回收/配送费/人工/耗材/其他）、现金利润、净利、毛利率"""
     from profit import order_profit
     p = order_profit(g.db, oid)
     if not p:
