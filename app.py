@@ -12,8 +12,51 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 # /api/version 的缓存：{sha: 最新改动标题}，避免每次开页面都去 git fetch（见 api_version）
 _VERSION_MEMO = {}
 
-# 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
-init_db()
+# ===== 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）=====
+# 这里是**整个应用的生死线**：init_db 一抛异常，Flask 就加载不起来，
+# 于是**所有请求（包括 /api/ping、甚至不存在的地址）全都是 500** —— 2026-09-28 晚上
+# 那次"又打不开了"就是这个：仓库里那份 kitchen.db 是坏的（每 10 分钟自动备份，
+# 正好撞上写入的瞬间就会抓到半截文件），init_db 直接炸，应用起不来。
+# 所以：先体检，坏了就用 GitHub 备份重建；init_db 本身也包起来，绝不让它掀翻整个应用。
+def _boot_db():
+    import sqlite3 as _sq
+    from models import DB_PATH as _P
+    # 1) 先体检仓库里那份数据库
+    if os.path.exists(_P):
+        try:
+            _c = _sq.connect(_P)
+            _ok = _c.execute("PRAGMA integrity_check").fetchone()[0]
+            _c.close()
+            if _ok != "ok":
+                raise RuntimeError("integrity_check=" + str(_ok))
+        except Exception as _e:
+            print("[boot] ⚠️ 本地 kitchen.db 不可用：%s —— 改用 GitHub 备份" % _e)
+            try:
+                os.rename(_P, _P + ".broken")   # 先留个现场，别直接删
+            except Exception:
+                pass
+            try:
+                from db_backup import restore_from_github
+                if restore_from_github():
+                    print("[boot] 已从 GitHub 备份恢复")
+            except Exception as _e2:
+                print("[boot] 恢复失败：%s" % _e2)
+    # 2) 初始化（幂等）；失败就重建一次，再失败也只能带伤启动，不能拖垮整个应用
+    try:
+        init_db()
+    except Exception as _e:
+        print("[boot] init_db 失败：%s —— 尝试重建" % _e)
+        try:
+            if os.path.exists(_P):
+                os.rename(_P, _P + ".broken2")
+            from db_backup import restore_from_github
+            restore_from_github()
+            init_db()
+            print("[boot] 重建成功")
+        except Exception as _e2:
+            print("[boot] 重建也失败：%s（应用仍会启动，避免全站 500）" % _e2)
+
+_boot_db()
 
 # 尝试从 GitHub 恢复数据库（防止重新部署丢数据）
 try:
