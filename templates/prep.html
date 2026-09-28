@@ -219,23 +219,33 @@
   }
   .summary-chip b{color:var(--primary);font-size:16px}
 
-  /* 备餐保活条 */
-  .ka-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
-  .ka-btn{background:#fff;border:1px solid var(--border);color:#3a2416;font-weight:700}
-  .ka-btn.on{background:#1b7a43;border-color:#1b7a43;color:#fff}
-  .ka-stat{font-size:12px;color:var(--muted);line-height:1.4;flex:1 1 150px;min-width:0}
+  /* 备餐保活：手机上只占一个小胶囊（圆点+分钟数），详细说明只在电脑端显示 */
+  .ka-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:14px;
+    border:1px solid var(--border);background:#fff;color:#8a7364;font-size:12px;font-weight:700;
+    cursor:pointer;line-height:1;flex:0 0 auto}
+  .ka-dot{width:8px;height:8px;border-radius:50%;background:#c9c2b8;flex:0 0 auto}
+  .ka-chip.on{background:#eaf7ee;border-color:#a5d6a7;color:#1b7a43}
+  .ka-chip.on .ka-dot{background:#27ae60;animation:kapulse 2s ease-in-out infinite}
+  .ka-chip.err{background:#fdecea;border-color:#e8a9a3;color:#b3261e}
+  .ka-chip.err .ka-dot{background:#c0392b;animation:none}
+  @keyframes kapulse{0%,100%{box-shadow:0 0 0 0 rgba(39,174,96,.5)}50%{box-shadow:0 0 0 4px rgba(39,174,96,0)}}
+  .ka-stat{font-size:11px;color:var(--muted);line-height:1.3;flex:0 1 auto;min-width:0}
   .ka-stat.on{color:#1b7a43;font-weight:600}
   .ka-stat.err{color:#b3261e;font-weight:600}
-  /* 系统正在启动的提示条 */
-  .wake-banner{display:none;align-items:center;gap:8px;flex-wrap:wrap;
-    background:#fff4e5;border:1px solid #f0c98a;color:#8a4b00;border-radius:10px;
-    padding:9px 12px;font-size:13px;font-weight:600;margin:0 0 12px}
+  /* 系统正在启动：一行、小字，别占屏幕 */
+  .wake-banner{display:none;align-items:center;gap:6px;flex-wrap:nowrap;
+    background:#fff4e5;border:1px solid #f0c98a;color:#8a4b00;border-radius:9px;
+    padding:6px 10px;font-size:12.5px;font-weight:600;margin:0 0 8px}
   .wake-banner.on{display:flex}
-  .wake-spin{display:inline-block;width:14px;height:14px;border:2px solid #e0a94f;
-    border-top-color:#8a4b00;border-radius:50%;animation:wkspin .8s linear infinite}
+  .wake-banner #wakeTxt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wake-spin{display:inline-block;width:11px;height:11px;border:2px solid #e0a94f;
+    border-top-color:#8a4b00;border-radius:50%;animation:wkspin .8s linear infinite;flex:0 0 auto}
   @keyframes wkspin{to{transform:rotate(360deg)}}
-  .stale-tag{display:inline-block;background:#fff4e5;color:#8a4b00;border-radius:8px;
-    padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px}
+  @media(max-width:600px){
+    /* 手机端：说明文字一律藏起来，只留颜色和数字；页面副标题也收掉，把屏幕留给清单 */
+    .ka-stat{display:none}
+    .prep-sub{display:none}
+  }
 </style>
 </head>
 <body>
@@ -250,31 +260,32 @@
 </nav>
 
 <div class="container">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 12px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="title"><span class="fire">🍱</span>备餐合并</div>
-      <div class="sub">当天多订单食材汇总给后厨 · 工具装备给装配师傅 · 餐具逐项核对</div>
+      <div class="sub prep-sub">当天多订单食材汇总给后厨 · 工具装备给装配师傅 · 餐具逐项核对</div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="date" id="datePick" class="date-picker">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
       <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印 / 导出</button>
+      <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。
+           详细说明只在电脑端显示（手机端只看颜色和数字），点一下开关。 -->
+      <button id="kaBtn" class="ka-chip" onclick="toggleKeepAlive()"
+        title="备餐保活：防手机自动锁屏 + 每5分钟给系统发心跳，避免它休眠（点一下开关）">
+        <span class="ka-dot"></span><span id="kaNum">保活</span>
+      </button>
+      <span class="ka-stat" id="kaStat"></span>
     </div>
   </div>
 
   <!-- 系统唤醒提示（冷启动时显示，避免以为是卡死） -->
   <div class="wake-banner" id="wakeBanner">
     <span class="wake-spin"></span>
-    <span id="wakeTxt">系统正在启动，约需 30-60 秒…</span>
-    <span style="font-weight:400;font-size:12px">（页面会自动等它起来，不用刷新、不用关）</span>
+    <span id="wakeTxt">系统启动中…</span>
   </div>
 
   <!-- 备餐保活：防手机锁屏 + 每 5 分钟给系统发心跳，避免它休眠 -->
-  <div class="ka-bar">
-    <button id="kaBtn" class="btn btn-sm ka-btn" onclick="toggleKeepAlive()">🔆 备餐保活</button>
-    <span class="ka-stat" id="kaStat">备餐时点一下：屏幕不自动灭、系统不进入休眠，点别的套餐不用等</span>
-  </div>
-
   <!-- 有备餐订单的日期快捷切换条 -->
   <div class="date-chips" id="dateChips"></div>
 
@@ -364,7 +375,7 @@ function showWake(){
   const t = document.getElementById('wakeTxt');
   if(!b) return;
   b.classList.add('on');
-  if(t) t.textContent = '系统正在启动（已等 ' + _wakeSec + ' 秒，通常 30-60 秒）…';
+  if(t) t.textContent = '系统启动中 ' + _wakeSec + 's…（会自动恢复，别关页面）';
 }
 function hideWake(){
   _wakeSec = 0;
@@ -409,17 +420,32 @@ function kaInServiceWindow(){
   const h = new Date().getHours();
   return h >= KA_WINDOW[0] && h < KA_WINDOW[1];
 }
-function kaStatus(cls, txt){
+function kaStatus(cls, txt, flash){
   const el = document.getElementById('kaStat');
-  if(!el) return;
-  el.className = 'ka-stat' + (cls ? ' ' + cls : '');
-  el.textContent = txt;
+  if(el){
+    el.className = 'ka-stat' + (cls ? ' ' + cls : '');
+    el.textContent = txt || '';
+  }
+  // 手机端看不到这行小字 → 要紧的事用小气泡闪一下（2 秒自动消失）
+  if(flash && txt && typeof showToast === 'function') showToast(txt);
 }
 function kaSetBtn(on){
   const b = document.getElementById('kaBtn');
   if(!b) return;
   b.classList.toggle('on', !!on);
-  b.textContent = on ? '🔆 备餐保活：已开启' : '🔆 备餐保活';
+  b.classList.remove('err');
+  const n = document.getElementById('kaNum');
+  if(n) n.textContent = on ? '…' : '保活';
+}
+function kaNum(mins){
+  const n = document.getElementById('kaNum');
+  if(n) n.textContent = String(mins);
+}
+function kaErr(){
+  const b = document.getElementById('kaBtn');
+  if(b) b.classList.add('err');
+  const n = document.getElementById('kaNum');
+  if(n) n.textContent = '!';
 }
 async function kaWakeLock(){
   try{
@@ -436,13 +462,14 @@ function kaPing(){
 }
 function kaBeat(){
   if(!kaInServiceWindow()){
-    kaStatus('', '现在是休息时段（凌晨），心跳暂停以节省免费额度；营业时段会自动开始。');
+    kaStatus('', '凌晨休息，心跳暂停（省额度）');
     return;
   }
   kaPing().then(ok=>{
-    if(!ok){ kaStatus('err', '⚠️ 暂时连不上（可能正在唤醒），会自动重试…'); return; }
+    if(!ok){ kaErr(); kaStatus('err', '暂时连不上，自动重试中…', true); return; }
     const mins = Math.round((Date.now() - _kaStart) / 60000);
-    kaStatus('on', '系统在线 · 已保活 ' + (mins < 1 ? '不到 1' : mins) + ' 分钟 · 每 5 分钟自动心跳');
+    kaNum(mins < 1 ? 0 : mins);
+    kaStatus('on', '在线 · 已保活 ' + (mins < 1 ? '不到 1' : mins) + ' 分钟');
   });
   if(!_kaLock) kaWakeLock();   // 切到别的 App 再回来，常亮会失效 → 重新申请
 }
@@ -452,18 +479,22 @@ function startKeepAlive(silent){
   try{ localStorage.setItem(KA_KEY, '1'); }catch(e){}
   kaSetBtn(true);
   kaWakeLock().then(hasLock=>{
-    kaStatus('on', '已开启（' + (hasLock ? '屏幕不会自动灭' : '本浏览器不支持常亮，请别锁屏') + '）· 正在发心跳…');
+    kaStatus('on', hasLock ? '屏幕常亮中' : '请别锁屏（本浏览器不支持常亮）',
+             !silent && !hasLock);
+    if(!silent && hasLock && typeof showToast === 'function') showToast('✅ 保活已开：屏幕不灭、系统不睡');
   });
   kaBeat();
   _kaTimer = setInterval(kaBeat, 5 * 60 * 1000);
-  if(!silent && typeof showRefreshToast === 'function') showRefreshToast();
 }
 function stopKeepAlive(silent){
   if(_kaTimer){ clearInterval(_kaTimer); _kaTimer = null; }
   try{ if(_kaLock){ _kaLock.release(); _kaLock = null; } }catch(e){}
   try{ localStorage.removeItem(KA_KEY); }catch(e){}
   kaSetBtn(false);
-  if(!silent) kaStatus('', '已关闭。备餐时建议开启：这样点别的套餐不用等系统启动。');
+  if(!silent){
+    kaStatus('', '已关闭（备餐时建议开着）');
+    if(typeof showToast === 'function') showToast('保活已关');
+  }
 }
 function toggleKeepAlive(){ if(_kaTimer) stopKeepAlive(); else startKeepAlive(); }
 document.addEventListener('visibilitychange', ()=>{
@@ -561,7 +592,7 @@ function loadPrep(){
     render();
     renderDateChips(d);
     const mins = Math.max(1, Math.round((Date.now() - cached.t) / 60000));
-    prepStaleNote('⏳ 先显示 ' + mins + ' 分钟前的缓存数据，正在向服务器取最新的…');
+    prepStaleNote('⏳ ' + mins + ' 分钟前的数据，正在取最新…');
   }
   return fetchJSONRetry('/api/prep/merged?date='+d).then(d2=>{
     if(!d2 || !d2.ok){
@@ -980,7 +1011,7 @@ function showCachedFirst(){
     prepData.__date = d;
     render();
     const mins = Math.max(1, Math.round((Date.now() - c.t) / 60000));
-    prepStaleNote('⏳ 正在唤醒系统，先显示 ' + mins + ' 分钟前的数据；连上后会自动更新。');
+    prepStaleNote('⏳ 正在唤醒，先显示 ' + mins + ' 分钟前的数据');
   }catch(e){ /* 缓存坏了不影响正常流程 */ }
 }
 
@@ -998,16 +1029,17 @@ function refreshWithFx(fn){
   if(typeof fn === 'function') fn();
   showRefreshToast();
 }
-function showRefreshToast(){
+function showToast(txt){
   let t = document.getElementById('refreshToast');
   if(t) t.remove();
   t = document.createElement('div');
   t.id = 'refreshToast';
   t.className = 'refresh-toast';
-  t.textContent = '✓ 已刷新';
+  t.textContent = txt;
   document.body.appendChild(t);
-  setTimeout(()=>t.remove(), 2200);
+  setTimeout(()=>t.remove(), 2400);
 }
+function showRefreshToast(){ showToast('✓ 已刷新'); }
 async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
 </body>
