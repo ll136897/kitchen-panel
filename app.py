@@ -919,23 +919,38 @@ def menu_page():
 # ===== 订单解析与入库 =====
 @app.route("/api/parse", methods=["POST"])
 def api_parse():
-    """解析订单文本预览（不入库）。支持批量：用 --- 分隔多个订单"""
+    """解析订单文本预览（不入库）。
+
+    批量粘贴不需要再手工加分隔号：
+      - 自己写了 --- / === → 按它拆（老用法保留）
+      - 复制的微信聊天记录 → 按"昵称+时间"的抬头自动拆
+      - 多段空行隔开的订单 → 自动拆
+      - 拆不出来的就按一单处理，绝不丢内容
+    前端还能把人工调整过的 chunks 传回来重解析。
+    """
     data = request.get_json(force=True)
     raw = data.get("raw_text", "")
-    if not raw.strip():
+    if not raw.strip() and not data.get("chunks"):
         return jsonify({"ok": False, "msg": "文本为空"}), 400
-    import re as _re
-    chunks = _re.split(r'\n[\-=]{3,}\n', raw.strip())
-    chunks = [c.strip() for c in chunks if c.strip()]
-    if len(chunks) > 1:
-        previews = []
-        for i, chunk in enumerate(chunks):
-            parsed = preview_parse(chunk)
-            parsed["_batch_idx"] = i + 1
-            previews.append(parsed)
-        return jsonify({"ok": True, "batch": True, "count": len(previews), "items": previews})
-    parsed = preview_parse(raw)
-    return jsonify({"ok": True, "data": parsed})
+
+    from parser import split_orders
+    chunks_in = data.get("chunks")
+    if isinstance(chunks_in, list) and any((c or "").strip() for c in chunks_in):
+        parts = [(c, "manual") for c in chunks_in if (c or "").strip()]
+    else:
+        parts = split_orders(raw)
+
+    items = []
+    for i, (chunk, reason) in enumerate(parts):
+        p = preview_parse(chunk)
+        p["_raw"] = chunk
+        p["_batch_idx"] = i + 1
+        p["_split_reason"] = reason
+        items.append(p)
+    reasons = sorted({r for _, r in parts})
+    return jsonify({"ok": True, "batch": True, "count": len(items),
+                    "items": items, "data": (items[0] if items else None),
+                    "split_by": (reasons[0] if len(reasons) == 1 else "mixed")})
 
 
 def _dup_key_of(parsed):
@@ -976,18 +991,27 @@ def _find_duplicate_order(cur, parsed):
 
 @app.route("/api/orders", methods=["POST"])
 def create_order():
-    """创建订单：接收 raw_text（单个或批量用 --- 分隔），自动解析入库。
+    """创建订单：粘贴一大段（微信聊天记录）可自动拆成多单，一次全部入库。
+
+    支持两种入参：
+      raw_text：整段文本，后端自动拆分（免分隔号，见 parser.split_orders）
+      chunks  ：前端人工调整后的数组，每个元素就是一单（优先级更高）
     若发现一模一样的订单，返回 409 + duplicate 标记，由前端弹框让用户确认；
     用户确认后带 force=true 再提交一次即强制入库。"""
     data = request.get_json(force=True)
     raw = data.get("raw_text", "")
-    if not raw.strip():
+    if not raw.strip() and not data.get("chunks"):
         return jsonify({"ok": False, "msg": "文本为空"}), 400
 
-    # 批量：用 --- 或 === 分隔多个订单
-    import re as _re
-    chunks = _re.split(r'\n[\-=]{3,}\n', raw.strip())
-    chunks = [c.strip() for c in chunks if c.strip()]
+    # 自动拆分多单（不再需要手工加 ---）；前端调整过的 chunks 优先
+    from parser import split_orders
+    chunks_in = data.get("chunks")
+    if isinstance(chunks_in, list) and any((c or "").strip() for c in chunks_in):
+        chunks = [c.strip() for c in chunks_in if (c or "").strip()]
+    else:
+        chunks = [c for c, _ in split_orders(raw)]
+    if not chunks:
+        return jsonify({"ok": False, "msg": "没有可入库的内容"}), 400
 
     db = g.db
     cur = db.cursor()
@@ -1040,9 +1064,10 @@ def create_order():
                         "date": parsed.get("booking_date", ""), "amount": parsed.get("amount", 0)})
 
     db.commit()
-    if len(results) == 1:
-        return jsonify({"ok": True, "order_id": order_ids[0]})
-    return jsonify({"ok": True, "batch": True, "count": len(results), "orders": results})
+    # 单/批量都带上 count 与 order_ids，前端不用区分两种返回
+    return jsonify({"ok": True, "batch": len(results) > 1, "count": len(results),
+                    "order_ids": order_ids, "orders": results,
+                    "order_id": order_ids[0] if results else None})
 
 
 @app.route("/api/orders")

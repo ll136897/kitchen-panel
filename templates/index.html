@@ -72,7 +72,7 @@
 </nav>
 <div class="container">
   <h1 class="title">📋 新建订单</h1>
-  <p class="sub">粘贴微信确认文本，系统自动解析套餐、地址、备注，并算出备餐需求</p>
+  <p class="sub">粘贴微信确认文本（可以一次粘一大段聊天记录），系统自动拆成多单、自动解析套餐地址备注</p>
 
   <div class="card">
     <label class="label">订单文本</label>
@@ -89,8 +89,14 @@
 备注:多拿1张桌子，1个椅子，10点钟搭好天幕桌椅，餐食12点左右送到。"></textarea>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="parseOrder()">🔍 解析预览</button>
-      <button class="btn btn-success" id="confirmBtn" style="display:none" onclick="confirmOrder()">✓ 确认入库</button>
+      <button class="btn btn-success" id="confirmBtn" style="display:none" onclick="confirmOrder(false)">✓ 确认入库</button>
       <button class="btn" onclick="loadSample()">载入示例</button>
+      <label class="muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px">
+        <input type="checkbox" id="autoPaste" checked onchange="syncAuto()"> 粘贴后自动识别
+      </label>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px">
+      一次粘多单不需要加分隔号：微信聊天记录按「昵称+时间」自动拆，空行隔开的多段也会自动拆。
     </div>
   </div>
 
@@ -98,18 +104,125 @@
 </div>
 <script src="/static/app.js"></script>
 <script>
-function parseOrder(){
+// ===== 批量录入：粘贴一大段微信记录 → 自动拆多单 → 一次入库 =====
+let parsedItems = [];      // 后端解析结果（每段一单）
+let parseBusy = false;
+let _timer = null;
+
+// 粘贴后自动识别：省掉一次点按钮（首次粘贴也能自动跑，不用先点页面）
+document.getElementById('raw').addEventListener('paste', ()=>{
+  if(document.getElementById('autoPaste') && document.getElementById('autoPaste').checked){
+    clearTimeout(_timer); _timer = setTimeout(()=>parseOrder(), 600);
+  }
+});
+function syncAuto(){ /* 勾选状态由 paste 事件读取，这里留空以便以后扩展 */ }
+
+// chunks 为空则让后端按原文自动拆；传了就按人工调整后的段来
+function parseOrder(chunks){
   const raw = document.getElementById('raw').value;
-  if(!raw.trim()){ alert('请粘贴订单文本'); return; }
-  fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+  if(!raw.trim() && !chunks){ alert('请粘贴订单文本'); return; }
+  if(parseBusy) return;
+  parseBusy = true;
+  const body = {raw_text: raw};
+  if(chunks) body.chunks = chunks;
+  document.getElementById('preview').innerHTML = '<div class="muted" style="padding:12px">🔍 识别中…</div>';
+  fetch('/api/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(r=>r.json()).then(d=>{
-      if(!d.ok){alert(d.msg);return;}
-      renderPreview(d.data);
-      document.getElementById('confirmBtn').style.display='inline-block';
-    });
+      parseBusy = false;
+      if(!d.ok){ alert(d.msg || '识别失败'); return; }
+      parsedItems = d.items || [];
+      renderBatch();
+    }).catch(()=>{ parseBusy=false; alert('网络异常，再试一次'); });
 }
 
-function renderPreview(p){
+function currentChunks(){ return parsedItems.map(o=>o._raw || ''); }
+
+// 重新识别某一段（改完原文后）
+function reparseChunk(i){
+  document.getElementById('raw-'+i).blur();
+  const cs = currentChunks();
+  cs[i] = document.getElementById('raw-'+i).value;
+  parseOrder(cs);
+}
+// 合并到上一单
+function mergeUp(i){
+  if(i<=0) return;
+  const cs = currentChunks();
+  cs[i-1] = (cs[i-1] + '\n' + cs[i]).trim();
+  cs.splice(i,1);
+  parseOrder(cs);
+}
+// 删除这一段
+function dropChunk(i){
+  const cs = currentChunks();
+  cs.splice(i,1);
+  if(!cs.length){ clearEntry(); return; }
+  parseOrder(cs);
+}
+function toggleDetail(i){
+  const el = document.getElementById('detail-'+i);
+  const btn = document.getElementById('tog-'+i);
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if(btn) btn.textContent = open ? '展开' : '收起';
+}
+function clearEntry(){
+  parsedItems = [];
+  document.getElementById('raw').value = '';
+  document.getElementById('preview').innerHTML = '';
+  document.getElementById('confirmBtn').style.display = 'none';
+}
+
+const SPLIT_TIP = {explicit:'按你写的分隔符', wechat:'按微信每条消息', block:'按空行分段', mixed:'混合方式', single:''};
+
+function renderBatch(){
+  const n = parsedItems.length;
+  const btn = document.getElementById('confirmBtn');
+  btn.style.display = 'inline-block';
+  btn.textContent = n>1 ? `✓ 全部入库（${n} 单）` : '✓ 确认入库';
+  const reason = (parsedItems[0]||{})._split_reason;
+  const weakN = parsedItems.filter(isWeak).length;
+  const head = n>1 ? `<div class="card" style="padding:10px 14px;background:#fff7ed;border:1px solid #fed7aa">
+      <b>识别到 ${n} 单</b> <span class="muted" style="font-size:12px">${SPLIT_TIP[reason]||''}自动拆分 · 拆错了可以直接「合并」或「删除」某段</span>
+      ${ weakN ? `<div style="color:#9a3412;font-size:12px;margin-top:4px">⚠️ 有 ${weakN} 段没能识别出日期/套餐/电话，点「展开」改一下原文再重新识别</div>` : '' }
+    </div>` : '';
+  document.getElementById('preview').innerHTML = head +
+    parsedItems.map((p,i)=>cardHtml(p,i,n)).join('');
+}
+
+// 这段是不是几乎没识别出东西（日期/套餐/电话都没有）——要明显提醒，别悄悄建空单
+function isWeak(p){
+  return !p.booking_date && !(p.matched_packages||[]).length && !p.contact_phone;
+}
+
+function cardHtml(p,i,n){
+  const open = n===1;
+  const title = n>1 ? `第 ${i+1} 单` : '订单信息';
+  const brief = [p.booking_date,p.booking_time,p.address,p.contact_name].filter(x=>x&&x!=='-').join(' · ') || (p._raw||'').slice(0,24);
+  return `<div class="card">
+    ${ n>1 ? `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <div style="font-weight:800;font-size:14px">${title} · ${brief}${isWeak(p)?' <span style="color:#c0392b;font-size:12px">⚠️ 没识别出关键信息</span>':''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm" id="tog-${i}" onclick="toggleDetail(${i})">${open?'收起':'展开'}</button>
+        <button class="btn btn-sm" onclick="mergeUp(${i})" ${i===0?'disabled style="opacity:.4"':''}>⬆️ 合并到上单</button>
+        <button class="btn btn-sm btn-danger" onclick="dropChunk(${i})">🗑</button>
+      </div></div>` : '' }
+    <div id="detail-${i}" style="display:${open?'block':'none'}">
+      ${detailInner(p)}
+      <div style="margin-top:10px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">原文（可改，改完点「重新识别」）</div>
+        <textarea id="raw-${i}" rows="5" style="width:100%;box-sizing:border-box">${escHtml(p._raw||'')}</textarea>
+        <button class="btn btn-sm" onclick="reparseChunk(${i})" style="margin-top:6px">🔍 重新识别这段</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function detailInner(p){
   const pkgs = (p.matched_packages||[]).map(x=>`<div class="chip">${x.name} · ${x.people}人 · ${x.quantity}份 · ${x.service_type}</div>`).join('') || '<span class="muted">无匹配套餐</span>';
   const ings = (p.preview_ingredients||[]).map(x=>{
     const cls = x.shortage>0 ? 'row-warn' : (x.warning ? 'row-low' : '');
@@ -130,7 +243,7 @@ function renderPreview(p){
     return `${k}${label}`;
   }).join('，') : '<span class="muted">无</span>';
 
-  document.getElementById('preview').innerHTML = `
+  return `
     <div class="card">
       <h3>订单信息</h3>
       <div class="info-grid">
@@ -166,16 +279,44 @@ function renderPreview(p){
       </table>
     </div>
   `;
-  document.getElementById('preview').scrollIntoView({behavior:'smooth'});
 }
 
-function confirmOrder(){
-  const raw = document.getElementById('raw').value;
-  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({raw_text:raw})})
+// ===== 入库：一次把识别出来的所有订单建好 =====
+function confirmOrder(force){
+  if(!parsedItems.length){ parseOrder(); return; }
+  const chunks = currentChunks().filter(c=>c && c.trim());
+  if(!chunks.length){ alert('没有可入库的内容'); return; }
+  const btn = document.getElementById('confirmBtn');
+  btn.textContent = '⏳ 入库中…'; btn.disabled = true;
+  fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({raw_text: document.getElementById('raw').value, chunks: chunks, force: !!force})})
     .then(r=>r.json()).then(d=>{
-      if(d.ok){ alert('✓ 订单已入库，编号:'+d.order_id); location.href='/orders'; }
-      else alert('失败：'+d.msg);
-    });
+      btn.disabled = false;
+      if(d.duplicate){
+        if(confirm(d.msg + '\n\n要仍然录入吗？（点确定=强制入库）')) return confirmOrder(true);
+        btn.textContent = '✓ 确认入库'; return;
+      }
+      if(!d.ok){ alert('失败：' + (d.msg||'未知错误')); btn.textContent = '✓ 确认入库'; return; }
+      showResult(d);
+    }).catch(()=>{ btn.disabled=false; btn.textContent='✓ 确认入库'; alert('网络异常，再试一次'); });
+}
+
+function showResult(d){
+  const ids = d.order_ids || [];
+  document.getElementById('raw').value = '';
+  parsedItems = [];
+  document.getElementById('confirmBtn').style.display = 'none';
+  document.getElementById('preview').innerHTML = `
+    <div class="card" style="text-align:center;padding:22px">
+      <div style="font-size:40px">✅</div>
+      <div style="font-weight:800;font-size:17px;margin:8px 0 4px">已入库 ${d.count} 单</div>
+      <div class="muted" style="font-size:13px;margin-bottom:12px">订单编号：#${ids.join('　#')}</div>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn btn-primary" onclick="clearEntry()">继续录下一批</button>
+        <a class="btn" href="/orders">去看订单 →</a>
+      </div>
+    </div>`;
+  window.scrollTo({top:0, behavior:'smooth'});
 }
 
 function loadSample(){

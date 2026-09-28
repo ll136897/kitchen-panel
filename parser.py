@@ -893,3 +893,83 @@ def match_inbound_to_db(items):
             })
 
     return results
+
+
+# ===================== 批量粘贴：自动拆分多个订单 =====================
+# 场景：客户在微信里发来确认内容，运营复制一大段聊天记录直接粘进来。
+# 以前要先手工加 --- 分隔符才能批量 —— 太浪费时间。这里自动识别。
+#
+# 三条规则，从"最确定"往下兜：
+#   1) explicit：用户自己写了 --- / === 分隔符（老用法，继续支持）
+#   2) wechat ：微信复制多段消息时，每条都带"昵称 + 时间"的抬头行 → 按抬头切
+#   3) block  ：按空行分段，且每段都确实像一单（命中多项强特征）才拆
+# 原则：宁可不拆也不乱拆 —— 拆错会多建单，比不拆更麻烦。
+
+_SEP_RE = re.compile(r"\n[ \t]*[-=*]{3,}[ \t]*\n")
+
+# 微信消息抬头：独占一行、"昵称 + 时间"，例如
+#   张三 2026-09-28 15:30 / 张三 下午3:30 / 张三 昨天 15:30 / 张三 15:30
+_WX_HEADER_RE = re.compile(
+    r"^[^\s]{1,20}[ 　]+(?:"
+    r"(?:\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日号]?\s*\d{1,2}:\d{2})"
+    r"|(?:\d{1,2}[-/月]\d{1,2}[日号]?\s*\d{1,2}:\d{2})"
+    r"|(?:(?:今天|明天|昨天|前天|星期[一二三四五六日]|周[一二三四五六日天])\s*(?:\d{1,2}:\d{2})?)"
+    r"|(?:(?:上午|下午)?\d{1,2}:\d{2})"
+    r")[ 　]*$"
+)
+
+_DATE_FEAT = re.compile(r"\d{1,2}[.\-/月]\d{1,2}[号日]?|今天|明天|后天|昨天|周[一二三四五六日天]|星期[一二三四五六日]|预约时间")
+_PKG_FEAT = re.compile(r"\d+\s*人|[一二三四五六七八九十]+\s*人\s*餐|套餐|\d+\s*人餐")
+_PHONE_FEAT = re.compile(r"1[3-9]\d{9}|联系电话|手机号")
+_ADDR_FEAT = re.compile(r"地址|预约地址|青龙湖|锦城湖|北湖|玉石公园|江家艺苑|双流中心公园|驿马河|鲁家滩")
+
+
+def _order_signals(text):
+    """这段内容像一单吗？返回命中的特征名列表"""
+    hits = []
+    if _DATE_FEAT.search(text):  hits.append("date")
+    if _PKG_FEAT.search(text):   hits.append("pkg")
+    if _PHONE_FEAT.search(text): hits.append("phone")
+    if _ADDR_FEAT.search(text):  hits.append("addr")
+    return hits
+
+
+def split_orders(raw):
+    """把一大段文本拆成多个订单。
+
+    返回：[(chunk, reason)]，reason ∈ explicit / wechat / block / single
+    拆不出来就原样返回一段（single），保证一定能入库、不会丢内容。
+    """
+    text = (raw or "").replace("\r\n", "\n").strip()
+    if not text:
+        return []
+
+    # 1) 显式分隔符（老用法优先，尊重用户自己的标记）
+    parts = [p.strip() for p in _SEP_RE.split(text) if p.strip()]
+    if len(parts) > 1:
+        return [(p, "explicit") for p in parts]
+
+    # 2) 微信消息抬头 → 每条消息一段
+    lines = text.split("\n")
+    heads = [i for i, l in enumerate(lines) if i > 0 and _WX_HEADER_RE.match((l or "").strip())]
+    if heads:
+        blocks, start = [], 0
+        for i in heads:
+            blocks.append("\n".join(lines[start:i]).strip())
+            start = i
+        blocks.append("\n".join(lines[start:]).strip())
+        blocks = [b for b in blocks if b]
+        if len(blocks) > 1:
+            return [(b, "wechat") for b in blocks]
+
+    # 3) 空行分段：得有足够的订单特征才敢拆
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    if len(blocks) > 1:
+        sigs = [_order_signals(b) for b in blocks]
+        enough = all(len(s) >= 2 for s in sigs)
+        multi_date = sum(1 for s in sigs if "date" in s) >= 2
+        multi_body = sum(1 for s in sigs if ({"pkg", "phone"} & set(s))) >= 2
+        if enough or (multi_date and multi_body):
+            return [(b, "block") for b in blocks]
+
+    return [(text, "single")]

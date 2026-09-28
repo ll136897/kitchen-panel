@@ -6,9 +6,29 @@ from contextlib import closing
 DB_PATH = os.path.join(os.path.dirname(__file__), "kitchen.db")
 
 
+class _ClosingConn(sqlite3.Connection):
+    """会自己关闭的连接（2026-09-28 加）
+
+    背景（踩过的坑）：sqlite3 的 `with conn:` **只负责提交/回滚事务，不会关闭连接**。
+    代码里到处是 `with get_db() as conn:` 的写法，于是每调用一次就漏一个连接 +
+    一个文件句柄，越积越多：先是变慢，攒到进程句柄上限后 sqlite 连不上库，
+    before_request 一炸 → **全站所有路由一起 500**（2026-09-28 下午那次事故）。
+    这里给连接加"退出即关闭"的行为，老写法 `with get_db() as conn:` 自动修好，
+    不用去改那十几处调用点。
+    """
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            try:
+                self.close()
+            except Exception:
+                pass
+
+
 def get_db():
-    """获取数据库连接"""
-    conn = sqlite3.connect(DB_PATH)
+    """获取数据库连接（用完要关：`with get_db() as conn:` 退出时已自动关闭）"""
+    conn = sqlite3.connect(DB_PATH, factory=_ClosingConn)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
