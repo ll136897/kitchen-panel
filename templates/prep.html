@@ -276,6 +276,7 @@
   .os-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:14px;border-bottom:1px dashed #eee}
   .os-row .nm{min-width:0;word-break:break-all}
   .os-row .qt{color:#c0392b;font-weight:700;white-space:nowrap}
+  .os-row .qt .qt2{color:#8a8a8a;font-weight:600;font-size:12px;margin-left:5px}
   .os-row .short{color:#b3261e;font-size:12px}
   @media(min-width:601px){
     .os-sheet{left:50%;right:auto;transform:translateX(-50%);width:560px;bottom:auto;top:8vh;
@@ -1014,6 +1015,32 @@ function osErr(msg){
   const el = document.getElementById('osList');
   if(el) el.innerHTML = `<div class="os-sum">${msg}</div>`;
 }
+// 用量按用户要的口径显示：**份**（一份=固定克数，点数最直观）+ **公斤/斤/袋**（他买货的口径）。
+// 不再只给克数（用户原话：按克算不方便，份是固定的克数、公斤是我购买的价格）。
+function osQty(it){
+  const u = it.unit || '';
+  const need = it.need || 0;
+  const isWeight = (u === 'g' || u === 'ml');
+  if(!isWeight){
+    return round(need) + (u || '');        // 个/套/包/瓶…保持原单位
+  }
+  const pu = it.purchase_unit || '';       // 公斤 / 斤 / 袋 …
+  const pf = it.purchase_factor || 0;      // 1 个采购单位 = 多少克
+  let main;
+  if(it.total_portions){
+    main = round(it.total_portions) + '份';
+  } else if(pf > 0){
+    main = round(need / pf) + (pu || '公斤');
+  } else {
+    main = round(need / 1000) + '公斤';
+  }
+  let sub = '';
+  if(pf > 0){
+    const v = need / pf;
+    sub = '≈' + (v >= 10 ? Math.round(v) : Math.round(v * 100) / 100) + (pu || '');
+  }
+  return main + (sub ? `<span class="qt2">${sub}</span>` : '');
+}
 function osRenderList(oid){
   const el = document.getElementById('osList');
   const r = _osReqCache[oid];
@@ -1040,7 +1067,7 @@ function osRenderList(oid){
       const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
       const sw = it.swapped_in ? ' <span style="color:#c0392b;font-weight:700">🔄换</span>' : '';
       return `<div class="os-row"><span class="nm">${it.name}${sw}</span>` +
-             `<span class="qt">${round(it.need)}${it.unit||''}${short}</span></div>`;
+             `<span class="qt">${osQty(it)}${short}</span></div>`;
     }).join('');
   }
   el.innerHTML = html || '<div class="os-sum">这一单没有食材明细</div>';

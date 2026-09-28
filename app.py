@@ -34,6 +34,18 @@ try:
 except Exception as _e:
     print(f"[init] seed_data skipped: {_e}")
 
+# seed 造完食材后**必须再回填一次**采购口径：
+# init_db 跑迁移时表还是空的，回填等于没跑，于是这些食材的 purchase_unit 会一直是空
+# （表现：备餐页按"公斤/斤"显示不出来、只回退到"份"）。幂等，只补空的。
+try:
+    from models import backfill_purchase
+    _db0 = get_db()
+    backfill_purchase(_db0.cursor())
+    _db0.commit()
+    _db0.close()
+except Exception as _e:
+    print(f"[init] backfill after seed skipped: {_e}")
+
 # 启动定时备份（10分钟）
 try:
     start_auto_backup(600)
@@ -1202,6 +1214,24 @@ def borrow_tools(db, order_id):
 @app.route("/api/orders/<int:oid>/requirements")
 def order_requirements(oid):
     req = calc_order_requirements(oid)
+    # 补上"采购口径"字段：备餐页要按用户要的「份 / 公斤·斤·袋」显示用量，
+    # 而不是只给克数（用户明确：按克算不方便，份是固定克数、公斤是他买货的价格）。
+    try:
+        meta = {}
+        for r in g.db.execute("SELECT id, purchase_unit, purchase_factor, portion_grams FROM ingredients"):
+            meta[r["id"]] = {"purchase_unit": r["purchase_unit"],
+                             "purchase_factor": r["purchase_factor"],
+                             "portion_grams": r["portion_grams"]}
+        for it in (req.get("ingredients") or []):
+            m = meta.get(it.get("id"))
+            if not m:
+                continue
+            it["purchase_unit"] = m["purchase_unit"]
+            it["purchase_factor"] = m["purchase_factor"]
+            if not it.get("portion_size"):
+                it["portion_size"] = m["portion_grams"]
+    except Exception:
+        pass
     return jsonify({"ok": True, "data": req})
 
 

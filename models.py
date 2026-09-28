@@ -326,26 +326,36 @@ def init_db():
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 
         # ---- 收尾回填（必须放在所有表都建好之后）----
-        # 食材的采购口径：g→公斤、ml→升（系数 1000），其余（个/瓶/包/份…）1:1
-        cur.execute("""UPDATE ingredients SET purchase_unit =
-                         CASE WHEN unit='g' THEN '公斤' WHEN unit='ml' THEN '升' ELSE unit END
-                       WHERE purchase_unit IS NULL OR purchase_unit=''""")
-        cur.execute("""UPDATE ingredients SET purchase_factor =
-                         CASE WHEN unit='g' THEN 1000 WHEN unit='ml' THEN 1000 ELSE 1 END
-                       WHERE purchase_factor IS NULL OR purchase_factor<=0""")
-        # 每份克数：取配方里"套餐用量 ÷ 份数"（同一食材各套餐一致）
-        cur.execute("""
-            UPDATE ingredients SET portion_grams = (
-                SELECT ROUND(pi.per_package * 1.0 / NULLIF(pi.portion_count, 0), 2)
-                FROM package_ingredients pi
-                WHERE pi.ingredient_id = ingredients.id AND pi.portion_count > 0
-                ORDER BY pi.id LIMIT 1
-            )
-            WHERE unit='g' AND (portion_grams IS NULL OR portion_grams<=0)
-        """)
+        backfill_purchase(cur)
 
         conn.commit()
     print(f"[OK] 数据库已初始化: {DB_PATH}")
+
+
+def backfill_purchase(cur):
+    """回填"采购口径"三列（幂等，只补空的）。
+
+    ⚠️ 必须在**所有表建好之后**调（`package_ingredients` 比 `ingredients` 晚建）；
+    而且**新建库走 seed 造完食材后要再调一次**——否则那些食材的 purchase_unit 一直是空
+    （init_db 时表还是空的，回填等于没跑）。
+    """
+    # 食材的采购口径：g→公斤、ml→升（系数 1000），其余（个/瓶/包/份…）1:1
+    cur.execute("""UPDATE ingredients SET purchase_unit =
+                     CASE WHEN unit='g' THEN '公斤' WHEN unit='ml' THEN '升' ELSE unit END
+                   WHERE purchase_unit IS NULL OR purchase_unit=''""")
+    cur.execute("""UPDATE ingredients SET purchase_factor =
+                     CASE WHEN unit='g' THEN 1000 WHEN unit='ml' THEN 1000 ELSE 1 END
+                   WHERE purchase_factor IS NULL OR purchase_factor<=0""")
+    # 每份克数：取配方里"套餐用量 ÷ 份数"（同一食材各套餐一致）
+    cur.execute("""
+        UPDATE ingredients SET portion_grams = (
+            SELECT ROUND(pi.per_package * 1.0 / NULLIF(pi.portion_count, 0), 2)
+            FROM package_ingredients pi
+            WHERE pi.ingredient_id = ingredients.id AND pi.portion_count > 0
+            ORDER BY pi.id LIMIT 1
+        )
+        WHERE unit='g' AND (portion_grams IS NULL OR portion_grams<=0)
+    """)
 
 
 if __name__ == "__main__":
