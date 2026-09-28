@@ -49,6 +49,25 @@ try:
 except Exception as _e:
     print(f"[init] self_keepalive skipped: {_e}")
 
+
+@app.before_request
+def _keepalive_watchdog():
+    """每个请求都顺带看护一下保活线程（很便宜：先比较时间戳，不到点不做任何事）。
+
+    为什么要在请求里兜一层：**线程不会被 fork 继承**，worker 里的线程可能一开始就没有；
+    也可能因为任何原因死掉。只要还有任何请求（后厨手机每 5 分钟的保活心跳、有人开页面），
+    就能把线程补回来、并把该打的心跳补上，不至于悄无声息地失效。
+    ⚠️ 必须排除 /api/ping 自己 —— 它就是我们自己打进来的，否则会无限递归。
+    """
+    try:
+        if request.path == "/api/ping":
+            return
+        import keepalive
+        keepalive.ensure_thread()
+        keepalive.maybe_ping_now()
+    except Exception:
+        pass
+
 # 迁移：去掉"刷子"工具（用户要求菜单无刷子，兼容已有数据库）
 try:
     _db = get_db()

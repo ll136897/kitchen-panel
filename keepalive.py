@@ -47,10 +47,13 @@ _state = {
     "boot_ts": time.time(),     # 进程启动时间（用来判断"有没有睡过"：睡过就会重启进程，这个时间会变新）
     "last_ts": 0.0,             # 上次心跳时间（用于限速）
     "count": 0,                 # 累计成功心跳次数
+    "iters": 0,                 # 循环跑过多少轮（诊断：一直不涨 = 线程没在跑）
+    "pid": os.getpid(),
     "last": None,               # 上次结果 {at, ok, http, ms, target, err}
     "started": False,
     "stop": False,
 }
+_thread = None                  # 保活线程（要留着引用，才能判断它死没死）
 
 
 def _bj_now():
@@ -151,6 +154,8 @@ def _loop():
     """后台循环：每分钟看一次，到点/跨窗口就心跳"""
     while not _state["stop"]:
         try:
+            with _lock:
+                _state["iters"] += 1
             cfg = load_cfg()
             if cfg["enabled"] and in_window(cfg):
                 due = cfg["interval_min"] * 60
@@ -170,20 +175,87 @@ def _loop():
         time.sleep(60)
 
 
+def reset_after_fork():
+    """fork 之后必须调一次。
+
+    原因：**线程不会被 fork 继承**（子进程只有主线程），而 gunicorn 的 worker 就是 fork 出来的。
+    所以父进程里启动的保活线程在 worker 里是不存在的，而 `started` 标记却已经是 True
+    → 新进程再也不会有心跳线程（线上实测：进程连续跑了 3.25 小时，只成功心跳 1 次）。
+    """
+    with _lock:
+        _state["started"] = False
+        _state["stop"] = False
+        _state["pid"] = os.getpid()
+        _state["boot_ts"] = time.time()
+    global _thread
+    _thread = None
+
+
+def thread_alive():
+    return bool(_thread and _thread.is_alive())
+
+
+def ensure_thread():
+    """保活线程死了/没有就补起来（每次请求都会顺带检查，很便宜）。"""
+    if os.environ.get("KEEPALIVE_DISABLE"):
+        return False
+    if thread_alive():
+        return True
+    with _lock:
+        _state["started"] = False      # 清掉残留标记，让下面能真正重启
+        _state["stop"] = False
+    return start_self_keepalive()
+
+
+def maybe_ping_now():
+    """被请求顺带触发：到点了就补一次心跳（在短命线程里做，不拖慢这个请求）。
+
+    为什么需要：万一保活线程因为任何原因没在跑，只要有**任何**请求进来
+    （比如后厨手机每 5 分钟的保活心跳、有人开页面），就能立刻把心跳补上。
+    注意必须排除 /api/ping 自己 —— 否则自己打自己会无限递归。
+    """
+    if os.environ.get("KEEPALIVE_DISABLE"):
+        return False
+    now = time.time()
+    if now - _state["last_ts"] < 60:      # 距离上次不足 1 分钟：不折腾
+        return False
+    cfg = load_cfg()
+    if not (cfg["enabled"] and in_window(cfg)):
+        return False
+    if now - _state["last_ts"] < cfg["interval_min"] * 60:
+        return False
+    with _lock:
+        _state["last_ts"] = now           # 先占位，防并发重复打
+    threading.Thread(target=_ping_and_record, args=(cfg["url"],),
+                     name="self-keepalive-now", daemon=True).start()
+    return True
+
+
+def _ping_and_record(url):
+    res = ping_once(url)
+    with _lock:
+        _state["last"] = res
+        if res["ok"]:
+            _state["count"] += 1
+
+
 def start_self_keepalive():
     """启动后台保活线程（幂等；测试可用 KEEPALIVE_DISABLE=1 关掉）"""
     if os.environ.get("KEEPALIVE_DISABLE"):
         print("[keepalive] 已被 KEEPALIVE_DISABLE 关闭（测试环境）")
         return False
+    global _thread
     with _lock:
-        if _state["started"]:
+        if _state["started"] and _thread and _thread.is_alive():
             return True
         _state["started"] = True
     t = threading.Thread(target=_loop, name="self-keepalive", daemon=True)
     t.start()
+    _thread = t
     cfg = load_cfg()
-    print("[keepalive] 自保活已启动：%s | 时段 %s:00-%s:00(北京) | 每 %s 分钟"
-          % (cfg["url"], cfg["start_hour"], cfg["end_hour"], cfg["interval_min"]))
+    print("[keepalive] 自保活已启动(pid=%s)：%s | 时段 %s:00-%s:00(北京) | 每 %s 分钟"
+          % (os.getpid(), cfg["url"], cfg["start_hour"], cfg["end_hour"], cfg["interval_min"]),
+          flush=True)
     return True
 
 
@@ -203,6 +275,10 @@ def status():
         "interval_min": cfg["interval_min"],
         "url": cfg["url"],
         "count": st["count"],
+        # 诊断三件套：iters 一直涨 = 循环在跑；thread_alive=False = 线程丢了（fork 掉了）
+        "iters": st["iters"],
+        "thread_alive": thread_alive(),
+        "pid": st["pid"],
         "last": st["last"],
         "boot_at": boot.strftime("%Y-%m-%d %H:%M:%S"),
         # 这个数字很关键：一直增长 = 这段时间**从没睡过**（睡过会重启进程、数字归零）
