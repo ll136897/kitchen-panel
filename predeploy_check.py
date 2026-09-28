@@ -31,6 +31,8 @@ PY = sys.executable
 PAGES = ["/", "/orders", "/prep", "/finance", "/config", "/menu"]
 APIS = ["/api/ping", "/api/orders", "/api/ingredients",
         "/api/stats/packages?scope=month", "/api/prep/dates"]
+# 这一版可能还没有的接口（比如回滚后），404 不算失败
+OPTIONAL_APIS = ["/api/stats/packages?scope=month"]
 
 results = []
 
@@ -237,6 +239,8 @@ def check_boot():
             c = http(base + p)
             if c == 200:
                 print(f"     · {p} 200")
+            elif p in OPTIONAL_APIS and c == 404:
+                warn("可选接口本版本没有（404，不算失败）", p)
             else:
                 bad("页面/接口可用", "%s -> %s" % (p, c))
         if all(r[0] for r in results if r[1].startswith("页面")):

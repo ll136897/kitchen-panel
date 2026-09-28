@@ -206,17 +206,6 @@
   .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:12px;gap:2px}
   .mode-tab button{padding:10px 18px;border:none;background:transparent;color:#8a7f75;border-radius:10px;font-weight:700;cursor:pointer;font-size:15px}
   .mode-tab button.active{background:var(--primary);color:#fff}
-  /* 套餐分类 chips */
-  .pkg-scope{padding:6px 12px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--border);
-    background:#fff;color:#5a4a3a;cursor:pointer;line-height:1}
-  .pkg-scope.active{background:var(--primary);color:#fff;border-color:var(--primary)}
-  .pkg-chip{padding:7px 12px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid var(--border);
-    background:#fff;color:#5a4a3a;cursor:pointer;line-height:1;display:inline-flex;align-items:center;gap:4px}
-  .pkg-chip .n{color:var(--primary);font-weight:800}
-  .pkg-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
-  .pkg-chip.active .n{color:#fff}
-  #pkgDetail .pd-row{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-bottom:1px solid #f0ebe3;font-size:13px;flex-wrap:wrap}
-  @media(max-width:600px){ .pkg-chip{padding:6px 10px;font-size:12px} .pkg-scope{padding:5px 10px;font-size:12px} }
   .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .muted{color:var(--muted)}
 
@@ -338,22 +327,6 @@
 
   <!-- 用的是"上次缓存的数据"时在这里说明（系统唤醒期间也能先干活） -->
   <div id="prepStale" style="font-size:12px;color:#8a4b00;font-weight:600;margin:-4px 0 10px"></div>
-
-  <!-- 按套餐分类：当天/本周/本月/全部 各有多少个几人餐（点套餐看是哪几单） -->
-  <div class="card" id="pkgCard" style="margin-bottom:14px;padding:12px 14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <div style="font-weight:800;font-size:14px">🍱 按套餐看</div>
-      <span style="display:inline-flex;gap:6px;flex-wrap:wrap">
-        <button class="pkg-scope active" data-pscope="day"   onclick="setPkgScope('day')">当天</button>
-        <button class="pkg-scope" data-pscope="week"  onclick="setPkgScope('week')">本周</button>
-        <button class="pkg-scope" data-pscope="month" onclick="setPkgScope('month')">本月</button>
-        <button class="pkg-scope" data-pscope="all"   onclick="setPkgScope('all')">全部</button>
-      </span>
-    </div>
-    <div id="pkgChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
-    <div id="pkgSummary" class="muted" style="font-size:12px;margin-top:6px"></div>
-    <div id="pkgDetail" style="margin-top:8px"></div>
-  </div>
 
   <!-- 模式切换 -->
   <div class="mode-tab" style="margin-bottom:14px">
@@ -1300,70 +1273,7 @@ function showCachedFirst(){
   }catch(e){ /* 缓存坏了不影响正常流程 */ }
 }
 
-// ===== 套餐分类：当天/本周/本月/全部 各有多少个几人餐 =====
-let pkgScope = 'day';
-let pkgFilter = null;
-let pkgStats = null;
-
-function loadPkgStats(){
-  fetch('/api/stats/packages?scope=' + pkgScope + '&detail=1')
-    .then(r=>r.json()).then(d=>{
-      if(!d || !d.ok) return;
-      pkgStats = d;
-      // 兜底：当天没订单就自动往上看本周→本月→全部，别一进来是空的
-      if(!(d.items||[]).length && pkgScope !== 'all'){
-        const next = {day:'week', week:'month', month:'all'}[pkgScope];
-        if(next){ setPkgScope(next); return; }
-      }
-      const box = document.getElementById('pkgChips');
-      const sum = document.getElementById('pkgSummary');
-      const items = d.items || [];
-      if(!items.length){
-        box.innerHTML = `<span class="muted" style="font-size:13px">${d.label||''}没有套餐订单</span>`;
-        sum.textContent = '';
-        document.getElementById('pkgDetail').innerHTML = '';
-        return;
-      }
-      box.innerHTML = items.map(it=>`
-        <button class="pkg-chip ${pkgFilter===it.name?'active':''}" onclick="pickPkg('${String(it.name).replace(/'/g,"\\'")}')">
-          ${it.name} <span class="n">${it.order_cnt}单</span>·${it.qty}份
-        </button>`).join('');
-      sum.textContent = `${d.label||''} · 共 ${d.total_orders} 单 · 套餐 ${d.qty_total} 份 · 涉及约 ${d.people_total} 人`
-        + (pkgFilter ? ' · 再点一下取消' : ' · 点套餐看是哪几单');
-      renderPkgDetail();
-    }).catch(()=>{});
-}
-function setPkgScope(s){
-  pkgScope = s;
-  document.querySelectorAll('.pkg-scope[data-pscope]').forEach(b=>b.classList.toggle('active', b.dataset.pscope===s));
-  loadPkgStats();
-}
-function pickPkg(name){
-  pkgFilter = (pkgFilter===name) ? null : name;
-  loadPkgStats();
-}
-// 点亮的套餐：列出这个范围内是哪几单（日期/时间/地址/联系人/份数）
-function renderPkgDetail(){
-  const box = document.getElementById('pkgDetail');
-  if(!box) return;
-  if(!pkgFilter || !pkgStats){
-    if(box) box.innerHTML = '';
-    return;
-  }
-  const it = (pkgStats.items||[]).find(x=>x.name===pkgFilter);
-  const list = (it && it.orders) || [];
-  box.innerHTML = `<div style="font-weight:700;font-size:13px;margin-bottom:4px">🍱 ${pkgFilter}（${pkgStats.label||''}）共 ${list.length} 单</div>` +
-    (list.length ? list.map(o=>`<div class="pd-row">
-        <b>#${o.id}</b>
-        <span>${o.booking_date||''} ${o.booking_time||''}</span>
-        <span>📍${o.address||'—'}</span>
-        <span>👤${o.contact_name||'—'}</span>
-        <span class="muted">${o.people||''}人 × ${o.quantity||1}份</span>
-      </div>`).join('') : '<div class="muted" style="font-size:13px">这个范围内没有该套餐的订单</div>');
-}
-
 showCachedFirst();
-loadPkgStats();
 loadPrepDates(true).then(()=>{
   // 深度联动：从订单页点"🍱 备餐核对"跳过来时，直接打开这单的整页核对清单
   const fp = new URLSearchParams(location.search).get('focus');
@@ -1372,7 +1282,7 @@ loadPrepDates(true).then(()=>{
     if(!isNaN(foid)) enterFocus(foid);
   }
 });   // 首次加载，自动切到有订单的日期
-setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); loadPkgStats(); }, 60000);
+setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）
 try{ if(localStorage.getItem(KA_KEY) === '1') startKeepAlive(true); }catch(e){}

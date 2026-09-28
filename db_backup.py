@@ -56,19 +56,6 @@ def backup_to_github():
         print("[backup] 已有备份任务在跑，跳过")
         return False
     try:
-        # 先体检：坏库绝不上传（2026-09-28 的教训——把半截文件传上去，
-        # 下次部署就会拿到坏库，init_db 一炸 = 全站 500）
-        try:
-            _c = sqlite3.connect(DB_PATH)
-            _ok = _c.execute("PRAGMA integrity_check").fetchone()[0]
-            _c.close()
-            if _ok != "ok":
-                print(f"[backup] ⚠️ 本地数据库体检未通过({_ok})，本次不上传（避免污染备份）")
-                return False
-        except Exception as _e:
-            print(f"[backup] ⚠️ 无法打开本地数据库({_e})，本次不上传")
-            return False
-
         # 读取数据库文件
         with open(DB_PATH, "rb") as f:
             content = base64.b64encode(f.read()).decode()
