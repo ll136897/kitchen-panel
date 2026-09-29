@@ -67,7 +67,7 @@ def report_error(tag, text):
         return False
 
 
-from flask import Flask, request, jsonify, render_template, g
+from flask import Flask, request, jsonify, render_template, g, session, redirect
 try:
     from models import get_db, init_db
     from addresses import canonical_address
@@ -80,6 +80,12 @@ except Exception as _imp_err:                  # 导入期就炸 = 应用根本�
     raise
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+# 会话密钥：登录态靠它签名。务必用环境变量固定一把（Render 里配 SECRET_KEY），
+# 否则免费实例重启会随机换密钥 → 全员被踢下线。本地测试没配就给个开发用默认值（仅本地）。
+app.secret_key = os.environ.get("SECRET_KEY") or "dev-insecure-secret-key-CHANGE-ME"
+if not os.environ.get("SECRET_KEY"):
+    print("[init] ⚠️ 未设置 SECRET_KEY，登录态在重启后会失效；上线前请在 Render 环境变量里配一个随机值")
 
 # /api/version 的缓存：{sha: 最新改动标题}，避免每次开页面都去 git fetch（见 api_version）
 _VERSION_MEMO = {}
@@ -362,6 +368,209 @@ def teardown(exc):
     db = getattr(g, "db", None)
     if db is not None:
         db.close()
+
+
+# ===================== 登录 / 分角色权限 =====================
+# 角色：boss（老板/合伙人，全权限）| staff（店员/帮手：订单/备餐/库存，看不见财务/设置/菜单）
+# 设计原则（2026-09-29）：
+#   - 所有校验在服务端做（before_request），前端隐藏链接只是体验，不是安全；
+#   - 老板专属页面 = 配置/财务/菜单/历史/账号/录入；写操作默认老板，仅放少量店员操作（备餐出库等）。
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime as _dt
+
+
+def _now():
+    return _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 该请求需要什么角色：None=不用登录(匿名可访问)
+def _required_role(path, method):
+    if path in ("/login", "/api/login", "/api/ping", "/api/version", "/logout"):
+        return None
+    if path.startswith("/static/"):
+        return None
+    # 老板专属（页面与同名 API 一并拦）
+    for p in ("/config", "/finance", "/menu", "/history", "/admin",
+              "/dashboard", "/api/users"):
+        if path == p or path.startswith(p + "/"):
+            return "boss"
+    # 写操作默认老板；仅明确放给店员的运营动作才可写
+    if method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
+        for s in ("/api/stock/consume", "/api/stock/consume/undo",
+                  "/api/stock/loans", "/api/stock/loans/return-all", "/api/prep"):
+            if path == s or path.startswith(s + "/"):
+                return "staff"
+        return "boss"
+    # 其余 GET/HEAD（订单/备餐/库存/出餐单）：登录即可
+    return "staff"
+
+
+@app.before_request
+def auth_guard():
+    path = request.path
+    need = _required_role(path, request.method)
+    if need is None:
+        return
+    uid = session.get("uid")
+    user = None
+    if uid:
+        try:
+            row = get_db().execute(
+                "SELECT id,username,name,role,active FROM users WHERE id=?",
+                (uid,)).fetchone()
+            if row and row["active"]:
+                user = dict(row)
+        except Exception:
+            user = None
+    # 未登录
+    if not user:
+        if path.startswith("/api/"):
+            return jsonify({"ok": False, "msg": "请先登录"}), 401
+        return redirect("/login")
+    g.cur_user = user
+    # 角色不够
+    if need == "boss" and user["role"] != "boss":
+        if path.startswith("/api/"):
+            return jsonify({"ok": False, "msg": "无权限：该操作仅老板/合伙人可用"}), 403
+        return "无权限：该页面仅老板/合伙人可访问", 403
+
+
+@app.context_processor
+def _inject_user():
+    return {"cur_user": getattr(g, "cur_user", None)}
+
+
+@app.route("/login")
+def login_page():
+    return render_template("login.html")
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.get_json(force=True) or {}
+    u = (data.get("username") or "").strip()
+    p = data.get("password") or ""
+    row = get_db().execute(
+        "SELECT id,username,name,role,active,pw_hash FROM users WHERE username=?",
+        (u,)).fetchone()
+    if not row or not row["active"] or not check_password_hash(row["pw_hash"], p):
+        return jsonify({"ok": False, "msg": "用户名或密码错误"}), 401
+    session["uid"] = row["id"]
+    return jsonify({"ok": True, "role": row["role"], "name": row["name"]})
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/api/me")
+def api_me():
+    if not getattr(g, "cur_user", None):
+        return jsonify({"ok": False, "msg": "未登录"}), 401
+    return jsonify({"ok": True, "user": g.cur_user})
+
+
+# ---- 老板专属：账号管理 ----
+@app.route("/admin")
+def admin_page():
+    return render_template("admin.html")
+
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    rows = get_db().execute(
+        "SELECT id,username,name,role,active FROM users ORDER BY id").fetchall()
+    return jsonify({"ok": True, "users": [dict(r) for r in rows]})
+
+
+@app.route("/api/users", methods=["POST"])
+def add_user():
+    data = request.get_json(force=True) or {}
+    un = (data.get("username") or "").strip()
+    name = (data.get("name") or "").strip()
+    role = "boss" if data.get("role") == "boss" else "staff"
+    pw = data.get("password") or ""
+    if not un or not pw:
+        return jsonify({"ok": False, "msg": "用户名和密码必填"}), 400
+    try:
+        get_db().execute(
+            "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
+            (un, name, role, generate_password_hash(pw), 1, _now()))
+        get_db().commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": "创建失败：" + str(e)}), 400
+
+
+@app.route("/api/users/<int:uid>/toggle", methods=["POST"])
+def toggle_user(uid):
+    get_db().execute("UPDATE users SET active=1-active WHERE id=?", (uid,))
+    get_db().commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<int:uid>", methods=["DELETE"])
+def del_user(uid):
+    get_db().execute("UPDATE users SET active=0 WHERE id=?", (uid,))
+    get_db().commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/<int:uid>/reset-pw", methods=["POST"])
+def reset_pw(uid):
+    data = request.get_json(force=True) or {}
+    pw = data.get("password") or ""
+    if not pw:
+        return jsonify({"ok": False, "msg": "请输入新密码"}), 400
+    get_db().execute("UPDATE users SET pw_hash=? WHERE id=?",
+                     (generate_password_hash(pw), uid))
+    get_db().commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/me/change-pw", methods=["POST"])
+def change_my_pw():
+    if not getattr(g, "cur_user", None):
+        return jsonify({"ok": False, "msg": "未登录"}), 401
+    data = request.get_json(force=True) or {}
+    old = data.get("old") or ""
+    new = data.get("new") or ""
+    if not new:
+        return jsonify({"ok": False, "msg": "请输入新密码"}), 400
+    row = get_db().execute("SELECT pw_hash FROM users WHERE id=?",
+                           (session.get("uid"),)).fetchone()
+    if not row or not check_password_hash(row["pw_hash"], old):
+        return jsonify({"ok": False, "msg": "原密码错误"}), 400
+    get_db().execute("UPDATE users SET pw_hash=? WHERE id=?",
+                     (generate_password_hash(new), session["uid"]))
+    get_db().commit()
+    return jsonify({"ok": True})
+
+
+def ensure_admin_user():
+    """库里一个账号都没有时，用环境变量 ADMIN_PW（没有就默认 kaorou888）建一个老板号。
+    这样第一次部署后你就能用 admin 登录，再去“账号”页改密码、加店员。"""
+    try:
+        conn = get_db()
+        n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if n == 0:
+            pw = os.environ.get("ADMIN_PW") or "kaorou888"
+            conn.execute(
+                "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
+                ("admin", "管理员(老板)", "boss", generate_password_hash(pw), 1, _now()))
+            conn.commit()
+            print("[init] 已创建默认老板账号 admin / %s —— 请尽快在“账号”页修改密码" % pw)
+    except Exception as e:
+        print("[init] ensure_admin_user 跳过：", e)
+
+
+# 模块加载时确保至少有一个老板账号（首次部署后即可用 admin 登录），放在函数定义之后
+try:
+    ensure_admin_user()
+except Exception as _e:
+    print(f"[init] ensure_admin_user skipped: {_e}")
 
 
 # 数据变更后自动备份到 GitHub（POST/PUT/DELETE 且非备份接口）

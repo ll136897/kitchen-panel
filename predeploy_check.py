@@ -28,7 +28,7 @@ DB = os.path.join(HERE, "kitchen.db")
 PY = sys.executable
 
 # 需要验证的页面和接口（上线后用户真会点的）
-PAGES = ["/", "/orders", "/prep", "/finance", "/config", "/menu"]
+PAGES = ["/", "/orders", "/prep", "/finance", "/config", "/menu", "/admin", "/login"]
 APIS = ["/api/ping", "/api/orders", "/api/ingredients",
         "/api/stats/packages?scope=month", "/api/prep/dates"]
 # 这一版可能还没有的接口（比如回滚后），404 不算失败
@@ -212,14 +212,42 @@ def check_boot():
     env["PORT"] = port
     # 不设 GITHUB_TOKEN：避免本地跑的时候真的去 GitHub 备份/恢复
     env.pop("GITHUB_TOKEN", None)
+    # 给个固定默认管理员密码，自检才能以老板身份登录、带会话测受保护页
+    env.setdefault("ADMIN_PW", "kaorou888")
     logf = open(os.path.join(HERE, "_predeploy_server.log"), "w", encoding="utf-8")
     proc = subprocess.Popen([PY, "app.py"], cwd=HERE, env=env,
                             stdout=logf, stderr=subprocess.STDOUT)
     base = "http://127.0.0.1:%s" % port
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None   # 不跟随跳转，直接把 302/301 交给调用方判断
+
+    _no_redirect = urllib.request.build_opener(_NoRedirect)
+
+    def httpc(url, cookie=None, timeout=20, follow=True):
+        try:
+            h = {"User-Agent": "predeploy-check"}
+            if cookie:
+                h["Cookie"] = cookie
+            req = urllib.request.Request(url, headers=h)
+            # 默认跟随跳转；匿名权限检查需关闭跟随，才能看到 302/401 本身
+            opener = _no_redirect if not follow else None
+            if opener:
+                with opener.open(req, timeout=timeout) as r:
+                    return r.status, r.headers.get("Set-Cookie")
+            else:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return r.status, r.headers.get("Set-Cookie")
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Set-Cookie")
+        except Exception as e:
+            return "ERR:%s" % type(e).__name__, None
+
     alive = False
     for _ in range(40):          # 最多等 20 秒
         time.sleep(0.5)
-        if http(base + "/api/ping") == 200:
+        if httpc(base + "/api/ping")[0] == 200:
             alive = True
             break
     try:
@@ -229,23 +257,58 @@ def check_boot():
             return
         ok("应用能启动", "/api/ping 200")
 
-        code = http(base + "/zzz-not-exist-xyz")
+        # 以老板账号登录，拿会话 cookie（默认 admin / kaorou888，首次启动会自建）
+        admin_pw = os.environ.get("PREDEPLOY_ADMIN_PW", "kaorou888")
+        req = urllib.request.Request(
+            base + "/api/login",
+            data=json.dumps({"username": "admin", "password": admin_pw}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "predeploy-check"},
+            method="POST")
+        try:
+            r = urllib.request.urlopen(req, timeout=20)
+            cookie, code = r.headers.get("Set-Cookie"), r.status
+        except urllib.error.HTTPError as e:
+            cookie, code = e.headers.get("Set-Cookie"), e.code
+        if code == 200 and cookie:
+            ok("老板登录 /api/login", "200，已拿到会话")
+        else:
+            bad("老板登录 /api/login", "返回 %s —— 无法带会话继续测试" % code)
+            _dump_log()
+            return
+
+        # 权限生效的关键证据：未登录访问受保护页应被拦（跳转/401，且不跟随跳转）
+        anon = httpc(base + "/finance", follow=False)[0]
+        if anon in (302, 401):
+            ok("未登录被拦截（权限已生效）", "/finance -> %s" % anon)
+        else:
+            bad("未登录被拦截", "/finance -> %s（应为 302 或 401）" % anon)
+
+        # 登录页本身应可匿名访问
+        lc, _ = httpc(base + "/login")
+        if lc == 200:
+            print("     · /login 200")
+        else:
+            bad("登录页可访问", "/login -> %s" % lc)
+
+        # 带会话时：不存在地址返回 404（证明路由层正常）
+        code = httpc(base + "/zzz-not-exist-xyz", cookie)[0]
         if code == 404:
             ok("路由层正常（不存在地址=404）")
         else:
             bad("路由层正常（不存在地址应为 404）", "实测 %s（500 就说明应用没起来）" % code)
 
+        allok = True
         for p in PAGES + APIS:
-            c = http(base + p)
+            c = httpc(base + p, cookie)[0]
             if c == 200:
                 print(f"     · {p} 200")
             elif p in OPTIONAL_APIS and c == 404:
                 warn("可选接口本版本没有（404，不算失败）", p)
             else:
+                allok = False
                 bad("页面/接口可用", "%s -> %s" % (p, c))
-        if all(r[0] for r in results if r[1].startswith("页面")):
-            pass
-        ok("主要页面与接口", "全部 200（%d 个）" % (len(PAGES) + len(APIS)))
+        if allok:
+            ok("主要页面与接口", "全部 200（%d 个，已带登录会话）" % (len(PAGES) + len(APIS)))
 
         # 启动日志里不能有 Traceback
         _dump_log(only_errors=True)

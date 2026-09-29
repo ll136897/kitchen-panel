@@ -342,6 +342,21 @@ def init_db():
             )
         """)
 
+        # 账号与角色（分权限用）：role = 'boss'(老板/合伙人，全权限) | 'staff'(店员/帮手)
+        #   店员只看：订单 / 备餐 / 库存，不能进财务、设置、菜单。
+        #   active=0 表示被禁用（等于删号，但保留历史记录归属）。
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'staff',
+                pw_hash TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT
+            )
+        """)
+
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 

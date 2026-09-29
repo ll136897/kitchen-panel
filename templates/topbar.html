@@ -1,0 +1,26 @@
+{# 公共顶栏（复用 .nav 样式）：按角色只显示该看的链接。登录后才能看到。 #}
+<nav class="nav">
+  {% if cur_user and cur_user.role == 'boss' %}
+    <a href="/dashboard" class="nav-item">📊 录入</a>
+    <a href="/orders" class="nav-item">📋 订单</a>
+    <a href="/prep" class="nav-item">🍱 备餐</a>
+    <a href="/finance" class="nav-item">📈 财务</a>
+    <a href="/menu" class="nav-item">📜 菜单</a>
+    <a href="/config" class="nav-item">📦 库存</a>
+    <a href="/admin" class="nav-item">👤 账号</a>
+  {% else %}
+    <a href="/orders" class="nav-item">📋 订单</a>
+    <a href="/prep" class="nav-item">🍱 备餐</a>
+  {% endif %}
+  <a href="/logout" class="nav-item">退出</a>
+</nav>
+<script>
+(function(){
+  // 高亮当前页对应的导航项
+  var p = location.pathname;
+  document.querySelectorAll('.nav .nav-item').forEach(function(a){
+    var h = a.getAttribute('href');
+    if (h && (p === h || (h !== '/' && p.indexOf(h) === 0))) a.classList.add('active');
+  });
+})();
+</script>

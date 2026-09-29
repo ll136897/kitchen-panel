@@ -67,15 +67,7 @@
 </style>
 </head>
 <body>
-<nav class="nav">
-  <a href="/" class="nav-item">📊 面板</a>
-  <a href="/orders" class="nav-item">📋 订单</a>
-  <a href="/prep" class="nav-item">🍱 备餐</a>
-  <a href="/finance" class="nav-item">📈 财务</a>
-  <a href="/menu" class="nav-item">📜 菜单</a>
-  <a href="/config" class="nav-item active">📦 库存</a>
-  <button class="nav-item" onclick="doBackup()" style="border:none;background:none;cursor:pointer;font-size:14px;padding:6px 10px;border-radius:6px;" title="备份数据">💾 备份</button>
-</nav>
+{% include 'topbar.html' %}
 <div class="container">
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 10px">
     <div><div class="title">📦 库存管理</div>
