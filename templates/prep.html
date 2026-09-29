@@ -296,7 +296,7 @@
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="date" id="datePick" class="date-picker" onchange="onDatePicked()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
-      <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印 / 导出</button>
+      <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value))">📥 导出备餐矩阵</button>
       <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。
            详细说明只在电脑端显示（手机端只看颜色和数字），点一下开关。 -->
       <button id="kaBtn" class="ka-chip" onclick="toggleKeepAlive()"
@@ -414,6 +414,18 @@ function orderTimeOf(o){ return ((o&&(o.meal_time||o.booking_time||o.pickup_time
 
 // 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
 document.getElementById('datePick').value = localToday();
+
+// 用隐藏iframe下载，避免window.open新标签页空白（与菜单页一致）
+function downloadFile(url){
+  let f = document.getElementById('dl_frame');
+  if (!f){
+    f = document.createElement('iframe');
+    f.id = 'dl_frame';
+    f.style.display = 'none';
+    document.body.appendChild(f);
+  }
+  f.src = url;
+}
 
 // 用户在日期选择器里换了日期 → 必须重新取数（以前这里没接事件，选了日期页面没反应）
 function onDatePicked(){
