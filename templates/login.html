@@ -12,6 +12,9 @@
   h2{margin:0 0 4px;font-size:20px;color:#2b1e14}
   .sub{color:#8a7c6d;font-size:13px;margin-bottom:18px}
   input{width:100%;box-sizing:border-box;padding:11px 12px;margin:8px 0;border:1px solid #ddd;border-radius:9px;font-size:15px}
+  .pw-wrap{position:relative;display:flex;align-items:center;margin:8px 0}
+  .pw-wrap input{margin:0;padding-right:54px}
+  .pw-toggle{position:absolute;right:8px;margin:0;padding:6px 9px;font-size:12px;background:#f0f0f0;color:#2b1e14;border:0;border-radius:7px;cursor:pointer}
   button{width:100%;padding:12px;border:0;border-radius:9px;background:#b3402f;color:#fff;font-size:16px;font-weight:700;margin-top:10px;cursor:pointer}
   button:active{filter:brightness(.95)}
   .msg{color:#b3402f;font-size:13px;min-height:18px;margin-top:8px;text-align:center}
@@ -22,7 +25,10 @@
   <h2>刘和牛后厨系统</h2>
   <div class="sub">请输入账号密码</div>
   <input id="u" placeholder="用户名" autocomplete="username">
-  <input id="p" type="password" placeholder="密码" autocomplete="current-password">
+  <div class="pw-wrap">
+    <input id="p" type="password" placeholder="密码" autocomplete="current-password">
+    <button type="button" class="pw-toggle" onclick="togglePw('p')">显示</button>
+  </div>
   <button onclick="login()">登录</button>
   <div class="msg" id="msg"></div>
 </div>
@@ -38,6 +44,11 @@ async function login(){
     const d=await r.json();
     if(d.ok){location.href='/';}else{msg.textContent=d.msg||'登录失败';}
   }catch(e){msg.textContent='网络错误，请重试';}
+}
+function togglePw(id){
+  const el=document.getElementById(id);const btn=el.parentElement.querySelector('.pw-toggle');
+  if(el.type==='password'){el.type='text';btn.textContent='隐藏';}
+  else{el.type='password';btn.textContent='显示';}
 }
 document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
 </script>

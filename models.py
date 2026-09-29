@@ -27,10 +27,15 @@ class _ClosingConn(sqlite3.Connection):
 
 
 def get_db():
-    """获取数据库连接（用完要关：`with get_db() as conn:` 退出时已自动关闭）"""
-    conn = sqlite3.connect(DB_PATH, factory=_ClosingConn)
+    """获取数据库连接（用完要关：`with get_db() as conn:` 退出时已自动关闭）
+
+    关键：设 busy_timeout=5000，让并发写（Render 多进程 gunicorn）遇到写锁时
+    **排队等 5 秒**而不是立刻抛 'database is locked'。这是线上改密码 500 的根因之一。
+    """
+    conn = sqlite3.connect(DB_PATH, factory=_ClosingConn, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

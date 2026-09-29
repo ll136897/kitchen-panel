@@ -24,6 +24,9 @@
   .row .acts button{margin:0;padding:6px 10px;font-size:12px}
   .msg{font-size:13px;color:var(--primary);min-height:16px;margin-top:6px}
   .tip{font-size:12px;color:var(--muted);line-height:1.6}
+  .pw-wrap{position:relative;display:flex;align-items:center}
+  .pw-wrap input{padding-right:54px}
+  .pw-toggle{position:absolute;right:8px;margin:0;padding:6px 9px;font-size:12px;background:#f0f0f0;color:var(--txt);border-radius:7px}
 </style>
 </head>
 <body>
@@ -42,7 +45,10 @@
     <option value="staff" selected>店员/帮手（仅订单/备餐/库存）</option>
   </select>
   <label>初始密码</label>
-  <input id="np" type="password" placeholder="至少 4 位">
+  <div class="pw-wrap">
+    <input id="np" type="password" placeholder="至少 4 位">
+    <button type="button" class="pw-toggle" onclick="togglePw('np')">显示</button>
+  </div>
   <button onclick="addUser()">添加账号</button>
   <div class="msg" id="addMsg"></div>
 </div>
@@ -55,9 +61,15 @@
 <div class="card">
   <h3>修改我的密码</h3>
   <label>原密码</label>
-  <input id="old" type="password">
+  <div class="pw-wrap">
+    <input id="old" type="password">
+    <button type="button" class="pw-toggle" onclick="togglePw('old')">显示</button>
+  </div>
   <label>新密码</label>
-  <input id="newp" type="password">
+  <div class="pw-wrap">
+    <input id="newp" type="password">
+    <button type="button" class="pw-toggle" onclick="togglePw('newp')">显示</button>
+  </div>
   <button class="ghost" onclick="changePw()">保存新密码</button>
   <div class="msg" id="pwMsg"></div>
 </div>
@@ -107,6 +119,11 @@ async function changePw(){
   const r=await fetch('/api/me/change-pw',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({old:document.getElementById('old').value,new:document.getElementById('newp').value})});
   const d=await r.json();m.textContent=d.ok?'密码已更新':'失败：'+(d.msg||'');
+}
+function togglePw(id){
+  const el=document.getElementById(id);const btn=el.parentElement.querySelector('.pw-toggle');
+  if(el.type==='password'){el.type='text';btn.textContent='隐藏';}
+  else{el.type='password';btn.textContent='显示';}
 }
 load();
 </script>

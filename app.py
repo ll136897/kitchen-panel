@@ -450,13 +450,14 @@ def api_login():
     data = request.get_json(force=True) or {}
     u = (data.get("username") or "").strip()
     p = data.get("password") or ""
-    row = get_db().execute(
-        "SELECT id,username,name,role,active,pw_hash FROM users WHERE username=?",
-        (u,)).fetchone()
-    if not row or not row["active"] or not check_password_hash(row["pw_hash"], p):
-        return jsonify({"ok": False, "msg": "用户名或密码错误"}), 401
-    session["uid"] = row["id"]
-    return jsonify({"ok": True, "role": row["role"], "name": row["name"]})
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id,username,name,role,active,pw_hash FROM users WHERE username=?",
+            (u,)).fetchone()
+        if not row or not row["active"] or not check_password_hash(row["pw_hash"], p):
+            return jsonify({"ok": False, "msg": "用户名或密码错误"}), 401
+        session["uid"] = row["id"]
+        return jsonify({"ok": True, "role": row["role"], "name": row["name"]})
 
 
 @app.route("/logout")
@@ -480,8 +481,9 @@ def admin_page():
 
 @app.route("/api/users", methods=["GET"])
 def list_users():
-    rows = get_db().execute(
-        "SELECT id,username,name,role,active FROM users ORDER BY id").fetchall()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id,username,name,role,active FROM users ORDER BY id").fetchall()
     return jsonify({"ok": True, "users": [dict(r) for r in rows]})
 
 
@@ -495,10 +497,10 @@ def add_user():
     if not un or not pw:
         return jsonify({"ok": False, "msg": "用户名和密码必填"}), 400
     try:
-        get_db().execute(
-            "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
-            (un, name, role, generate_password_hash(pw), 1, _now()))
-        get_db().commit()
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
+                (un, name, role, generate_password_hash(pw), 1, _now()))
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": "创建失败：" + str(e)}), 400
@@ -506,15 +508,15 @@ def add_user():
 
 @app.route("/api/users/<int:uid>/toggle", methods=["POST"])
 def toggle_user(uid):
-    get_db().execute("UPDATE users SET active=1-active WHERE id=?", (uid,))
-    get_db().commit()
+    with get_db() as conn:
+        conn.execute("UPDATE users SET active=1-active WHERE id=?", (uid,))
     return jsonify({"ok": True})
 
 
 @app.route("/api/users/<int:uid>", methods=["DELETE"])
 def del_user(uid):
-    get_db().execute("UPDATE users SET active=0 WHERE id=?", (uid,))
-    get_db().commit()
+    with get_db() as conn:
+        conn.execute("UPDATE users SET active=0 WHERE id=?", (uid,))
     return jsonify({"ok": True})
 
 
@@ -524,9 +526,9 @@ def reset_pw(uid):
     pw = data.get("password") or ""
     if not pw:
         return jsonify({"ok": False, "msg": "请输入新密码"}), 400
-    get_db().execute("UPDATE users SET pw_hash=? WHERE id=?",
+    with get_db() as conn:
+        conn.execute("UPDATE users SET pw_hash=? WHERE id=?",
                      (generate_password_hash(pw), uid))
-    get_db().commit()
     return jsonify({"ok": True})
 
 
@@ -539,13 +541,13 @@ def change_my_pw():
     new = data.get("new") or ""
     if not new:
         return jsonify({"ok": False, "msg": "请输入新密码"}), 400
-    row = get_db().execute("SELECT pw_hash FROM users WHERE id=?",
+    with get_db() as conn:
+        row = conn.execute("SELECT pw_hash FROM users WHERE id=?",
                            (session.get("uid"),)).fetchone()
-    if not row or not check_password_hash(row["pw_hash"], old):
-        return jsonify({"ok": False, "msg": "原密码错误"}), 400
-    get_db().execute("UPDATE users SET pw_hash=? WHERE id=?",
+        if not row or not check_password_hash(row["pw_hash"], old):
+            return jsonify({"ok": False, "msg": "原密码错误"}), 400
+        conn.execute("UPDATE users SET pw_hash=? WHERE id=?",
                      (generate_password_hash(new), session["uid"]))
-    get_db().commit()
     return jsonify({"ok": True})
 
 
@@ -553,15 +555,14 @@ def ensure_admin_user():
     """库里一个账号都没有时，用环境变量 ADMIN_PW（没有就默认 kaorou888）建一个老板号。
     这样第一次部署后你就能用 admin 登录，再去“账号”页改密码、加店员。"""
     try:
-        conn = get_db()
-        n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        if n == 0:
-            pw = os.environ.get("ADMIN_PW") or "kaorou888"
-            conn.execute(
-                "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
-                ("admin", "管理员(老板)", "boss", generate_password_hash(pw), 1, _now()))
-            conn.commit()
-            print("[init] 已创建默认老板账号 admin / %s —— 请尽快在“账号”页修改密码" % pw)
+        with get_db() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            if n == 0:
+                pw = os.environ.get("ADMIN_PW") or "kaorou888"
+                conn.execute(
+                    "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
+                    ("admin", "管理员(老板)", "boss", generate_password_hash(pw), 1, _now()))
+                print("[init] 已创建默认老板账号 admin / %s —— 请尽快在“账号”页修改密码" % pw)
     except Exception as e:
         print("[init] ensure_admin_user 跳过：", e)
 
