@@ -3,6 +3,34 @@ import math
 import os
 
 
+# ===== idna 编码器兜底（2026-09-29 线上全站 500 的根因修复）=====
+# 现象：Render 的 Python 3.14 环境缺 encodings.idna（unknown encoding: idna），
+# 而 werkzeug 每个请求做路由匹配都要 server_name.encode("idna")，
+# 缺了它 = 所有请求一律 500，页面全部打不开。
+# 修法：应用启动最前面先检查，缺就补上：
+#   1) 尝试 import encodings.idna（导入即自动注册，旧版 Python 自带）；
+#   2) 实在没有就用 ascii 编码器顶替 —— 我们的域名全是 ASCII
+#      （*.onrender.com），对 ASCII 域名两者编码结果完全一样。
+def ensure_idna_codec():
+    import codecs
+    forced = os.environ.get("_FORCE_IDNA_FALLBACK") == "1"
+    if not forced:
+        try:
+            codecs.lookup("idna")
+            return
+        except LookupError:
+            pass
+        try:
+            import encodings.idna  # noqa: F401  导入即注册
+            return
+        except Exception:
+            pass
+    import encodings.ascii as _ascii
+    codecs.register(lambda name: _ascii.getregentry() if name == "idna" else None)
+
+ensure_idna_codec()
+
+
 # ===== 线上报错自动上报（不再麻烦用户去翻 Render 日志）=====
 # 2026-09-28 的教训：线上出 500 时，唯一能定位的 Traceback 只有 Render 日志里有，
 # 而让用户去翻日志既慢又容易指错地方。这里把报错直接写回 GitHub 仓库的
