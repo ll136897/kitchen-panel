@@ -1,13 +1,1 @@
-[2026-09-29T02:03:08.367249 UTC] request /api/me/change-pw
-Traceback (most recent call last):
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 880, in full_dispatch_request
-    rv = self.dispatch_request()
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 865, in dispatch_request
-    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-  File "/opt/render/project/src/app.py", line 546, in change_my_pw
-    get_db().execute("UPDATE users SET pw_hash=? WHERE id=?",
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                     (generate_password_hash(new), session["uid"]))
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-sqlite3.OperationalError: database is locked
+worker(pid=61) 启动成功，app import OK
