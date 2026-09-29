@@ -1264,6 +1264,8 @@ def api_parse():
     if not raw.strip() and not data.get("chunks"):
         return jsonify({"ok": False, "msg": "文本为空"}), 400
 
+    db = g.db
+    cur = db.cursor()
     from parser import split_orders
     chunks_in = data.get("chunks")
     if isinstance(chunks_in, list) and any((c or "").strip() for c in chunks_in):
@@ -1277,6 +1279,13 @@ def api_parse():
         p["_raw"] = chunk
         p["_batch_idx"] = i + 1
         p["_split_reason"] = reason
+        # 顺带标注这条是否和已有订单重复（不入库、只提示），让用户在预览框就能看到并删除
+        dup = _find_duplicate_order(cur, p)
+        if dup:
+            p["dup"] = {"id": dup["id"], "booking_date": dup["booking_date"],
+                        "booking_time": dup["booking_time"], "address": dup["address"],
+                        "contact_name": dup["contact_name"], "contact_phone": dup["contact_phone"],
+                        "status": dup["status"]}
         items.append(p)
     reasons = sorted({r for _, r in parts})
     return jsonify({"ok": True, "batch": True, "count": len(items),
@@ -1305,7 +1314,7 @@ def _find_duplicate_order(cur, parsed):
     # 日期 + 时间 + 电话先筛出候选（这几个条件已经很紧了），
     # 地址再按"归一"规则比：青龙湖二期 = 青龙湖，写法不同也算同一单，避免重复建单。
     rows = cur.execute("""
-        SELECT id, booking_date, booking_time, address, contact_name, contact_phone
+        SELECT id, booking_date, booking_time, address, contact_name, contact_phone, status
         FROM orders
         WHERE deleted_at IS NULL AND status != 'cancelled'
           AND booking_date = ?
@@ -1358,12 +1367,20 @@ def create_order():
                                              d.get("booking_time") or "",
                                              d.get("address") or "",
                                              d.get("contact_name") or ""] if x)
+                _st = {None: "未知", "pending": "待备", "preparing": "备餐中",
+                       "done": "已完成", "cancelled": "已取消"}.get(d.get("status"), "未知")
+                # 该单在哪天、什么状态——让用户一眼知道去哪找、为什么搜不到
+                hint = "（%s，%s）" % (_st, d.get("booking_date") or "日期未知")
                 return jsonify({
                     "ok": False,
                     "duplicate": True,
                     "existing_id": d["id"],
+                    "existing_status": d.get("status"),
+                    "existing_status_cn": _st,
                     "existing": d,
-                    "msg": "已有一模一样的订单 #%s（%s）" % (d["id"], where),
+                    "msg": "已存在订单 #%s %s" % (d["id"], where),
+                    "dup_hint": "这条已经在系统里了%s；可在「订单」页顶部搜索框搜“%s”直接定位，或去「备餐页」切到 %s 那天查看。" % (
+                        hint, d.get("contact_name") or d.get("address") or "", d.get("booking_date") or ""),
                 }), 409
 
     order_ids = []

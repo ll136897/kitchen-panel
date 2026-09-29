@@ -34,6 +34,15 @@
     #batchBar{gap:8px;padding:10px 12px}
     #batchBar .btn{padding:8px 10px;font-size:13px}
   }
+  /* 搜索框 + 日期快捷切换（与备餐页同款风格） */
+  .search-row{display:flex;gap:8px;margin:12px 0 12px;flex-wrap:wrap;align-items:center}
+  #searchBox{flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font-size:15px}
+  .date-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .date-chip{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap}
+  .date-chip:hover{filter:brightness(.97)}
+  .date-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .date-chip .cnt{opacity:.7;font-size:12px;margin-left:4px}
+  .order-count-hint{font-size:12px;color:#9a3412;margin:-4px 0 10px}
 </style>
 </head>
 <body>
@@ -67,6 +76,14 @@
       <button class="scope-chip" data-scope="month" onclick="setScope('month')">本月</button>
     </span>
   </div>
+
+  <!-- 搜索框 + 日期快捷切换（与备餐页同款，方便快速查找） -->
+  <div class="search-row">
+    <input id="searchBox" type="search" placeholder="🔍 搜 姓名 / 电话 / 地址 / 日期 / 备注 / 订单号" oninput="onSearch(this.value)">
+    <button class="btn btn-sm btn-refresh" onclick="clearSearch()">✕ 清除</button>
+  </div>
+  <div class="date-chips" id="orderDateChips"></div>
+  <div id="orderCountHint" class="order-count-hint" style="display:none"></div>
 
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
   <div class="kpi-row" id="orderKPIs" style="margin-bottom:16px"></div>
@@ -119,6 +136,8 @@ let currentVisibleIds = [];   // 当前渲染出来的订单 id（用于全选�
 let groupField = null;     // 'address' | 'contact_name' | null
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
+let filterText = '';       // 搜索关键字
+let filterDate = '';       // 按日期筛选（''=全部日期）
 
 // 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
 // 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
@@ -173,8 +192,24 @@ function loadOrders(){
     }
     const tip = document.getElementById('trashTip');
     if(tip) tip.style.display = showDeleted ? 'block' : 'none';
+    renderOrderDateChips();
     renderOrders();
   });
+}
+
+// ===== 搜索 + 日期快捷切换（同款备餐页）=====
+function onSearch(v){ filterText = (v||'').trim(); renderOrders(); }
+function clearSearch(){ const b=document.getElementById('searchBox'); if(b) b.value=''; filterText=''; renderOrders(); }
+function setOrderDate(d){ filterDate = d; renderOrderDateChips(); renderOrders(); }
+function renderOrderDateChips(){
+  const box = document.getElementById('orderDateChips');
+  if(!box) return;
+  const counts = {};
+  allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date] = (counts[o.booking_date]||0)+1; });
+  const dates = Object.keys(counts).sort().reverse();
+  let html = `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')">全部日期</button>`;
+  html += dates.map(d=>`<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`).join('');
+  box.innerHTML = html;
 }
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
@@ -235,17 +270,34 @@ function renderOrders(){
     {cls:'kpi-green',icon:'✅',num:count.done,lbl:'已完成'},
   ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
 
+  // 应用搜索 + 日期筛选
+  let list = allOrders;
+  if(filterDate) list = list.filter(o=>o.booking_date===filterDate);
+  if(filterText){
+    const q = filterText.toLowerCase();
+    list = list.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
+      .some(f=>(f||'').toLowerCase().includes(q)));
+  }
+  const hint = document.getElementById('orderCountHint');
+  if(hint){
+    if(filterText || filterDate){
+      hint.style.display='block';
+      hint.textContent = `🔎 筛选出 ${list.length} 条（共 ${allOrders.length} 条）${filterDate?(' · '+filterDate):''}${filterText?(' · 含“'+filterText+'”'):''}`;
+    } else hint.style.display='none';
+  }
+
   if(!groupField){
     document.getElementById('groupBar').style.display='none';
-    box.innerHTML = allOrders.map(o=>buildCard(o,false)).join('') || `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>还没有订单，去 <a href="/">录单页</a> 创建第一笔吧</div>`;
+    box.innerHTML = list.map(o=>buildCard(o,false)).join('') ||
+      `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>${(filterText||filterDate)?'没有匹配的订单，换个关键字或日期试试':'还没有订单，去 <a href="/">录单页</a> 创建第一笔吧'}</div>`;
     finishRender();
     return;
   }
   // 分组视图：按地址/联系人聚合，默认按点击订单的时间排（默认全部时段）
   // 地址用"归一后的地址"（青龙湖二期 → 青龙湖），同一个地方的不同写法算一个地方
-  const anchor = allOrders.find(o=>o.id===groupAnchorId) || {};
+  const anchor = list.find(o=>o.id===groupAnchorId) || {};
   const val = (groupField==='address' ? addrKey(anchor) : (anchor.contact_name||''));
-  let list = allOrders.filter(o=> (groupField==='address' ? addrKey(o) : (o.contact_name||'')) === val);
+  list = list.filter(o=> (groupField==='address' ? addrKey(o) : (o.contact_name||'')) === val);
   if(groupScope!=='all') list = list.filter(o=> inScope(o.booking_date, anchor.booking_date, groupScope));
   list = list.slice().sort((a,b)=> { const da=orderDt(a), db=orderDt(b); return db<da?-1:(db>da?1:0); });
 

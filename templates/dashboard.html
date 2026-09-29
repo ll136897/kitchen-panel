@@ -287,10 +287,18 @@ function parseCurrent(){
 }
 
 // --- 订单解析 ---
+let batchItems = [];   // 当前解析出来的订单（含 _raw），可在预览里删除重复项后再入库
+function stCn(s){ return ({pending:'待备',preparing:'备餐中',done:'已完成',cancelled:'已取消'})[s] || '未知'; }
 function renderBatchPreview(items){
-  const cards = items.map((data,i)=>{
+  batchItems = items.slice();
+  const cards = batchItems.map((data,i)=>{
     const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
+    const dupTag = data.dup ? `<div style="background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;font-size:12px;padding:6px 8px;border-radius:6px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>⚠️ 疑似重复：系统已有订单 #${data.dup.id}（${data.dup.contact_name||''} · ${data.dup.booking_date} ${data.dup.booking_time||''} · ${stCn(data.dup.status)}）</span>
+      <button class="btn btn-sm btn-danger" onclick="removeBatchItem(${i})">🗑 删除这一条</button>
+    </div>` : '';
     return `<div style="background:#faf5ed;border-radius:10px;padding:12px;margin:8px 0;border:1px solid #e8dfd0">
+      ${dupTag}
       <h4 style="margin:0 0 8px;font-size:14px">订单 ${i+1} · ${data.contact_name||'未识别'} · ¥${data.amount||0}</h4>
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">📅 ${data.booking_date||'-'}/${data.booking_time||'-'} · 📍 ${data.address||'-'}</div>
       <div class="chips">${pkgs}</div>
@@ -300,12 +308,17 @@ function renderBatchPreview(items){
   document.getElementById('parsePreview').innerHTML = `
     <div class="order-preview">
       <div class="btn-row" style="margin-bottom:12px">
-        <button class="btn btn-success" onclick="confirmOrder()">✅ 批量入库 ${items.length} 单</button>
+        <button class="btn btn-success" onclick="confirmOrder()">✅ 批量入库 ${batchItems.length} 单</button>
         <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
       </div>
-      <h4>📦 批量预览 · ${items.length} 个订单</h4>
+      ${ batchItems.length ? `<h4>📦 批量预览 · ${batchItems.length} 个订单</h4>` : `<div class="muted" style="padding:12px">已全部删除，没有可入库的订单</div>` }
       ${cards}
     </div>`;
+}
+function removeBatchItem(i){
+  if(i<0 || i>=batchItems.length) return;
+  batchItems.splice(i,1);
+  renderBatchPreview(batchItems);
 }
 function parseOrder(){
   const raw = document.getElementById('rawText').value.trim();
@@ -319,6 +332,7 @@ function parseOrder(){
         return;
       }
       const data = d.data;
+      batchItems = [data];   // 单条也纳入 batchItems，方便统一走“删除重复/入库”流程
       const pkgs = (data.matched_packages||[]).map(p=>`<span class="chip pkg">${p.name} × ${p.quantity}</span>`).join('');
       const extraT = Object.entries(data.extra_tools||{});
       const extraChips = extraT.map(([k,v])=>{
@@ -422,13 +436,18 @@ function parseOrder(){
         ingHtml += `<tr><td colspan="7" style="background:#8e44ad;color:#fff;font-weight:700;padding:5px 8px;font-size:13px">🍱 客户餐具/工具 · ${tableware.length}项</td></tr>${rows}`;
       }
 
+      const dupBanner = data.dup ? `<div style="background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:12px;line-height:1.6">
+        ⚠️ <b>疑似重复</b>：系统里已有订单 <b>#${data.dup.id}</b>（${data.dup.contact_name||''} · ${data.dup.booking_date} ${data.dup.booking_time||''} · ${data.dup.address||''} · 状态：${stCn(data.dup.status)}）。若确认是同一单，删掉这一条即可；确定要补录就点「✅ 确认入库」强制录入。
+      </div>` : '';
       document.getElementById('parsePreview').classList.add('show');
       document.getElementById('parsePreview').innerHTML = `
         <div class="order-preview">
           <div class="btn-row" style="margin-bottom:12px">
             <button class="btn btn-success" onclick="confirmOrder()">✅ 确认入库</button>
             <button class="btn" onclick="document.getElementById('parsePreview').classList.remove('show')">✖ 取消</button>
+            ${data.dup?`<button class="btn btn-danger" onclick="clearText()">🗑 删除这一条重复单</button>`:''}
           </div>
+          ${dupBanner}
           <h4>✅ 订单解析结果</h4>
           <div class="preview-grid">
             <div class="cell"><div class="k">📅 预约日期</div><div class="v">${data.booking_date||'未识别'}</div></div>
@@ -448,15 +467,16 @@ function parseOrder(){
     });
 }
 function confirmOrder(){
-  const raw = document.getElementById('rawText').value.trim();
-  if(!raw) return;
-  postOrder(raw, false);
+  if(!batchItems.length){ showStockToast('没有可入库的订单（重复项都已删除）'); return; }
+  const chunks = batchItems.map(it=>it._raw);
+  if(!chunks.some(c=>(c||'').trim())){ showStockToast('没有可入库的内容'); return; }
+  postOrderChunks(chunks, false);
 }
 
-// 提交订单；若后端发现"一模一样的订单"(duplicate)，弹框让用户确认后再 force 提交
-function postOrder(raw, force){
+// 用预览里剩下的 chunk 入库；若后端发现"一模一样的订单"(duplicate)，弹框让用户确认后再 force 提交
+function postOrderChunks(chunks, force){
   fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({raw_text:raw, force:!!force})})
+      body:JSON.stringify({chunks:chunks, force:!!force})})
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         clearText();
@@ -469,10 +489,11 @@ function postOrder(raw, force){
         }
         return;
       }
-      // 完全重复：弹框确认（点确定=照录，点取消=放弃）
+      // 完全重复：弹框确认（点确定=强制照录，点取消=放弃）
       if(d.duplicate){
-        const go = confirm(`⚠️ 发现一模一样的订单\n\n${d.msg||''}\n\n确定还要再录一遍吗？\n· 点「确定」= 继续录入\n· 点「取消」= 放弃这一单`);
-        if(go) postOrder(raw, true);
+        const tip = `⚠️ 发现一模一样的订单\n\n${d.msg||''}` + (d.dup_hint ? ('\n\n'+d.dup_hint) : '');
+        const go = confirm(tip + '\n\n确定还要再录一遍吗？');
+        if(go) postOrderChunks(chunks, true);
         return;
       }
       showStockToast('入库失败：'+(d.msg||'未知错误'));
