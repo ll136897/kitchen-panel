@@ -1010,6 +1010,7 @@ function renderByOrder(){
       <h3 style="margin:0">📍 ${o.address||'—'} · 📅 ${dateLabel} · 🍱 ${pkgsTxt||'—'} · 👤 ${o.contact_name||'—'}</h3>
       <span>
         <button class="check-all-btn" onclick="window.open('/orders/${o.id}/ticket','_blank')" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#27ae60;color:#fff;cursor:pointer;font-weight:700">🖨 出餐单</button>
+        <button class="check-all-btn" onclick="doConsume(${o.id})" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#8e44ad;color:#fff;cursor:pointer;font-weight:700">📦 出库</button>
         <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
       </span>
     </div><div class="muted" style="padding:16px">加载中...</div></div>`;
@@ -1258,6 +1259,46 @@ function checkAll(section, checked){
 function checkAllOrder(oid, checked){
   fetch('/api/prep/check/batch',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({order_ids:[oid], checked:checked})}).then(()=>loadPrep());
+}
+
+// 按这一单出库：食材/耗材扣库存并记流水（装备不记账，靠盘点校正）。可到「库存」页撤销。
+function doConsume(oid){
+  fetch('/api/stock/order-needs/'+oid).then(r=>r.json()).then(d=>{
+    if(!d.ok){ alert(d.msg||'取不到需求'); return; }
+    const items = (d.data && d.data.items) || [];
+    if(!items.length){ alert('该单没有备餐需求，无需出库'); return; }
+    const foods = items.filter(x=>x.item_type==='ingredient');
+    const gears = items.filter(x=>x.item_type==='tool');
+    const shortFood = foods.filter(x=>(x.stock||0) < x.need);
+    let msg = '确认给订单 #'+oid+' 出库？\n\n'
+      + '· 食材/耗材 '+foods.length+' 项 → 扣减库存（真消耗）\n'
+      + '· 装备 '+gears.length+' 项 → 不记账（靠盘点校正）';
+    if(shortFood.length){
+      msg += '\n\n⚠️ 有 '+shortFood.length+' 项食材库存不够（会扣成负数，建议先入库）：\n'
+        + shortFood.slice(0,8).map(x=>'· '+x.name+'：需要 '+x.need+x.unit+'，现有 '+x.stock+x.unit).join('\n');
+    }
+    if(!confirm(msg)) return;
+    fetch('/api/stock/consume',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({order_id:oid})}).then(r=>r.json()).then(res=>{
+      if(res.ok){
+        let ok = '✅ 订单 #'+oid+' 已出库\n· 食材消耗 '+(res.consumed||0)+' 项（已扣库存）';
+        if(res.gears && res.gears.length){
+          ok += '\n· 装备 '+res.gears.length+' 项（不记账，本单要用）：\n   '
+            + res.gears.slice(0,10).map(g=>g.name+'×'+g.need).join('、') + (res.gears.length>10?' …':'');
+        }
+        if(res.short && res.short.length){
+          const sf = res.short.filter(x=>x.kind==='ingredient').length;
+          if(sf) ok += '\n\n⚠️ '+sf+' 项食材库存不足，已扣成负数（记得补货）';
+        }
+        alert(ok);
+        if(typeof showToast === 'function') showToast('✓ 已出库');
+      } else if(res.already){
+        alert(res.msg || '该单已出过库（如需重出请先到库存页撤销）');
+      } else {
+        alert(res.msg || '出库失败');
+      }
+    }).catch(()=>alert('出库失败：网络错误'));
+  });
 }
 
 function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
