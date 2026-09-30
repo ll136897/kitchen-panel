@@ -2746,7 +2746,8 @@ def export_menu_xlsx():
     from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
     from urllib.parse import quote as _quote2
     _now2 = _dt2.now(_tz2(_td2(hours=8)))
-    _mname = f"菜单表{_now2.year}-{_now2.month}-{_now2.day}-{_now2.hour}:{_now2.minute}.xlsx"
+    # 用"点"代替冒号：Windows 文件名不允许 ':'（会被系统换成 _）
+    _mname = f"菜单表{_now2.year}-{_now2.month}-{_now2.day}-{_now2.hour}点{_now2.minute:02d}.xlsx"
     resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     # 中文文件名要用 RFC 5987 filename* 编码，否则 response header latin-1 会报错
     resp.headers["Content-Disposition"] = "attachment; filename=\"menu.xlsx\"; filename*=UTF-8''" + _quote2(_mname)
@@ -2984,7 +2985,8 @@ def export_prep_matrix():
     from datetime import datetime as _dt3, timezone as _tz3, timedelta as _td3
     from urllib.parse import quote as _quote3
     _now3 = _dt3.now(_tz3(_td3(hours=8)))
-    _pname = f"备餐表{_now3.year}-{_now3.month}-{_now3.day}-{_now3.hour}:{_now3.minute}.xlsx"
+    # 用"点"代替冒号：Windows 文件名不允许 ':'（会被系统换成 _）
+    _pname = f"备餐表{_now3.year}-{_now3.month}-{_now3.day}-{_now3.hour}点{_now3.minute:02d}.xlsx"
     # 中文文件名要用 RFC 5987 filename* 编码，否则 response header latin-1 会报错
     resp.headers["Content-Disposition"] = "attachment; filename=\"prep.xlsx\"; filename*=UTF-8''" + _quote3(_pname)
     return resp
