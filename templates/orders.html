@@ -103,7 +103,7 @@
   <div class="sort-chips" id="orderSortChips">
     <span class="sort-label">排序</span>
     <button class="sort-chip active" data-mode="date" onclick="setSort('date')">📅 出餐日期</button>
-    <button class="sort-chip" data-mode="join" onclick="setSort('join')">🆔 加入顺序</button>
+    <button class="sort-chip" data-mode="join" onclick="setSort('join')" title="最后加入的排在最前面">🆔 加入顺序</button>
     <span class="sort-sep"></span>
     <button class="sort-chip active" id="monthChip" onclick="toggleMonthMode()">📆 按月分组</button>
     <button class="sort-chip" id="collapseAllChip" onclick="toggleCollapseAll()">⇕ 全部收起</button>
@@ -164,9 +164,11 @@ let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
 let sortMode = 'date';     // 排序方式：'date'=出餐日期（默认） | 'join'=加入顺序
-let monthMode = true;            // 是否按月分组显示（默认开）
-let collapsedMonths = new Set(); // 已收起的月份（'YYYY-MM'）
-let lastMonthKeys = [];          // 最近一次渲染出现的月份（供"全部收起/展开"用）
+let monthMode = true;             // 是否按月分组显示（默认开）
+let collapsedMonths = new Set();  // 手动收起的月份（'YYYY-MM'）
+let expandedMonths = new Set();   // 手动展开的往月（往月默认收起，点开才进这里）
+let initedMonths = new Set();     // 已经做过"往月默认收起"初始化的月份
+let lastMonthKeys = [];           // 最近一次渲染出现的月份（供"全部收起/展开"用）
 
 // 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
 // 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
@@ -264,16 +266,32 @@ function currentMonthKeys(){
   const ks = allOrders.map(monthKey);
   return [...new Set(ks)].sort().reverse();
 }
+// 是否收起：往月首次出现时默认收起（见 syncMonthDefaults），手动点开后记住
+function isMonthCollapsed(k){ return collapsedMonths.has(k) && !expandedMonths.has(k); }
+// 首次见到某个月份时：
+//  · 往月（早于当月）默认收起；但当月没有订单时，最新的那个月（keys[0]）保持展开，
+//    避免"一屏全是收起、看不到任何订单"。
+//  · 用户手动操作过的月份不再被默认规则干预（靠 initedMonths 只判一次）。
+function syncMonthDefaults(keys){
+  const cur = thisMonthKey();
+  const newest = keys.length ? keys[0] : '';
+  keys.forEach(k=>{
+    if(initedMonths.has(k)) return;
+    initedMonths.add(k);
+    if(k < cur && k !== newest) collapsedMonths.add(k);
+  });
+}
 function toggleMonthMode(){ monthMode = !monthMode; renderOrders(); }
 function toggleMonth(k){
-  if(collapsedMonths.has(k)) collapsedMonths.delete(k); else collapsedMonths.add(k);
+  if(isMonthCollapsed(k)){ collapsedMonths.delete(k); expandedMonths.add(k); }   // 收起 → 展开
+  else { expandedMonths.delete(k); collapsedMonths.add(k); }                     // 展开 → 收起
   renderOrders();
 }
 function toggleCollapseAll(){
   const keys = lastMonthKeys.length ? lastMonthKeys : currentMonthKeys();
-  const allCollapsed = keys.length>0 && keys.every(k=>collapsedMonths.has(k));
-  if(allCollapsed) keys.forEach(k=>collapsedMonths.delete(k));
-  else keys.forEach(k=>collapsedMonths.add(k));
+  const allCollapsed = keys.length>0 && keys.every(isMonthCollapsed);
+  if(allCollapsed){ keys.forEach(k=>{ collapsedMonths.delete(k); expandedMonths.add(k); }); }
+  else { keys.forEach(k=>{ expandedMonths.delete(k); collapsedMonths.add(k); }); }
   renderOrders();
 }
 function renderMonthChips(){
@@ -283,7 +301,7 @@ function renderMonthChips(){
   if(ca){
     ca.style.display = monthMode ? '' : 'none';
     const keys = lastMonthKeys.length ? lastMonthKeys : currentMonthKeys();
-    const allCollapsed = keys.length>0 && keys.every(k=>collapsedMonths.has(k));
+    const allCollapsed = keys.length>0 && keys.every(isMonthCollapsed);
     ca.textContent = allCollapsed ? '⇕ 全部展开' : '⇕ 全部收起';
   }
 }
@@ -300,10 +318,11 @@ function renderOrderList(list, isGroup){
   list.forEach(o=>{ const k=monthKey(o); (groups[k]=groups[k]||[]).push(o); });
   const keys = Object.keys(groups).sort().reverse();   // 月份新的在前；月内沿用当前排序
   lastMonthKeys = keys;
+  syncMonthDefaults(keys);                             // 往月首次出现 → 默认收起
   const cur = thisMonthKey();
   return keys.map(k=>{
     const arr = groups[k];
-    const collapsed = collapsedMonths.has(k);
+    const collapsed = isMonthCollapsed(k);
     const amt = arr.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
     return `<div class="month-group${k===cur?' cur':''}">
       <div class="month-head" onclick="toggleMonth('${k}')">
@@ -384,7 +403,7 @@ function renderOrders(){
   }
   // 排序：默认按出餐日期（新日期在前），可切到加入顺序（先录入的在前）
   list = list.slice().sort((a,b)=>{
-    if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return ca<cb?-1:(ca>cb?1:0); }
+    if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return cb<ca?-1:(cb>ca?1:0); }  // 最后加入的排最前
     const da=orderDt(a), db=orderDt(b);
     return db<da?-1:(db>da?1:0);
   });

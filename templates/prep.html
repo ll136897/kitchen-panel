@@ -203,6 +203,17 @@
   }
   .date-chip.active .chip-cnt{background:rgba(255,255,255,.3)}
   .date-chip.active .muted{color:rgba(255,255,255,.85)}
+  /* 日期条按月分组：月份行可点开/收起（默认展开当月、往月自动收起） */
+  .dm-head{
+    display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;
+    border:1px solid var(--border-l);background:#fff;color:#9a3412;cursor:pointer;
+    font-size:13px;font-weight:700;
+  }
+  .dm-head:hover{background:#faf5ed}
+  .dm-head.cur{border-color:var(--primary);color:var(--primary);background:#fffaf9}
+  .dm-caret{font-size:11px}
+  .dm-meta{margin-left:2px;font-weight:600;opacity:.85}
+  .dm-days{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px 4px}
   .mode-tab{display:inline-flex;background:#f3efe8;padding:3px;border-radius:12px;gap:2px}
   .mode-tab button{padding:10px 18px;border:none;background:transparent;color:#8a7f75;border-radius:10px;font-weight:700;cursor:pointer;font-size:15px}
   .mode-tab button.active{background:var(--primary);color:#fff}
@@ -431,6 +442,7 @@ function downloadFile(url){
 function onDatePicked(){
   const d = document.getElementById('datePick').value;
   if(!d) return;
+  ensurePrepMonthOpen(d);   // 用日期选择器选到往月时，自动展开那个月
   if(typeof showToast === 'function') showToast('📅 已切到 ' + mdOf(d));
   loadPrep();
 }
@@ -618,6 +630,39 @@ function loadPrepDates(autoSwitch){
   });
 }
 
+// ===== 日期条：按月分组，月份可展开/收回（默认展开当月，往月自动收起）=====
+let prepExpandedMonths = new Set();   // 手动展开过的往月
+let prepCollapsedMonths = new Set();  // 手动收起过的月
+let prepInitedMonths = new Set();     // 已经做过"往月默认收起"初始化的月份
+function prepMonthOf(d){ return (d||'').slice(0,7) || '未知'; }
+function prepMonthLabel(k){
+  const p = k.split('-');
+  return (p.length===2 && p[0]) ? `${p[0]}年${parseInt(p[1],10)}月` : '日期未知';
+}
+function prepMonthCollapsed(k){ return prepCollapsedMonths.has(k) && !prepExpandedMonths.has(k); }
+// 首次见到某个月份时：往月默认收起；但最新的那个月（keys[0]，通常是当月）保持展开，
+// 避免"一屏全是收起、看不到任何日期"。用户手动操作过的月份不再被干预（initedMonths 只判一次）。
+function prepSyncMonthDefaults(keys){
+  const curM = (todayDateStr || localToday()).slice(0,7);
+  const newest = keys.length ? keys[0] : '';
+  keys.forEach(k=>{
+    if(prepInitedMonths.has(k)) return;
+    prepInitedMonths.add(k);
+    if(k < curM && k !== newest) prepCollapsedMonths.add(k);
+  });
+}
+function togglePrepMonth(k){
+  if(prepMonthCollapsed(k)){ prepCollapsedMonths.delete(k); prepExpandedMonths.add(k); }
+  else { prepExpandedMonths.delete(k); prepCollapsedMonths.add(k); }
+  renderDateChips();
+}
+// 选中某天时，确保它所在的月份是展开的（否则看不到高亮）
+function ensurePrepMonthOpen(dateStr){
+  if(!dateStr) return;
+  const mk = prepMonthOf(dateStr);
+  if(prepMonthCollapsed(mk)){ prepExpandedMonths.add(mk); prepCollapsedMonths.delete(mk); renderDateChips(); }
+}
+
 function renderDateChips(){
   // ⚠️ "今天"必须用后端给的 todayDateStr（=真正的今天），不能把"当前选中的日期"当成今天。
   // 以前 loadPrep() 把选中日期传进来 → 点任何一天，那条日期就会被标成"📍 今天"。
@@ -633,7 +678,8 @@ function renderDateChips(){
     dates.unshift({booking_date: todayStr, cnt: 0, is_today: true, is_past: false});
   }
   const currentDate = document.getElementById('datePick').value;
-  box.innerHTML = dates.map(d=>{
+
+  const chipHtml = (d)=>{
     const cls = [
       'date-chip',
       d.is_today ? 'today' : '',
@@ -651,11 +697,36 @@ function renderDateChips(){
     return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">
       ${prefix} <span class="muted" style="font-weight:400">${weekdayOf(d.booking_date)}</span> <span class="chip-cnt">${d.cnt}单</span>
     </button>`;
+  };
+
+  // 按月分组（月份新的在前，月内日期升序）
+  const groups = {}, order = [];
+  dates.forEach(d=>{
+    const k = prepMonthOf(d.booking_date);
+    if(!groups[k]){ groups[k] = []; order.push(k); }
+    groups[k].push(d);
+  });
+  order.sort().reverse();
+  prepSyncMonthDefaults(order);   // 往月首次出现 → 默认收起
+  const curM = (todayStr||'').slice(0,7);
+  box.innerHTML = order.map(k=>{
+    const arr = groups[k].slice().sort((a,b)=> a.booking_date < b.booking_date ? -1 : (a.booking_date > b.booking_date ? 1 : 0));
+    const collapsed = prepMonthCollapsed(k);
+    const total = arr.reduce((s,d)=> s + (d.cnt || 0), 0);
+    return `<div style="flex:1 1 100%">
+      <button class="dm-head${k===curM?' cur':''}" onclick="togglePrepMonth('${k}')">
+        <span class="dm-caret">${collapsed?'▸':'▾'}</span>
+        <span>${prepMonthLabel(k)}</span>
+        <span class="dm-meta">${arr.length}天 · ${total}单</span>
+      </button>
+      ${collapsed ? '' : `<div class="dm-days">${arr.map(chipHtml).join('')}</div>`}
+    </div>`;
   }).join('');
 }
 
 function pickDate(dateStr){
   document.getElementById('datePick').value = dateStr;
+  ensurePrepMonthOpen(dateStr);   // 选中的日期若在收起的往月里，先展开那个月
   loadPrep();
   // 更新按钮高亮（不全量重渲染 date chips 避免列表跳动）
   document.querySelectorAll('.date-chip').forEach(b=>{
