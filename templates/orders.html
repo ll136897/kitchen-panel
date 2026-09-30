@@ -43,6 +43,12 @@
   .date-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .date-chip .cnt{opacity:.7;font-size:12px;margin-left:4px}
   .order-count-hint{font-size:12px;color:#9a3412;margin:-4px 0 10px}
+  /* 排序切换（出餐日期 / 加入顺序） */
+  .sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .sort-label{font-size:12px;color:#9a3412;font-weight:600;margin-right:2px}
+  .sort-chip{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  .sort-chip:hover{filter:brightness(.97)}
+  .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 </style>
 </head>
 <body>
@@ -83,6 +89,11 @@
     <button class="btn btn-sm btn-refresh" onclick="clearSearch()">✕ 清除</button>
   </div>
   <div class="date-chips" id="orderDateChips"></div>
+  <div class="sort-chips" id="orderSortChips">
+    <span class="sort-label">排序</span>
+    <button class="sort-chip active" data-mode="date" onclick="setSort('date')">📅 出餐日期</button>
+    <button class="sort-chip" data-mode="join" onclick="setSort('join')">🆔 加入顺序</button>
+  </div>
   <div id="orderCountHint" class="order-count-hint" style="display:none"></div>
 
   <!-- 顶部 KPI 计数条（简单的小卡，复用 kpi-row） -->
@@ -138,6 +149,7 @@ let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月�
 let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
+let sortMode = 'date';     // 排序方式：'date'=出餐日期（默认） | 'join'=加入顺序
 
 // 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
 // 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
@@ -193,6 +205,7 @@ function loadOrders(){
     const tip = document.getElementById('trashTip');
     if(tip) tip.style.display = showDeleted ? 'block' : 'none';
     renderOrderDateChips();
+    renderSortChips();
     renderOrders();
   });
 }
@@ -211,6 +224,15 @@ function renderOrderDateChips(){
   html += dates.map(d=>`<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`).join('');
   box.innerHTML = html;
 }
+
+// 排序切换：出餐日期 / 加入顺序
+function setSort(m){ sortMode = m; renderSortChips(); renderOrders(); }
+function renderSortChips(){
+  const box = document.getElementById('orderSortChips');
+  if(!box) return;
+  box.querySelectorAll('.sort-chip').forEach(b=>b.classList.toggle('active', b.dataset.mode===sortMode));
+}
+function joinKey(o){ return o.created_at || ('0000000000'+(o.id||0)).slice(-10); }
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
 function buildCard(o, isAnchor){
@@ -278,6 +300,12 @@ function renderOrders(){
     list = list.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
       .some(f=>(f||'').toLowerCase().includes(q)));
   }
+  // 排序：默认按出餐日期（新日期在前），可切到加入顺序（先录入的在前）
+  list = list.slice().sort((a,b)=>{
+    if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return ca<cb?-1:(ca>cb?1:0); }
+    const da=orderDt(a), db=orderDt(b);
+    return db<da?-1:(db>da?1:0);
+  });
   const hint = document.getElementById('orderCountHint');
   if(hint){
     if(filterText || filterDate){
@@ -299,7 +327,7 @@ function renderOrders(){
   const val = (groupField==='address' ? addrKey(anchor) : (anchor.contact_name||''));
   list = list.filter(o=> (groupField==='address' ? addrKey(o) : (o.contact_name||'')) === val);
   if(groupScope!=='all') list = list.filter(o=> inScope(o.booking_date, anchor.booking_date, groupScope));
-  list = list.slice().sort((a,b)=> { const da=orderDt(a), db=orderDt(b); return db<da?-1:(db>da?1:0); });
+  // 排序已在上文按 sortMode 完成（出餐日期 / 加入顺序）
 
   const gb = document.getElementById('groupBar');
   gb.style.display = 'flex';
