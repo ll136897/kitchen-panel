@@ -49,6 +49,17 @@
   .sort-chip{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
   .sort-chip:hover{filter:brightness(.97)}
   .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .sort-sep{width:1px;height:16px;background:var(--border);margin:0 2px}
+  /* 按月分组：月份条可展开/收回 */
+  .month-group{margin-bottom:8px}
+  .month-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border:1px solid var(--border);border-radius:10px;cursor:pointer;user-select:none;font-weight:700;color:#5a4a3a}
+  .month-head:hover{filter:brightness(.98)}
+  .month-group.cur .month-head{border-color:var(--primary);background:#fffaf9}
+  .month-caret{font-size:11px;width:12px;text-align:center;color:#9a3412;flex:0 0 auto}
+  .month-name{font-size:14px}
+  .month-group.cur .month-name{color:var(--primary)}
+  .month-meta{margin-left:auto;font-size:12px;font-weight:600;color:#9a3412;opacity:.9;white-space:nowrap}
+  .month-body{margin-top:10px}
 </style>
 </head>
 <body>
@@ -93,6 +104,9 @@
     <span class="sort-label">排序</span>
     <button class="sort-chip active" data-mode="date" onclick="setSort('date')">📅 出餐日期</button>
     <button class="sort-chip" data-mode="join" onclick="setSort('join')">🆔 加入顺序</button>
+    <span class="sort-sep"></span>
+    <button class="sort-chip active" id="monthChip" onclick="toggleMonthMode()">📆 按月分组</button>
+    <button class="sort-chip" id="collapseAllChip" onclick="toggleCollapseAll()">⇕ 全部收起</button>
   </div>
   <div id="orderCountHint" class="order-count-hint" style="display:none"></div>
 
@@ -150,6 +164,9 @@ let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
 let sortMode = 'date';     // 排序方式：'date'=出餐日期（默认） | 'join'=加入顺序
+let monthMode = true;            // 是否按月分组显示（默认开）
+let collapsedMonths = new Set(); // 已收起的月份（'YYYY-MM'）
+let lastMonthKeys = [];          // 最近一次渲染出现的月份（供"全部收起/展开"用）
 
 // 地址归并用的键：后端算好的"归一地址"（青龙湖二期 → 青龙湖）。
 // 旧的 /api/orders 没这个字段时退回原地址，保证任何情况下都能用。
@@ -230,9 +247,74 @@ function setSort(m){ sortMode = m; renderSortChips(); renderOrders(); }
 function renderSortChips(){
   const box = document.getElementById('orderSortChips');
   if(!box) return;
-  box.querySelectorAll('.sort-chip').forEach(b=>b.classList.toggle('active', b.dataset.mode===sortMode));
+  box.querySelectorAll('.sort-chip[data-mode]').forEach(b=>b.classList.toggle('active', b.dataset.mode===sortMode));
 }
 function joinKey(o){ return o.created_at || ('0000000000'+(o.id||0)).slice(-10); }
+
+// ===== 按月分组（可展开/收回）=====
+function monthKey(o){ return (o.booking_date||'').slice(0,7) || '未知'; }
+function thisMonthKey(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function monthLabel(k){
+  const p = k.split('-');
+  if(p.length===2 && p[0]) return `${p[0]}年${parseInt(p[1],10)}月`;
+  return k==='未知' ? '日期未知' : k;
+}
+function money(n){ return (Math.round((n||0)*100)/100).toLocaleString('zh-CN'); }
+function currentMonthKeys(){
+  const ks = allOrders.map(monthKey);
+  return [...new Set(ks)].sort().reverse();
+}
+function toggleMonthMode(){ monthMode = !monthMode; renderOrders(); }
+function toggleMonth(k){
+  if(collapsedMonths.has(k)) collapsedMonths.delete(k); else collapsedMonths.add(k);
+  renderOrders();
+}
+function toggleCollapseAll(){
+  const keys = lastMonthKeys.length ? lastMonthKeys : currentMonthKeys();
+  const allCollapsed = keys.length>0 && keys.every(k=>collapsedMonths.has(k));
+  if(allCollapsed) keys.forEach(k=>collapsedMonths.delete(k));
+  else keys.forEach(k=>collapsedMonths.add(k));
+  renderOrders();
+}
+function renderMonthChips(){
+  const mc = document.getElementById('monthChip');
+  if(mc) mc.classList.toggle('active', monthMode);
+  const ca = document.getElementById('collapseAllChip');
+  if(ca){
+    ca.style.display = monthMode ? '' : 'none';
+    const keys = lastMonthKeys.length ? lastMonthKeys : currentMonthKeys();
+    const allCollapsed = keys.length>0 && keys.every(k=>collapsedMonths.has(k));
+    ca.textContent = allCollapsed ? '⇕ 全部展开' : '⇕ 全部收起';
+  }
+}
+
+// 列表渲染：按月分组（月份条可点开展开/收回）或平铺；isGroup=true 时高亮锚点卡片
+function renderOrderList(list, isGroup){
+  if(!list.length){
+    lastMonthKeys = [];
+    return `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>${isGroup ? '该范围内暂无订单' : ((filterText||filterDate) ? '没有匹配的订单，换个关键字或日期试试' : '还没有订单，去 <a href="/">录单页</a> 创建第一笔吧')}</div>`;
+  }
+  const cardAt = (o)=>buildCard(o, isGroup && o.id===groupAnchorId);
+  if(!monthMode){ lastMonthKeys = []; return list.map(cardAt).join(''); }
+  const groups = {};
+  list.forEach(o=>{ const k=monthKey(o); (groups[k]=groups[k]||[]).push(o); });
+  const keys = Object.keys(groups).sort().reverse();   // 月份新的在前；月内沿用当前排序
+  lastMonthKeys = keys;
+  const cur = thisMonthKey();
+  return keys.map(k=>{
+    const arr = groups[k];
+    const collapsed = collapsedMonths.has(k);
+    const amt = arr.reduce((s,o)=> s + (o.status!=='cancelled' ? (o.amount||0) : 0), 0);
+    return `<div class="month-group${k===cur?' cur':''}">
+      <div class="month-head" onclick="toggleMonth('${k}')">
+        <span class="month-caret">${collapsed?'▸':'▾'}</span>
+        <span class="month-name">${monthLabel(k)}</span>
+        <span class="month-meta">${arr.length} 单 · ¥${money(amt)}</span>
+      </div>
+      ${collapsed ? '' : `<div class="month-body">${arr.map(cardAt).join('')}</div>`}
+    </div>`;
+  }).join('');
+}
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
 function buildCard(o, isAnchor){
@@ -316,8 +398,7 @@ function renderOrders(){
 
   if(!groupField){
     document.getElementById('groupBar').style.display='none';
-    box.innerHTML = list.map(o=>buildCard(o,false)).join('') ||
-      `<div class="card" style="text-align:center;padding:40px;color:#aaa"><div style="font-size:40px;margin-bottom:12px">🍖</div>${(filterText||filterDate)?'没有匹配的订单，换个关键字或日期试试':'还没有订单，去 <a href="/">录单页</a> 创建第一笔吧'}</div>`;
+    box.innerHTML = renderOrderList(list, false);
     finishRender();
     return;
   }
@@ -344,14 +425,14 @@ function renderOrders(){
   document.getElementById('groupSummary').textContent = `· 共 ${list.length} 单 · 合计 ¥${sumAmt} · ${scopeTxt}`;
   document.querySelectorAll('.scope-chip').forEach(b=>b.classList.toggle('active', b.dataset.scope===groupScope));
 
-  box.innerHTML = list.map(o=>buildCard(o, o.id===groupAnchorId)).join('') ||
-    `<div class="card" style="text-align:center;padding:32px;color:#aaa">该范围内暂无订单</div>`;
+  box.innerHTML = renderOrderList(list, true);
   finishRender();
 }
 
 function finishRender(){
   const box = document.getElementById('orderList');
   currentVisibleIds = [...box.querySelectorAll('.order-card')].map(c=>parseInt(c.id.replace('ocard-',''),10));
+  renderMonthChips();
   updateBatchBar();
 }
 
