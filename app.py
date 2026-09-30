@@ -3503,7 +3503,7 @@ def print_menu():
 </style>
 </head>
 <body>
-<a class="back-btn" href="/" onclick="if(history.length>1){{event.preventDefault();history.back();}}">← 返回</a>
+<a class="back-btn" href="/" onclick="var r=document.referrer;if(r&amp;&amp;r.indexOf(location.origin)===0){{location.href=r;return false;}}">← 返回</a>
 <button class="print-btn" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
 <button class="export-btn" onclick="exportCSV()">📥 导出Excel(CSV)</button>
 <h1>🔥 刘和牛户外烤肉 · 备餐单</h1>
@@ -3541,6 +3541,248 @@ function exportCSV(){{
 </script>
 </body></html>"""
     return html
+
+
+# ===== 菜单打印页（顾客版 / 内部成本版）=====
+# 独立可打印页面，带固定工具条（← 返回 / 🖨️ 打印），A4 友好。
+# 挂在 /menu/ 前缀下 → 仅老板可见（成本属敏感信息）。
+_MENU_PRINT_TPL = """<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root{--red:#c0392b;--ink:#2c1810;--brown:#6b4f3a}
+  *{box-sizing:border-box}
+  body{margin:0;background:#efe9e1;color:var(--ink);
+       font-family:-apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+       -webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .ptoolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;
+            padding:10px 14px;background:rgba(255,255,255,.97);border-bottom:1px solid #e6ded1}
+  .pback{padding:8px 16px;border:1.5px solid var(--red);border-radius:8px;color:var(--red);
+         text-decoration:none;font-weight:700;font-size:14px;background:#fff}
+  .pback:hover{background:#fdecea}
+  .spacer{flex:1}
+  .pprint{padding:9px 20px;border:none;border-radius:8px;background:var(--red);color:#fff;
+          font-weight:700;font-size:14px;cursor:pointer}
+  .wrap{max-width:840px;margin:18px auto 44px;padding:0 12px}
+  .page{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 34px rgba(0,0,0,.13)}
+  .hero{background:linear-gradient(135deg,#8e1e1a 0%,#c0392b 55%,#e74c3c 100%);color:#fff;
+        padding:34px 28px;text-align:center;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;top:-46px;right:-40px;width:170px;height:170px;
+        background:rgba(255,255,255,.09);border-radius:50%}
+  .hero::after{content:"";position:absolute;bottom:-64px;left:-34px;width:130px;height:130px;
+        background:rgba(255,255,255,.07);border-radius:50%}
+  .hero h1{margin:0 0 8px;font-size:27px;letter-spacing:3px;position:relative;z-index:1}
+  .hero p{margin:0;opacity:.92;font-size:13px;letter-spacing:1.5px;position:relative;z-index:1}
+  .hero-cost{background:linear-gradient(135deg,#2c1810 0%,#4a2c1a 60%,#6b4f3a 100%)}
+  .pkg{border-bottom:1px dashed #e8e0d5}
+  .pkg:last-of-type{border-bottom:none}
+  .pkg-head{display:flex;justify-content:space-between;align-items:center;gap:10px;
+            padding:16px 24px;background:#faf5ed;border-bottom:1px solid #eee5d8;flex-wrap:wrap}
+  .pkg-name{font-size:18px;font-weight:800;color:#2c1810;display:flex;align-items:center;gap:10px}
+  .people{font-size:12px;color:#8b7355;background:#e8dcc8;padding:3px 10px;border-radius:12px;font-weight:400}
+  .pkg-price{white-space:nowrap}
+  .pkg-price .sym{font-size:15px;font-weight:700;color:var(--red)}
+  .pkg-price .num{font-size:26px;font-weight:800;color:var(--red)}
+  .pkg-price .unit{font-size:11px;color:#999}
+  .pkg-body{padding:16px 24px 20px}
+  .cat{margin-bottom:14px}
+  .cat:last-child{margin-bottom:0}
+  .cat-title{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:800;color:var(--brown);
+             margin-bottom:9px;padding-bottom:6px;border-bottom:2px solid #f0e6d8}
+  .cat-icon{width:21px;height:21px;border-radius:6px;display:inline-flex;align-items:center;
+            justify-content:center;font-size:12px;color:#fff;flex:0 0 auto}
+  .dishes{display:flex;flex-wrap:wrap;gap:7px 8px}
+  .dish{font-size:14px;color:#3d2817;background:#faf5ed;border:1px solid #f0e6d8;
+        border-radius:8px;padding:4px 11px}
+  .dish:first-child{color:var(--red);border-color:#f2d5d0;background:#fdf3f1;font-weight:700}
+  .footer{background:#2c1810;color:#fff;padding:18px 24px;text-align:center;font-size:12.5px}
+  .footer p{margin:4px 0}
+  .foot-note{padding:14px 24px;font-size:12px;color:#8a7f75;background:#faf5ed;
+             border-top:1px solid #eee5d8;line-height:1.7}
+  table.cost-tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+  table.cost-tbl th{background:#f3efe8;text-align:left;padding:7px 10px;font-weight:700;color:#7a6a58}
+  table.cost-tbl th:last-child{text-align:right}
+  table.cost-tbl td{padding:7px 10px;border-bottom:1px solid #f0ebe2}
+  table.cost-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:#444}
+  table.cost-tbl tr.cat-row td{color:#fff;font-weight:800;font-size:12.5px;padding:6px 10px;letter-spacing:.5px}
+  .loss{font-size:10.5px;color:#b06a00;background:#fff3d9;border-radius:6px;padding:1px 6px;margin-left:4px}
+  .summary{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .sum-item{flex:1;min-width:120px;background:#faf5ed;border:1px solid #efe6d8;border-radius:10px;
+            padding:10px 14px;display:flex;flex-direction:column;gap:3px}
+  .sum-item span{font-size:11.5px;color:#8b7355}
+  .sum-item b{font-size:18px;color:#2c1810;font-variant-numeric:tabular-nums}
+  .sum-item b.pos{color:#1e8449}
+  .sum-item b.neg{color:var(--red)}
+  @media print{
+    body{background:#fff}
+    .ptoolbar{display:none!important}
+    .wrap{margin:0;max-width:none;padding:0}
+    .page{box-shadow:none;border-radius:0}
+    .pkg{break-inside:avoid}
+    @page{size:A4;margin:10mm}
+  }
+</style></head>
+<body>
+<div class="ptoolbar">
+  <a class="pback" href="__BACK__" onclick="try{var r=document.referrer;if(r&&r.indexOf(location.origin)===0){location.href=r;return false;}}catch(e){}">← 返回</a>
+  <div class="spacer"></div>
+  <button class="pprint" onclick="window.print()">🖨️ 打印 / 存PDF</button>
+</div>
+<div class="wrap"><div class="page">
+__BODY__
+</div></div>
+</body></html>"""
+
+
+def _menu_print_build(show_cost):
+    """构建菜单打印页 HTML：show_cost=False 顾客版；True 内部成本版。"""
+    import html as _html
+
+    def fmt_num(x):
+        try:
+            x = round(float(x), 2)
+        except Exception:
+            return x
+        return int(x) if abs(x - round(x)) < 1e-9 else x
+
+    try:
+        from calculator import _subcategorize_meat
+    except Exception:
+        def _subcategorize_meat(name, cat):
+            return cat or "other"
+
+    CATS = [
+        ("beef", "牛肉", "🥩", "#8e1e1a"),
+        ("pork", "猪肉", "🥓", "#c75d3e"),
+        ("chicken", "鸡肉", "🍗", "#c9962b"),
+        ("vegetable", "素菜", "🥬", "#3a8a3a"),
+        ("side", "小菜", "🥗", "#5a8a3a"),
+        ("staple", "主食", "🍚", "#b8860b"),
+        ("sauce", "蘸料", "🧂", "#7a5a3a"),
+        ("drink", "赠饮", "🎁", "#666666"),
+        ("packaging", "食材包装", "📦", "#d35400"),
+        ("utensil", "客户餐具", "🍱", "#8e44ad"),
+        ("other", "其他", "📦", "#6b4f3a"),
+    ]
+    CUSTOMER_KEYS = {"beef", "pork", "chicken", "vegetable", "side", "sauce", "drink"}
+
+    def eff_cat(name, raw):
+        raw = raw or "other"
+        if raw in ("packaging", "utensil", "drink", "staple", "side", "sauce", "other", "vegetable"):
+            return raw
+        return _subcategorize_meat(name, raw)
+
+    def build_customer(p, groups):
+        parts = []
+        for key, label, icon, color in CATS:
+            if key not in CUSTOMER_KEYS:
+                continue
+            items = groups.get(key) or []
+            if not items:
+                continue
+            seen = set(); names = []
+            for it in items:
+                if it["name"] not in seen:
+                    seen.add(it["name"]); names.append(it["name"])
+            dishes = "".join('<span class="dish">%s</span>' % _html.escape(n) for n in names)
+            parts.append(
+                '<div class="cat"><div class="cat-title">'
+                '<span class="cat-icon" style="background:%s">%s</span>%s · %d款</div>'
+                '<div class="dishes">%s</div></div>'
+                % (color, icon, label, len(names), dishes)
+            )
+        price = p.get("base_price") or p.get("price") or 0
+        return (
+            '<div class="pkg"><div class="pkg-head">'
+            '<div class="pkg-name">%s <span class="people">%s-%s人餐</span></div>'
+            '<div class="pkg-price"><span class="sym">¥</span><span class="num">%s</span>'
+            '<span class="unit"> / 套</span></div></div>'
+            '<div class="pkg-body">%s</div></div>'
+            % (_html.escape(p["name"] or ""), p["min_people"], p["max_people"],
+               fmt_num(price), "".join(parts))
+        )
+
+    def build_cost(p, groups):
+        rows = []
+        total_cost = 0.0
+        for key, label, icon, color in CATS:
+            items = groups.get(key) or []
+            if not items:
+                continue
+            rows.append('<tr class="cat-row"><td colspan="3" style="background:%s">%s %s</td></tr>'
+                        % (color, icon, label))
+            for it in items:
+                pp = it.get("per_package") or 0
+                c = float(pp) * float(it.get("cost") or 0)
+                total_cost += c
+                pc = it.get("portion_count") or 0
+                unit = it.get("unit") or ""
+                spec = ("%s%s" % (fmt_num(pp / pc), unit)) if (pp and pc) else (unit or "")
+                loss = ' <span class="loss">损耗</span>' if it.get("cost_only") else ""
+                rows.append('<tr><td>%s%s</td><td>%s</td><td class="num">%.2f</td></tr>'
+                            % (_html.escape(it["name"] or ""), loss, spec or "—", c))
+        price = float(p.get("base_price") or 0)
+        profit = price - total_cost
+        rate = (profit / price * 100) if price else 0
+        cls = "pos" if profit >= 0 else "neg"
+        summary = (
+            '<div class="summary">'
+            '<div class="sum-item"><span>食材成本</span><b>¥%.2f</b></div>'
+            '<div class="sum-item"><span>售价 (菜品价)</span><b>¥%s</b></div>'
+            '<div class="sum-item"><span>毛利</span><b class="%s">¥%.2f</b></div>'
+            '<div class="sum-item"><span>毛利率</span><b class="%s">%.1f%%</b></div>'
+            '</div>'
+            % (total_cost, fmt_num(price), cls, profit, cls, rate)
+        )
+        return (
+            '<div class="pkg"><div class="pkg-head">'
+            '<div class="pkg-name">%s <span class="people">%s-%s人餐</span></div></div>'
+            '<table class="cost-tbl"><thead><tr><th>菜品</th><th>单份规格</th><th>成本(元)</th></tr></thead>'
+            '<tbody>%s</tbody></table>%s</div>'
+            % (_html.escape(p["name"] or ""), p["min_people"], p["max_people"], "".join(rows), summary)
+        )
+
+    cur = g.db.cursor()
+    cur.execute("SELECT id, name, min_people, max_people, base_price, price FROM packages ORDER BY min_people")
+    pkgs = [dict(r) for r in cur.fetchall()]
+
+    body = ['<div class="hero%s"><h1>%s</h1><p>%s</p></div>' % (
+        " hero-cost" if show_cost else "",
+        "刘和牛 · 内部成本表" if show_cost else "刘和牛 · 精品烤肉套餐",
+        "仅供内部参考 · 食材成本 / 毛利核算" if show_cost else "现切现送 · 鲜料直达 · 青龙湖户外烤肉",
+    )]
+    for p in pkgs:
+        cur.execute(
+            """SELECT i.name, i.unit, i.category, i.cost, pi.per_package, pi.portion_count, pi.cost_only
+               FROM package_ingredients pi JOIN ingredients i ON pi.ingredient_id = i.id
+               WHERE pi.package_id = ?""", (p["id"],))
+        groups = {}
+        for it in [dict(r) for r in cur.fetchall()]:
+            groups.setdefault(eff_cat(it["name"], it["category"]), []).append(it)
+        body.append(build_cost(p, groups) if show_cost else build_customer(p, groups))
+
+    if show_cost:
+        body.append('<div class="foot-note">注：成本仅含食材（含损耗项），未含人工 / 场地 / 装备折旧；'
+                    '售价为菜品价（不含配送费）。</div>')
+    else:
+        body.append('<div class="footer"><p>🔥 下单即送精美餐具套装</p>'
+                    '<p>🚗 支持全城配送 · 提前 1 天预订</p></div>')
+
+    return (_MENU_PRINT_TPL
+            .replace("__TITLE__", "刘和牛 · 内部成本表" if show_cost else "刘和牛 · 精品菜单")
+            .replace("__BACK__", "/menu")
+            .replace("__BODY__", "".join(body)))
+
+
+@app.route("/menu/print/customer")
+def menu_print_customer():
+    return _menu_print_build(False)
+
+
+@app.route("/menu/print/cost")
+def menu_print_cost():
+    return _menu_print_build(True)
 
 
 # ===== 工具借出归还 =====
