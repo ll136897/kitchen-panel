@@ -279,7 +279,7 @@ function renderPkg(p, idx){
     <div class="pkg-head" onclick="togglePkg(${p.id})">
       <div>
         <h3>${p.name}</h3>
-        <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 基价¥${p.base_price} · 总价¥${p.price} · 荤菜${meatCount}/素菜${vegCount}</div>
+        <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 总价¥${p.price} · 荤菜${meatCount}/素菜${vegCount}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:12px;padding:4px 10px" onclick="event.stopPropagation();exportPkgXlsx(${p.id})">📊 导出</button>

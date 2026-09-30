@@ -2557,17 +2557,17 @@ def export_menu():
         buf = io.StringIO()
         buf.write("\ufeff")  # BOM for Excel
         w = csv.writer(buf)
-        w.writerow(["套餐", "人数范围", "类别", "食材/工具", "单位", "每份克数", "份数", "总量", "基价", "总价"])
+        w.writerow(["套餐", "人数范围", "类别", "食材/工具", "单位", "每份克数", "份数", "总量", "总价"])
         for p in pkgs:
             people = f"{p['min_people']}-{p['max_people']}人"
             for ing in p["ingredients"]:
                 size = ing["per_package"] / max(1, ing["portion_count"])
                 w.writerow([p["name"], people, ing["category"], ing["ingredient"],
                            ing["unit"], round(size, 2), ing["portion_count"],
-                           ing["per_package"], p["base_price"], p["price"]])
+                           ing["per_package"], p["price"]])
             for t in p["tools"]:
                 w.writerow([p["name"], people, "tool", t["tool"], "个", "", "",
-                            t["per_package"], p["base_price"], p["price"]])
+                            t["per_package"], p["price"]])
         resp = app.response_class(buf.getvalue(), mimetype="text/csv")
         resp.headers["Content-Disposition"] = f"attachment; filename={fname}.csv"
         return resp
@@ -2674,7 +2674,7 @@ def export_menu_xlsx():
 
     for p in pkgs:
         # 套餐标题行（合并 7 列）
-        ws.append([f"{p['name']}  ·  {p['min_people']}-{p['max_people']}人  ·  基价¥{p['base_price']}  总价¥{p['price']}", "", "", "", "", "", ""])
+        ws.append([f"{p['name']}  ·  {p['min_people']}-{p['max_people']}人  ·  总价¥{p['price']}", "", "", "", "", "", ""])
         ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=7)
         for cell in ws[ws.max_row]:
             cell.fill = PatternFill("solid", fgColor="8E1E1A")
@@ -3694,7 +3694,7 @@ def _menu_print_build(show_cost):
                 '<div class="dishes">%s</div></div>'
                 % (color, icon, label, len(names), dishes)
             )
-        price = p.get("base_price") or p.get("price") or 0
+        price = p.get("price") or p.get("base_price") or 0   # 对外价用总价（含配送搭建费）
         return (
             '<div class="pkg"><div class="pkg-head">'
             '<div class="pkg-name">%s <span class="people">%s-%s人餐</span></div>'
@@ -3724,25 +3724,33 @@ def _menu_print_build(show_cost):
                 loss = ' <span class="loss">损耗</span>' if it.get("cost_only") else ""
                 rows.append('<tr><td>%s%s</td><td>%s</td><td class="num">%.2f</td></tr>'
                             % (_html.escape(it["name"] or ""), loss, spec or "—", c))
-        price = float(p.get("base_price") or 0)
-        profit = price - total_cost
-        rate = (profit / price * 100) if price else 0
+        # 对外总价 = 菜品价 + 配送搭建费；算真实毛利率要先把这笔配送/搭建费扣掉
+        total_price = float(p.get("price") or 0)
+        base = float(p.get("base_price") or 0)
+        fee = max(0.0, total_price - base)          # 配送搭建费
+        revenue = total_price - fee                 # 真实收益基数（≈菜品价）
+        profit = revenue - total_cost
+        rate = (profit / revenue * 100) if revenue else 0
         cls = "pos" if profit >= 0 else "neg"
         summary = (
             '<div class="summary">'
+            '<div class="sum-item"><span>对外总价</span><b>¥%s</b></div>'
+            '<div class="sum-item"><span>－ 配送搭建费</span><b>¥%s</b></div>'
             '<div class="sum-item"><span>食材成本</span><b>¥%.2f</b></div>'
-            '<div class="sum-item"><span>售价 (菜品价)</span><b>¥%s</b></div>'
             '<div class="sum-item"><span>毛利</span><b class="%s">¥%.2f</b></div>'
             '<div class="sum-item"><span>毛利率</span><b class="%s">%.1f%%</b></div>'
             '</div>'
-            % (total_cost, fmt_num(price), cls, profit, cls, rate)
+            % (fmt_num(total_price), fmt_num(fee), total_cost, cls, profit, cls, rate)
         )
         return (
             '<div class="pkg"><div class="pkg-head">'
-            '<div class="pkg-name">%s <span class="people">%s-%s人餐</span></div></div>'
+            '<div class="pkg-name">%s <span class="people">%s-%s人餐</span></div>'
+            '<div class="pkg-price"><span class="sym">¥</span><span class="num">%s</span>'
+            '<span class="unit"> / 套 (对外总价)</span></div></div>'
             '<table class="cost-tbl"><thead><tr><th>菜品</th><th>单份规格</th><th>成本(元)</th></tr></thead>'
             '<tbody>%s</tbody></table>%s</div>'
-            % (_html.escape(p["name"] or ""), p["min_people"], p["max_people"], "".join(rows), summary)
+            % (_html.escape(p["name"] or ""), p["min_people"], p["max_people"],
+               fmt_num(total_price), "".join(rows), summary)
         )
 
     cur = g.db.cursor()
@@ -3765,8 +3773,8 @@ def _menu_print_build(show_cost):
         body.append(build_cost(p, groups) if show_cost else build_customer(p, groups))
 
     if show_cost:
-        body.append('<div class="foot-note">注：成本仅含食材（含损耗项），未含人工 / 场地 / 装备折旧；'
-                    '售价为菜品价（不含配送费）。</div>')
+        body.append('<div class="foot-note">注：对外总价 = 菜品价 + 配送搭建费；真实毛利率 = （对外总价 － 配送搭建费 － 食材成本）÷（对外总价 － 配送搭建费），'
+                    '食材成本含损耗项；未含人工 / 场地 / 装备折旧。</div>')
     else:
         body.append('<div class="footer"><p>🔥 下单即送精美餐具套装</p>'
                     '<p>🚗 支持全城配送 · 提前 1 天预订</p></div>')
