@@ -296,7 +296,7 @@
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="date" id="datePick" class="date-picker" onchange="onDatePicked()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
-      <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value))">📥 导出备餐矩阵</button>
+      <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value))">📥 导出备餐表(Excel)</button>
       <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。
            详细说明只在电脑端显示（手机端只看颜色和数字），点一下开关。 -->
       <button id="kaBtn" class="ka-chip" onclick="toggleKeepAlive()"

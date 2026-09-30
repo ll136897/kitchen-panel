@@ -2743,186 +2743,13 @@ def export_menu_xlsx():
     import io as _io
     buf = _io.BytesIO()
     wb.save(buf)
-    fname = f"menu_{pkgs[0]['name']}" if len(pkgs)==1 else "menu_all"
+    from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+    from urllib.parse import quote as _quote2
+    _now2 = _dt2.now(_tz2(_td2(hours=8)))
+    _mname = f"菜单表{_now2.year}-{_now2.month}-{_now2.day}-{_now2.hour}:{_now2.minute}.xlsx"
     resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    resp.headers["Content-Disposition"] = f"attachment; filename={fname}.xlsx"
-    return resp
-
-
-# ===== 跨套餐食材矩阵（菜单页新增导出）=====
-# 行=食材(按分类)，列=各套餐的份数，末尾总份数/总备料量/成本。与菜单页一致排除 cost_only。
-@app.route("/api/menu/export/matrix")
-def export_menu_matrix():
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-        import io as _io
-    except ImportError:
-        return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
-    from calculator import (_subcategorize_meat, PACKAGING_CATEGORY, UTENSIL_CATEGORY)
-    cur = g.db.cursor()
-    cur.execute("SELECT id, name, min_people, max_people FROM packages ORDER BY min_people")
-    pkgs = [dict(r) for r in cur.fetchall()]
-    if not pkgs:
-        return jsonify({"ok": False, "msg": "暂无套餐数据"}), 400
-
-    # 食材跨套餐聚合（cost_only=0，与菜单页一致）
-    ing = {}
-    for p in pkgs:
-        cur.execute("""
-            SELECT i.id, i.name, i.unit, i.category, i.cost, pi.per_package, pi.portion_count
-            FROM package_ingredients pi
-            JOIN ingredients i ON pi.ingredient_id = i.id
-            WHERE pi.package_id = ? AND pi.cost_only = 0
-        """, (p["id"],))
-        for r in cur.fetchall():
-            d = ing.setdefault(r["id"], {"name": r["name"], "unit": r["unit"] or "",
-                                         "category": r["category"] or "other",
-                                         "cost": r["cost"] or 0, "by_pkg": {}})
-            d["by_pkg"][p["id"]] = (r["portion_count"], r["per_package"])
-    # 工具跨套餐聚合
-    tool = {}
-    for p in pkgs:
-        cur.execute("""
-            SELECT t.id, t.name, t.cost, pt.per_package
-            FROM package_tools pt
-            JOIN tools t ON pt.tool_id = t.id
-            WHERE pt.package_id = ?
-        """, (p["id"],))
-        for r in cur.fetchall():
-            d = tool.setdefault(r["id"], {"name": r["name"], "cost": r["cost"] or 0, "by_pkg": {}})
-            d["by_pkg"][p["id"]] = r["per_package"]
-
-    cat_colors = {'beef':'8E1E1A','pork':'C75D3E','chicken':'C9962B','vegetable':'3A8A3A',
-                  'side':'5A8A3A','sauce':'7A5A3A','drink':'666666','staple':'666666',
-                  'packaging':'D35400','utensil':'8E44AD','other':'666666','tool':'4A4A4A'}
-    cat_labels = {'beef':'🥩 牛肉','pork':'🥓 猪肉','chicken':'🍗 鸡肉','vegetable':'🥬 素菜',
-                  'side':'🥗 小菜','sauce':'🧂 小料','drink':'🎁 赠品','staple':'🍚 主食',
-                  'packaging':'📦 食材包装','utensil':'🍱 客户餐具','other':'📦 其他','tool':'🔧 工具'}
-    EXPORT_CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','packaging','utensil','other','tool']
-    ing_fixed_order = [
-        ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
-        ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
-        ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],
-        ['chicken','掌中宝'],['chicken','鸡脚筋'],
-        ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],
-        ['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],
-        ['vegetable','杏鲍菇'],['vegetable','洋葱'],
-        ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
-        ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
-        ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
-    ]
-
-    def eff_cat(v, is_tool=False):
-        if is_tool:
-            return 'tool'
-        raw = v["category"]
-        if raw in ('packaging','utensil','drink','staple','side','sauce','other','vegetable'):
-            return raw
-        return _subcategorize_meat(v["name"], raw)
-
-    def ing_sort_idx(name, cat):
-        for i, (c, kw) in enumerate(ing_fixed_order):
-            if c == cat and kw in (name or ''):
-                return i
-        return 999
-
-    cats = {c: [] for c in EXPORT_CAT_ORDER}
-    for d in ing.values():
-        cats[eff_cat(d)].append(d)
-    for d in tool.values():
-        cats['tool'].append(d)
-
-    thin = Side(border_style="thin", color="CCCCCC")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    center = Alignment(horizontal="center", vertical="center")
-    left = Alignment(horizontal="left", vertical="center", indent=1)
-    ncol = 2 + len(pkgs) + 3  # 品名,单份规格 | 套餐列 | 总份数,总备料量,成本
-
-    wb = Workbook(); ws = wb.active; ws.title = "跨套餐矩阵"
-    ws.append([f"刘和牛 · 各食材在各套餐中的量（共 {len(pkgs)} 档套餐）"])
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF", size=13)
-        cell.fill = PatternFill("solid", fgColor="3A2416")
-        cell.alignment = center
-    headers = ["品名", "单份规格"] + [p["name"] for p in pkgs] + ["总份数", "总备料量", "成本(元)"]
-    ws.append(headers)
-    for cell in ws[2]:
-        cell.font = Font(bold=True, color="FFFFFF", size=11)
-        cell.fill = PatternFill("solid", fgColor="3A2416")
-        cell.alignment = center
-        cell.border = border
-
-    for cat in EXPORT_CAT_ORDER:
-        items = cats[cat]
-        if not items:
-            continue
-        is_tool = (cat == 'tool')
-        items.sort(key=lambda x: (ing_sort_idx(x["name"], cat), x["name"]))
-        # 分类标题行（与菜单页/备餐页配色一致）
-        ws.append([f"{cat_labels.get(cat, cat)} · {len(items)}项"])
-        ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=ncol)
-        for cell in ws[ws.max_row]:
-            cell.font = Font(bold=True, color="FFFFFF", size=10)
-            cell.fill = PatternFill("solid", fgColor=cat_colors.get(cat, "666666"))
-            cell.alignment = left
-        for it in items:
-            by_pkg = it["by_pkg"]
-            if is_tool:
-                spec = ""; unit = "个"
-            else:
-                spec_v = None
-                for (pc, pp) in by_pkg.values():
-                    if pc and pp:
-                        spec_v = pp / pc
-                        break
-                unit = it["unit"] or ""
-                spec = (round(spec_v, 2) if spec_v is not None else "")
-            pkg_cells = []
-            tot_cnt = 0.0; tot_amt = 0.0; tot_cost = 0.0
-            for p in pkgs:
-                if p["id"] in by_pkg:
-                    if is_tool:
-                        v = by_pkg[p["id"]]
-                        pkg_cells.append(v)
-                        tot_amt += v
-                        tot_cost += v * (it.get("cost") or 0)
-                    else:
-                        pc, pp = by_pkg[p["id"]]
-                        pkg_cells.append(pc)
-                        tot_cnt += pc
-                        tot_amt += pp
-                        tot_cost += pp * (it["cost"] or 0)
-                else:
-                    pkg_cells.append("")
-            if is_tool:
-                total_str = f"{round(tot_amt)}个"
-                cost_str = round(tot_cost, 2)
-                cnt_str = round(tot_amt)
-            else:
-                total_str = f"{round(tot_amt, 2)}{unit}" if tot_amt else "-"
-                cost_str = round(tot_cost, 2)
-                cnt_str = round(tot_cnt)
-            row = [it["name"], (f"{spec}{unit}" if spec != "" else "—")] + pkg_cells + [cnt_str, total_str, cost_str]
-            ws.append(row)
-            for cell in ws[ws.max_row]:
-                cell.border = border
-                cell.alignment = center
-            ws.cell(ws.max_row, 1).alignment = left
-            ws.cell(ws.max_row, 1).font = Font(bold=True)
-            ws.cell(ws.max_row, ncol - 1).font = Font(bold=True, color="8E1E1A")  # 总备料量
-            ws.cell(ws.max_row, ncol).font = Font(bold=True, color="B8860B")        # 成本
-
-    widths = [22, 12] + [10] * len(pkgs) + [9, 12, 11]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A3"
-    buf = _io.BytesIO()
-    wb.save(buf)
-    resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    resp.headers["Content-Disposition"] = "attachment; filename=menu_matrix.xlsx"
+    # 中文文件名要用 RFC 5987 filename* 编码，否则 response header latin-1 会报错
+    resp.headers["Content-Disposition"] = "attachment; filename=\"menu.xlsx\"; filename*=UTF-8''" + _quote2(_mname)
     return resp
 
 
@@ -3060,21 +2887,22 @@ def export_prep_matrix():
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center")
     left = Alignment(horizontal="left", vertical="center", indent=1)
-    ncol = 2 + len(pkg_cols) + 3  # 品名,单份规格 | 套餐列 | 总份数,总备料量,备餐勾选
+    ncol = 3 + len(pkg_cols) + 4  # 类别,品名,单份规格 | 套餐列 | 总份数,总备料量,成本,备餐勾选
 
-    wb = Workbook(); ws = wb.active; ws.title = "备餐矩阵"
-    ws.append([f"刘和牛 · {date} 备餐清单（{len(orders)} 单）"])
+    wb = Workbook(); ws = wb.active; ws.title = "备餐表"
+    ws.append([f"刘和牛户外烤肉 · {date} 备餐清单"])
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF", size=13)
         cell.fill = PatternFill("solid", fgColor="3A2416")
         cell.alignment = center
-    ws.append(["（配套： " + " ｜ ".join(f"{pkg_info[pid]['name']}×{pkg_sets[pid]}套" for pid in pkg_cols) + " ）"])
+    _combo = " ｜ ".join(f"{pkg_info[pid]['name']}×{pkg_sets[pid]}套" for pid in pkg_cols)
+    ws.append([f"配套方案：{_combo}（共 {len(orders)} 单，合计 {sum(pkg_sets.values())} 套）"])
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncol)
     for cell in ws[2]:
         cell.font = Font(italic=True, color="8B7355", size=10)
         cell.alignment = left
-    headers = ["品名", "单份规格"] + [f"{pkg_info[pid]['name']}({pkg_sets[pid]}套)" for pid in pkg_cols] + ["总份数", "总备料量", "备餐勾选"]
+    headers = ["类别", "品名", "单份规格"] + [f"{pkg_info[pid]['name']}({pkg_sets[pid]}套)" for pid in pkg_cols] + ["总份数", "总备料量", "成本(元)", "备餐勾选"]
     ws.append(headers)
     for cell in ws[3]:
         cell.font = Font(bold=True, color="FFFFFF", size=11)
@@ -3082,6 +2910,17 @@ def export_prep_matrix():
         cell.alignment = center
         cell.border = border
 
+    def _num(x):
+        """整数就不显示 .0（900.0 → 900），与参考表一致"""
+        try:
+            x = round(float(x), 2)
+        except Exception:
+            return x
+        return int(x) if abs(x - round(x)) < 1e-9 else x
+    # 类别列用的简称（与参考备餐清单一致：荤菜/素菜/主食/小菜/蘸料/饮料/餐具配套/装备）
+    cat_short = {'beef': '荤菜', 'pork': '荤菜', 'chicken': '荤菜', 'vegetable': '素菜',
+                 'staple': '主食', 'side': '小菜', 'sauce': '蘸料', 'drink': '饮料',
+                 'packaging': '餐具配套', 'utensil': '餐具配套', 'other': '其他', 'tool': '装备'}
     for cat in EXPORT_CAT_ORDER:
         items = cats[cat]
         if not items:
@@ -3100,7 +2939,7 @@ def export_prep_matrix():
                 spec = ""; unit = "个"
             else:
                 unit = it["unit"] or ""
-                spec = (round(it.get("spec") or 0, 2) if it.get("spec") else "")
+                spec = (_num(it["spec"]) if it.get("spec") else "")
             pkg_cells = []
             tot_cnt = 0.0; tot_amt = 0.0
             for pid in pkg_cols:
@@ -3115,29 +2954,39 @@ def export_prep_matrix():
                 total_str = f"{round(tot_amt)}个"
                 cnt_str = round(tot_amt)
             else:
-                total_str = f"{round(tot_amt, 2)}{unit}" if tot_amt else "-"
+                total_str = (f"{_num(tot_amt)}{unit}" if (tot_amt and unit)
+                             else (f"{_num(tot_amt)}" if tot_amt else "-"))
                 cnt_str = round(tot_cnt)
-            checked = is_checked(it.get("id") if not is_tool else it.get("id"), it["order_ids"], "ingredient" if not is_tool else "tool")
+            # 成本 = 总备料量(基础单位) × 食材单价（与系统成本口径一致）
+            cost_val = round(tot_amt * (it.get("cost") or 0), 2)
+            checked = is_checked(it.get("id"), it["order_ids"], "tool" if is_tool else "ingredient")
             chk = "✓" if checked else "☐"
-            row = [it["name"], (f"{spec}{unit}" if spec != "" else "—")] + pkg_cells + [cnt_str, total_str, chk]
+            row = [cat_short.get(cat, ""), it["name"], (f"{spec}{unit}" if spec != "" else "—")] + pkg_cells + [cnt_str, total_str, cost_val, chk]
             ws.append(row)
             for cell in ws[ws.max_row]:
                 cell.border = border
                 cell.alignment = center
-            ws.cell(ws.max_row, 1).alignment = left
-            ws.cell(ws.max_row, 1).font = Font(bold=True)
-            ws.cell(ws.max_row, ncol - 1).font = Font(bold=True, color="8E1E1A")
-            chk_cell = ws.cell(ws.max_row, ncol)
-            chk_cell.font = Font(bold=True, color=("27AE60" if checked else "999999"), size=14)
+            ws.cell(ws.max_row, 1).alignment = left                 # 类别
+            ws.cell(ws.max_row, 2).alignment = left                 # 品名
+            ws.cell(ws.max_row, 2).font = Font(bold=True)
+            ws.cell(ws.max_row, ncol - 2).font = Font(bold=True, color="8E1E1A")   # 总备料量
+            ws.cell(ws.max_row, ncol - 1).font = Font(bold=True, color="8E1E1A")   # 成本
+            ws.cell(ws.max_row, ncol - 1).number_format = "0.##"
+            ws.cell(ws.max_row, ncol).font = Font(bold=True, color=("27AE60" if checked else "999999"), size=14)
 
-    widths = [22, 12] + [13] * len(pkg_cols) + [9, 12, 10]
+    widths = [10, 22, 12] + [13] * len(pkg_cols) + [9, 12, 11, 10]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A4"
     buf = _io.BytesIO()
     wb.save(buf)
     resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    resp.headers["Content-Disposition"] = f"attachment; filename=prep_{date}.xlsx"
+    from datetime import datetime as _dt3, timezone as _tz3, timedelta as _td3
+    from urllib.parse import quote as _quote3
+    _now3 = _dt3.now(_tz3(_td3(hours=8)))
+    _pname = f"备餐表{_now3.year}-{_now3.month}-{_now3.day}-{_now3.hour}:{_now3.minute}.xlsx"
+    # 中文文件名要用 RFC 5987 filename* 编码，否则 response header latin-1 会报错
+    resp.headers["Content-Disposition"] = "attachment; filename=\"prep.xlsx\"; filename*=UTF-8''" + _quote3(_pname)
     return resp
 
 
@@ -3654,7 +3503,7 @@ def print_menu():
 </style>
 </head>
 <body>
-<a class="back-btn" href="javascript:history.length>1?history.back():'/'">← 返回</a>
+<a class="back-btn" href="/" onclick="if(history.length>1){{event.preventDefault();history.back();}}">← 返回</a>
 <button class="print-btn" onclick="window.print()">🖨️ 打印 / 存为PDF</button>
 <button class="export-btn" onclick="exportCSV()">📥 导出Excel(CSV)</button>
 <h1>🔥 刘和牛户外烤肉 · 备餐单</h1>
