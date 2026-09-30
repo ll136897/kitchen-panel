@@ -3653,6 +3653,12 @@ def _menu_print_build(show_cost):
     except Exception:
         def _subcategorize_meat(name, cat):
             return cat or "other"
+    # 打包切配人工：套餐页按"1 个套餐 = 1 单"算首单价（与财务口径一致）
+    try:
+        from profit import get_config as _get_cfg
+        _labor_first = float((_get_cfg(g.db) or {}).get("labor_first", 40) or 0)
+    except Exception:
+        _labor_first = 40.0
 
     CATS = [
         ("beef", "牛肉", "🥩", "#8e1e1a"),
@@ -3727,9 +3733,10 @@ def _menu_print_build(show_cost):
         # 对外总价 = 菜品价 + 配送搭建费；算真实毛利率要先把这笔配送/搭建费扣掉
         total_price = float(p.get("price") or 0)
         base = float(p.get("base_price") or 0)
-        fee = max(0.0, total_price - base)          # 配送搭建费
+        fee = max(0.0, total_price - base)          # 配送搭建费（代收代付，与搭建成本基本抵消）
         revenue = total_price - fee                 # 真实收益基数（≈菜品价）
-        profit = revenue - total_cost
+        labor = float(_labor_first or 0)            # 打包切配人工：1 个套餐 = 1 单 = 首单价
+        profit = revenue - total_cost - labor
         rate = (profit / revenue * 100) if revenue else 0
         cls = "pos" if profit >= 0 else "neg"
         summary = (
@@ -3737,10 +3744,11 @@ def _menu_print_build(show_cost):
             '<div class="sum-item"><span>对外总价</span><b>¥%s</b></div>'
             '<div class="sum-item"><span>－ 配送搭建费</span><b>¥%s</b></div>'
             '<div class="sum-item"><span>食材成本</span><b>¥%.2f</b></div>'
-            '<div class="sum-item"><span>毛利</span><b class="%s">¥%.2f</b></div>'
-            '<div class="sum-item"><span>毛利率</span><b class="%s">%.1f%%</b></div>'
+            '<div class="sum-item"><span>打包切配人工</span><b>¥%s</b></div>'
+            '<div class="sum-item"><span>真实毛利</span><b class="%s">¥%.2f</b></div>'
+            '<div class="sum-item"><span>真实毛利率</span><b class="%s">%.1f%%</b></div>'
             '</div>'
-            % (fmt_num(total_price), fmt_num(fee), total_cost, cls, profit, cls, rate)
+            % (fmt_num(total_price), fmt_num(fee), total_cost, fmt_num(labor), cls, profit, cls, rate)
         )
         return (
             '<div class="pkg"><div class="pkg-head">'
@@ -3773,8 +3781,9 @@ def _menu_print_build(show_cost):
         body.append(build_cost(p, groups) if show_cost else build_customer(p, groups))
 
     if show_cost:
-        body.append('<div class="foot-note">注：对外总价 = 菜品价 + 配送搭建费；真实毛利率 = （对外总价 － 配送搭建费 － 食材成本）÷（对外总价 － 配送搭建费），'
-                    '食材成本含损耗项；未含人工 / 场地 / 装备折旧。</div>')
+        body.append('<div class="foot-note">注：对外总价 = 菜品价 + 配送搭建费（配送费属代收代付、与搭建成本基本抵消，故从毛利率基数里扣掉）；'
+                    '真实毛利 = 对外总价 － 配送搭建费 － 食材成本 － 打包切配人工；'
+                    '真实毛利率 = 真实毛利 ÷（对外总价 － 配送搭建费）。食材含损耗项；人工按首单价（1 个套餐 = 1 单）。</div>')
     else:
         body.append('<div class="footer"><p>🔥 下单即送精美餐具套装</p>'
                     '<p>🚗 支持全城配送 · 提前 1 天预订</p></div>')

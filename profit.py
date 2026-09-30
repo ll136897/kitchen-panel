@@ -25,7 +25,7 @@ KIND_LABEL = {
     "food": "食材成本",
     "outsource": "搭建/回收外包费",
     "fuel": "配送费",
-    "labor": "人工",
+    "labor": "打包切配人工",
     "consume": "额外耗材",
     "other": "其他开销",
 }
@@ -33,7 +33,7 @@ KIND_HINT = {
     "food": "套餐用量 × 食材单价，自动算（已含一次性餐具、打包盒）",
     "outsource": "按人数折算单数 × 场地单价（每 10 人 1 单，不足 10 人也算 1 单）",
     "fuel": "配送/跑腿的费用",
-    "labor": "小时工工钱 + 自己人时间折算",
+    "labor": "打包切配出餐人工：首单 + 每多一个 10 人单（单越大越省，参数见设置）",
     "consume": "炭、气罐这类；一次性餐具已含在食材里，这里别重复算",
     "other": "临时多出来的开销",
 }
@@ -50,7 +50,9 @@ DEFAULT_CONFIG = {
     ],
     "default_outsource": 100,      # 地址没匹配到场地时用它
     "people_per_unit": 10,         # 多少人一单
-    "defaults": {"fuel": 0, "labor": 0, "consume": 0},   # 每单默认金额
+    "defaults": {"fuel": 0, "consume": 0},   # 每单默认金额
+    "labor_first": 40,             # 打包切配出餐人工：首单金额（元）
+    "labor_per_unit": 25,          # 每多一个"单"（10人）增加的人工——单越大越省
     "fixed_monthly": 0,            # 每月固定开销（装备折旧、工具添置等）
     "fixed_orders_per_month": 0,   # 预计每月单数（用于摊销；0=按当期实际单数）
     "margin_alert": 40,            # 毛利率低于它标红
@@ -173,12 +175,18 @@ def _auto_items(db, oid, cfg):
     out_price = float((place or {}).get("outsource") if place else cfg.get("default_outsource", 100) or 0)
     units = outsource_units(r["people"], r["qty"], cfg.get("people_per_unit", 10))
     d = cfg.get("defaults", {})
+    # 打包切配人工：首单 + 每多一个"单"（单价更低，单越大越省）
+    l_first = float(cfg.get("labor_first", 40) or 0)
+    l_per = float(cfg.get("labor_per_unit", 25) or 0)
+    extra = max(0, units - 1)
+    labor_auto = round(l_first + l_per * extra, 2)
+    labor_detail = ("首单 ¥%g" % l_first) if extra == 0 else ("首单 ¥%g + %d 个多单 × ¥%g" % (l_first, extra, l_per))
     return {
         "food": {"amount": _food_cost(db, oid)},
         "outsource": {"amount": round(units * out_price, 2), "qty": units, "unit_price": out_price,
                       "detail": "%d单 × ¥%g（%s）" % (units, out_price, (place or {}).get("name") or "默认价")},
         "fuel": {"amount": float((place or {}).get("fuel") if place and (place or {}).get("fuel") else d.get("fuel", 0) or 0)},
-        "labor": {"amount": float(d.get("labor", 0) or 0)},
+        "labor": {"amount": labor_auto, "detail": labor_detail},
         "consume": {"amount": float(d.get("consume", 0) or 0)},
     }
 
@@ -230,7 +238,15 @@ def order_profit(db, oid, cfg=None):
 
     cost_total = round(cost_total, 2)
     cash_profit = round(revenue - cost_total, 2)
-    margin = round(cash_profit / revenue * 100, 1) if revenue > 0 else 0.0
+    # 配送费是代收代付（收多少基本付给搭建师傅多少）→ 算真实毛利率时从收入里扣掉，作分母
+    _dv = cur.execute("""
+        SELECT COALESCE(SUM((p.price - p.base_price) * op.quantity),0) AS dv
+        FROM order_packages op JOIN packages p ON op.package_id = p.id
+        WHERE op.order_id = ?
+    """, (oid,)).fetchone()
+    delivery_passthrough = round(float(_dv["dv"] or 0), 2)
+    margin_base = round(revenue - delivery_passthrough, 2)
+    margin = round(cash_profit / margin_base * 100, 1) if margin_base > 0 else 0.0
     # 固定开销摊销
     fixed_monthly = float(cfg.get("fixed_monthly", 0) or 0)
     per_month = float(cfg.get("fixed_orders_per_month", 0) or 0)
@@ -270,6 +286,8 @@ def order_profit(db, oid, cfg=None):
         "cost_total": cost_total,
         "cash_profit": cash_profit,
         "margin": margin,
+        "delivery_passthrough": delivery_passthrough,
+        "margin_base": margin_base,
         "fixed_alloc": fixed_alloc,
         "fixed_monthly": fixed_monthly,
         "fixed_orders_per_month": per_month,
@@ -295,7 +313,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
     rows = cur.execute("SELECT o.id FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
-                       "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0}
+                       "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0}
     for r in rows:
         p = order_profit(db, r["id"], cfg)
         if not p:
@@ -308,6 +326,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
         tot["cost"] += p["cost_total"]
         tot["profit"] += p["cash_profit"]
         tot["net"] += p["net_profit"]
+        tot["delivery"] += p.get("delivery_passthrough", 0.0)
         if p["alert"] == "loss":
             tot["loss"] += 1
         elif p["alert"] == "warn":
@@ -323,7 +342,9 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
         })
     tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
     tot["order_cnt"] = len(orders)
-    tot["margin"] = round(tot["profit"] / tot["revenue"] * 100, 1) if tot["revenue"] > 0 else 0.0
+    _mbase = tot["revenue"] - tot["delivery"]
+    tot["margin_base"] = round(_mbase, 2)
+    tot["margin"] = round(tot["profit"] / _mbase * 100, 1) if _mbase > 0 else 0.0
     tot["avg_margin"] = round(sum(o["margin"] for o in orders) / len(orders), 1) if orders else 0.0
     fixed_monthly = float(cfg.get("fixed_monthly", 0) or 0)
     tot["fixed_monthly"] = fixed_monthly

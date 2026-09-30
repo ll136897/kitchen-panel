@@ -144,7 +144,7 @@
       <table class="fin-tbl tbl-profit" id="profitTable">
         <thead>
           <tr>
-            <th>日期</th><th>客户</th><th>收入</th><th class="c-opt">成本</th><th>利润</th><th>毛利率</th>
+            <th>日期</th><th>客户</th><th>收入</th><th class="c-opt">成本</th><th>利润</th><th>真实毛利率</th>
             <th class="c-opt">货款</th><th class="c-opt">押金</th><th></th>
           </tr>
         </thead>
@@ -181,9 +181,14 @@
         <div class="hint">配送/跑腿的费用</div>
       </div>
       <div class="cfg-row">
-        <span class="nm">人工</span>
-        <input type="number" id="cfgLabor" step="1" placeholder="0"> <span class="lb">元/单</span>
-        <div class="hint">小时工工钱 + 自己人时间折算</div>
+        <span class="nm">打包切配人工（首单）</span>
+        <input type="number" id="cfgLabor" step="1" placeholder="40"> <span class="lb">元/单</span>
+        <div class="hint">一个 ≤10 人的套餐算 1 单</div>
+      </div>
+      <div class="cfg-row">
+        <span class="nm">每多一个 10 人单</span>
+        <input type="number" id="cfgLaborUnit" step="1" placeholder="25"> <span class="lb">元/单</span>
+        <div class="hint">单越大越省——第 2 单起按这个加（比首单价便宜）</div>
       </div>
       <div class="cfg-row">
         <span class="nm">额外耗材</span>
@@ -366,7 +371,7 @@ function renderProfitKpi(t){
     <div class="fin-kpi-item ${profit>=0?'positive':'negative'}">
       <div class="lbl">✅ 现金利润</div>
       <div class="val">${fmtY(profit)}</div>
-      <div class="sub">毛利率 ${t.margin||0}%</div>
+      <div class="sub">真实毛利率 ${t.margin||0}%</div>
     </div>
     <div class="fin-kpi-item ${(t.net||0)>=0?'positive':'negative'}">
       <div class="lbl">🏗️ 含固定开销净利</div>
@@ -374,7 +379,7 @@ function renderProfitKpi(t){
       <div class="sub">${t.fixed_monthly>0 ? ('每单摊 ¥'+(t.fixed_alloc_per_order||0)) : '未设固定开销'}</div>
     </div>
     <div class="fin-kpi-item neutral">
-      <div class="lbl">📊 平均毛利率</div>
+      <div class="lbl">📊 平均真实毛利率</div>
       <div class="val">${t.avg_margin||0}%</div>
       <div class="sub">警戒线 ${t.margin_alert||40}%</div>
     </div>
@@ -456,7 +461,7 @@ function renderProfitOrders(orders){
       <div class="line"><span>收入 ${fmtY(o.revenue)}${zeroNote}</span><span>成本 ${fmtY(o.cost_total)}</span></div>
       <div class="line">
         <span class="v-${cls}" style="font-weight:800">${o.alert==='loss'?'🚨 亏本 ':'赚 '}${fmtY(o.profit)}</span>
-        <span><span class="pf-tag ${pfTagCls(o.alert)}">毛利率 ${o.margin}%</span></span>
+        <span><span class="pf-tag ${pfTagCls(o.alert)}">真实毛利率 ${o.margin}%</span></span>
       </div>
       <div class="acts">
         <select class="select-mini" onchange="setPay(${o.id}, this.value)">
@@ -666,7 +671,8 @@ function renderCfg(){
     </div>`).join('');
   document.getElementById('cfgPerUnit').value = c.people_per_unit != null ? c.people_per_unit : 10;
   document.getElementById('cfgFuel').value = (c.defaults||{}).fuel || 0;
-  document.getElementById('cfgLabor').value = (c.defaults||{}).labor || 0;
+  document.getElementById('cfgLabor').value = (c.labor_first != null ? c.labor_first : 40);
+  document.getElementById('cfgLaborUnit').value = (c.labor_per_unit != null ? c.labor_per_unit : 25);
   document.getElementById('cfgConsume').value = (c.defaults||{}).consume || 0;
   document.getElementById('cfgDefaultOut').value = c.default_outsource != null ? c.default_outsource : 100;
   document.getElementById('cfgFixedMonthly').value = c.fixed_monthly || 0;
@@ -706,9 +712,10 @@ function saveCfg(){
     default_outsource: parseFloat(document.getElementById('cfgDefaultOut').value||100) || 0,
     defaults: {
       fuel: parseFloat(document.getElementById('cfgFuel').value||0)||0,
-      labor: parseFloat(document.getElementById('cfgLabor').value||0)||0,
       consume: parseFloat(document.getElementById('cfgConsume').value||0)||0
     },
+    labor_first: parseFloat(document.getElementById('cfgLabor').value||0)||0,
+    labor_per_unit: parseFloat(document.getElementById('cfgLaborUnit').value||0)||0,
     fixed_monthly: parseFloat(document.getElementById('cfgFixedMonthly').value||0)||0,
     fixed_orders_per_month: parseFloat(document.getElementById('cfgFixedOrders').value||0)||0,
     margin_alert: parseFloat(document.getElementById('cfgAlert').value||40)||40
