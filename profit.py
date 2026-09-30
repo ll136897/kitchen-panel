@@ -120,7 +120,7 @@ def outsource_units(people, pkg_qty, per_unit=10):
 
 # ---------- 成本明细 ----------
 def _food_cost(db, oid):
-    """食材成本 = 套餐配量×份数×单价 + 单点加菜成本"""
+    """食材成本 = 套餐配量×份数×单价 + 单点加菜 + 备注加菜（含 set 覆盖 / add 增量）"""
     cur = db.cursor()
     pk = cur.execute("""
         SELECT COALESCE(SUM(pi.per_package * op.quantity * COALESCE(i.cost,0)),0) AS c
@@ -146,6 +146,33 @@ def _food_cost(db, oid):
             """, (d["dish_id"],)).fetchone()
             unit = float(r["c"] or 0)
         cost += unit * float(d["quantity"] or 0)
+    # 备注加菜（备注解析出来的额外食材）：按 set 覆盖 / add 增量 并进成本
+    try:
+        from parser import parse_order_text, match_extra_ingredients_to_db
+        r = cur.execute("SELECT raw_text FROM orders WHERE id=?", (oid,)).fetchone()
+        raw = (r["raw_text"] if r else "") or ""
+        if raw:
+            parsed = parse_order_text(raw)
+            for ei in (match_extra_ingredients_to_db(parsed.get("extra_ingredients", []) or []) or []):
+                iid = ei.get("matched_id")
+                if not iid:
+                    continue
+                c = cur.execute("SELECT COALESCE(cost,0) AS c FROM ingredients WHERE id=?", (iid,)).fetchone()
+                unit_cost = float((c["c"] if c else 0) or 0)
+                amt = float(ei.get("total") or 0)
+                if ei.get("mode", "add") == "set":
+                    # 覆盖：先扣掉这个食材在套餐里的那份，再加设定的量
+                    pk2 = cur.execute("""
+                        SELECT COALESCE(SUM(pi.per_package * op.quantity * COALESCE(i.cost,0)),0) AS c
+                        FROM order_packages op
+                        JOIN package_ingredients pi ON pi.package_id = op.package_id
+                        JOIN ingredients i ON pi.ingredient_id = i.id
+                        WHERE op.order_id = ? AND pi.ingredient_id = ?
+                    """, (oid, iid)).fetchone()
+                    cost -= float(pk2["c"] or 0)
+                cost += amt * unit_cost
+    except Exception:
+        pass
     return round(cost, 2)
 
 

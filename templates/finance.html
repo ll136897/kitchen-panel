@@ -418,6 +418,11 @@ function renderPayKpi(s){
       <div class="lbl">⛔ 扣留押金</div>
       <div class="val">${fmtY(s.deposit_forfeited)}</div>
     </div>
+    <div class="fin-kpi-item neutral">
+      <div class="lbl">📦 库存占用资金</div>
+      <div class="val">${fmtY((s.stock_value||0)+(s.tool_stock_value||0))}</div>
+      <div class="sub">食材 ${fmtY(s.stock_value||0)} + 工具 ${fmtY(s.tool_stock_value||0)}</div>
+    </div>
   `;
 }
 
