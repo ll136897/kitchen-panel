@@ -1237,6 +1237,12 @@ def finance_page():
     return render_template("finance.html")
 
 
+@app.route("/analytics")
+def analytics_page():
+    """经营分析（趋势/环比/结构/客户）——仅老板可见（/analytics 在鉴权白名单外按角色控制）"""
+    return render_template("analytics.html")
+
+
 @app.route("/prep")
 def prep_page():
     return render_template("prep.html")
@@ -3385,6 +3391,235 @@ def finance_dates():
     return jsonify({"ok": True, "data": [
         {"date": r["d"], "cnt": r["cnt"], "amount": round(float(r["amt"] or 0), 2)} for r in rows
     ]})
+
+
+@app.route("/api/analytics/overview")
+def analytics_overview():
+    """经营分析：趋势（含环比）+ 结构分布（套餐/场地/时段/星期/性别）+ 回头客
+
+    口径（只在这里算一次，前端不重算）：
+      · 只统计未取消、未删除订单；收入＝实收货款 amount（押金不算收入）
+      · 客单价 = 收入 ÷ 单数
+      · 期（period）按 granularity 分为 日 / 周(周一起) / 月；环比＝当前期 vs 上一期
+      · 结构分布用"最近 4 期"合并统计（当期样本太小会失真）
+    """
+    import datetime as _dt
+    import re as _re
+    from calculator import today_cst as _today_cst
+
+    gran = (request.args.get("granularity") or "week").lower()
+    if gran not in ("day", "week", "month"):
+        gran = "week"
+    try:
+        n_periods = int(request.args.get("periods") or 8)
+    except Exception:
+        n_periods = 8
+    n_periods = max(2, min(24, n_periods))
+
+    db = g.db
+    today = _today_cst()
+
+    fem = _re.compile(r"(女士|小姐|太太|夫人|姐|妹|阿姨|婆婆)")
+    mal = _re.compile(r"(先生|男士|哥|叔|大爷|总)")
+
+    def gen_of(nm):
+        nm = nm or ""
+        if fem.search(nm):
+            return "f"
+        if mal.search(nm):
+            return "m"
+        return "u"
+
+    def pstart(d):
+        if gran == "day":
+            return d
+        if gran == "month":
+            return d.replace(day=1)
+        return d - _dt.timedelta(days=d.weekday())          # 周一为一周起点
+
+    def prev_start(s):
+        if gran == "day":
+            return s - _dt.timedelta(days=1)
+        if gran == "week":
+            return s - _dt.timedelta(days=7)
+        return (s - _dt.timedelta(days=1)).replace(day=1)
+
+    def plabel(s):
+        if gran == "day":
+            return "%d/%d" % (s.month, s.day)
+        if gran == "month":
+            return "%d年%d月" % (s.year, s.month)
+        e = s + _dt.timedelta(days=6)
+        return "%d/%d~%d/%d" % (s.month, s.day, e.month, e.day)
+
+    starts, s = [], pstart(today)
+    for _ in range(n_periods):
+        starts.append(s)
+        s = prev_start(s)
+    starts.reverse()
+
+    rows = db.execute("""
+        SELECT id, booking_date, booking_time, contact_name, contact_phone, address,
+               amount, status, payment_status
+        FROM orders
+        WHERE status!='cancelled' AND deleted_at IS NULL
+              AND booking_date IS NOT NULL AND booking_date!=''
+        ORDER BY booking_date DESC, id DESC
+    """).fetchall()
+
+    def to_date(v):
+        try:
+            return _dt.date(*[int(x) for x in v.split("-")[:3]])
+        except Exception:
+            return None
+
+    pk_rows = db.execute("""
+        SELECT p.name, p.min_people, p.max_people, op.quantity, op.order_id
+        FROM order_packages op
+        JOIN packages p ON p.id = op.package_id
+        JOIN orders o ON o.id = op.order_id
+        WHERE o.status!='cancelled' AND o.deleted_at IS NULL
+    """).fetchall()
+    order_pkgs = {}
+    for r in pk_rows:
+        order_pkgs.setdefault(r["order_id"], []).append(r["name"])
+
+    agg = {k: {"revenue": 0.0, "orders": 0} for k in starts}
+    recs = []
+    for r in rows:
+        d = to_date(r["booking_date"])
+        if not d:
+            continue
+        amt = float(r["amount"] or 0)
+        st = pstart(d)
+        if st in agg:
+            agg[st]["revenue"] += amt
+            agg[st]["orders"] += 1
+        recs.append({
+            "id": r["id"], "date": r["booking_date"], "hour": (r["booking_time"] or "")[:2],
+            "name": r["contact_name"] or "", "phone": r["contact_phone"] or "",
+            "address": r["address"] or "", "amount": amt, "period": st.isoformat(),
+            "payment_status": r["payment_status"] or "unpaid",
+            "pkgs": order_pkgs.get(r["id"], []), "gender": gen_of(r["contact_name"]),
+        })
+
+    def pack(k):
+        a = agg[k]
+        n = a["orders"]
+        return {"start": k.isoformat(), "label": plabel(k), "revenue": round(a["revenue"], 2),
+                "orders": n, "avg_price": round(a["revenue"] / n, 2) if n else 0.0}
+
+    periods = [pack(k) for k in starts]
+    cur = periods[-1] if periods else {}
+    pre = periods[-2] if len(periods) > 1 else {}
+
+    def pct(a, b):
+        return None if not b else round((a - b) / b * 100, 1)
+
+    # 当前期可能还没过完（比如今天是周三，本期只走了 3/7 天）→ 直接比会天然偏低，
+    # 所以额外算"日均"，并在前端标注"进行中"。
+    if gran == "day":
+        days_total, days_passed = 1, 1
+    elif gran == "week":
+        days_total = 7
+        days_passed = (today - starts[-1]).days + 1 if starts else 1
+    else:
+        import calendar as _cal
+        days_total = _cal.monthrange(today.year, today.month)[1]
+        days_passed = today.day
+    days_passed = max(1, min(days_passed, days_total))
+    pre_days = max(1, (starts[-1] - starts[-2]).days) if len(starts) > 1 else 1
+    cur_pd = (cur.get("revenue", 0) or 0) / days_passed
+    pre_pd = (pre.get("revenue", 0) or 0) / pre_days
+
+    delta = {
+        "revenue_pct": pct(cur.get("revenue", 0), pre.get("revenue", 0)),
+        "orders_pct": pct(cur.get("orders", 0), pre.get("orders", 0)),
+        "avg_pct": pct(cur.get("avg_price", 0), pre.get("avg_price", 0)),
+        "cur_label": cur.get("label", ""), "prev_label": pre.get("label", ""),
+        "days_passed": days_passed, "days_total": days_total,
+        "in_progress": days_passed < days_total,
+        "cur_per_day": round(cur_pd, 1), "pre_per_day": round(pre_pd, 1),
+        "per_day_pct": pct(cur_pd, pre_pd),
+    }
+
+    # ---- 结构分布：最近 4 期 ----
+    recent_from = starts[-4] if len(starts) >= 4 else starts[0]
+    recent = [x for x in recs if x["date"] >= recent_from.isoformat()]
+    recent_ids = set(x["id"] for x in recent)
+    rev_sum = sum(x["amount"] for x in recent) or 1.0
+
+    pk_map = {}
+    for r in pk_rows:
+        if r["order_id"] not in recent_ids:
+            continue
+        k = (r["name"], r["min_people"], r["max_people"])
+        pk_map[k] = pk_map.get(k, 0) + int(r["quantity"] or 0)
+    total_portions = sum(pk_map.values()) or 1
+    packages = sorted(
+        [{"name": k[0], "people": ("%s-%s人" % (k[1], k[2])) if k[1] != k[2] else ("%s人" % k[1]),
+          "portions": v, "share": round(v / total_portions * 100, 1)} for k, v in pk_map.items()],
+        key=lambda x: -x["portions"])
+
+    def dist(keyfn, limit=8):
+        m = {}
+        for x in recent:
+            k = keyfn(x) or "（未填）"
+            m.setdefault(k, {"orders": 0, "revenue": 0.0})
+            m[k]["orders"] += 1
+            m[k]["revenue"] += x["amount"]
+        out = [{"name": k, "orders": v["orders"], "revenue": round(v["revenue"], 2),
+                "share": round(v["revenue"] / rev_sum * 100, 1)} for k, v in m.items()]
+        out.sort(key=lambda x: -x["orders"])
+        return out[:limit]
+
+    places = dist(lambda x: x["address"])
+    hours = dist(lambda x: (x["hour"] + "点") if x["hour"] else "", 8)
+    hours.sort(key=lambda x: int(x["name"].replace("点", "") or 0))
+    WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekdays = dist(lambda x: (WD[to_date(x["date"]).weekday()] if to_date(x["date"]) else ""), 7)
+    weekdays.sort(key=lambda x: WD.index(x["name"]) if x["name"] in WD else 9)
+
+    # 性别（从联系人称谓推断："廖女士"/"黄先生"）
+    # ⚠️ 变量别叫 g——会盖住 Flask 的 g（上下文对象），导致 g.db 报 UnboundLocalError
+    gc = {"f": 0, "m": 0, "u": 0}
+    for x in recent:
+        gc[x.get("gender") or "u"] = gc.get(x.get("gender") or "u", 0) + 1
+    known = gc["f"] + gc["m"]
+    gender = {"female": gc["f"], "male": gc["m"], "unknown": gc["u"],
+              "known_ratio": round(known / max(1, len(recent)) * 100, 1),
+              "female_share": round(gc["f"] / known * 100, 1) if known else 0.0}
+
+    # 回头客（按电话聚合；名字会重名，不能用来识别客户）
+    inter_re = _re.compile(r"(刘和牛|测试|test|自取|内部)")
+    rp = {}
+    for r in rows:
+        ph = (r["contact_phone"] or "").strip()
+        if len(ph) < 7:
+            continue
+        e = rp.setdefault(ph, {"phone": ph, "name": r["contact_name"] or "", "orders": 0,
+                               "revenue": 0.0, "last_date": "", "internal": False})
+        e["orders"] += 1
+        e["revenue"] += float(r["amount"] or 0)
+        if inter_re.search(r["contact_name"] or "") or inter_re.search(r["address"] or ""):
+            e["internal"] = True
+        if (r["booking_date"] or "") > e["last_date"]:
+            e["last_date"] = r["booking_date"]
+            e["name"] = r["contact_name"] or e["name"]
+    repeat = sorted([v for v in rp.values() if v["orders"] >= 2],
+                    key=lambda x: (1 if x.get("internal") else 0, -x["orders"]))
+    for v in repeat:
+        v["revenue"] = round(v["revenue"], 2)
+        v["avg_price"] = round(v["revenue"] / max(1, v["orders"]), 2)
+
+    return jsonify({"ok": True, "data": {
+        "granularity": gran, "today": today.isoformat(),
+        "periods": periods, "current": cur, "previous": pre, "delta": delta,
+        "recent_from": recent_from.isoformat(), "recent_orders": len(recent),
+        "packages": packages, "places": places, "hours": hours, "weekdays": weekdays,
+        "gender": gender, "repeat": repeat[:30],
+        "orders": recs,          # 明细：供前端点条目下钻
+    }})
 
 
 @app.route("/api/finance/payment/<int:oid>", methods=["POST"])

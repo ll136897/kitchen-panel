@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>经营分析 · 刘和牛</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .an-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .an-kpi{background:linear-gradient(135deg,#f9f5ed,#f3ebe0);border-radius:10px;padding:10px;text-align:center}
+  .an-kpi .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
+  .an-kpi .val{font-size:18px;font-weight:800;color:#3a2416}
+  .an-kpi .d{font-size:11px;font-weight:700;margin-top:3px}
+  .an-kpi .d.up{color:#27ae60}
+  .an-kpi .d.down{color:#c0392b}
+  .an-kpi .d.flat{color:var(--muted)}
+  .an-kpi .vs{font-size:9px;color:var(--muted);font-weight:600}
+  .an-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:14px;margin:10px 0}
+  .an-sec{font-size:13px;font-weight:800;color:#3a2416;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .an-sec .mini{font-size:10px;font-weight:600;color:var(--muted)}
+  .an-tabs{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:3px;gap:2px;margin-bottom:10px}
+  .an-tab{padding:5px 12px;border:none;background:transparent;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;color:#6b4f3a}
+  .an-tab.active{background:#3a2416;color:#fff}
+  .an-chart{display:flex;align-items:flex-end;gap:6px;height:150px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:20px 2px 0}
+  .an-bar-wrap{flex:1 1 0;min-width:30px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;cursor:pointer}
+  .an-bar-v{font-size:9px;font-weight:700;color:#8a7364;margin-bottom:3px;white-space:nowrap}
+  .an-bar{width:72%;background:linear-gradient(180deg,#e8705f,#c0392b);border-radius:5px 5px 0 0;min-height:3px;transition:opacity .15s}
+  .an-bar-wrap:hover .an-bar{opacity:.8}
+  .an-bar-l{font-size:9px;color:#9a8b7c;margin-top:4px;white-space:nowrap}
+  .an-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed #f0e9df;cursor:pointer}
+  .an-row:last-child{border-bottom:none}
+  .an-row .nm{flex:1 1 auto;min-width:0;font-size:13px;font-weight:700;color:#3a2416;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .an-row .num{font-size:12px;font-weight:800;color:#c0392b;white-space:nowrap}
+  .an-row .pctn{font-size:10px;color:var(--muted);white-space:nowrap;width:44px;text-align:right}
+  .an-barline{height:6px;border-radius:4px;background:#efe7dc;overflow:hidden;margin-top:3px}
+  .an-barline > i{display:block;height:100%;background:linear-gradient(90deg,#e8a06a,#c0392b)}
+  .an-gender{display:flex;height:22px;border-radius:6px;overflow:hidden;margin:6px 0 8px;background:#efe7dc}
+  .an-gender > i{display:block;height:100%}
+  .an-g-f{background:#e8705f}.an-g-m{background:#5b8dd6}.an-g-u{background:#d9cfc2}
+  .an-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:#6b4f3a}
+  .an-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px}
+  .an-note{font-size:11px;color:#7a6a5c;background:#fbf6ef;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.6}
+  .an-empty{padding:20px;text-align:center;color:var(--muted);font-size:13px}
+  .an-sheet{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden}
+  .an-sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border-l);background:#fdfaf6}
+  .an-sheet-head .ttl{font-weight:800;font-size:15px;color:#3a2416}
+  .an-sheet-head .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .an-sheet-body{overflow:auto;-webkit-overflow-scrolling:touch;padding:8px 16px 18px}
+  .an-tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .an-tbl th{text-align:left;color:var(--muted);font-weight:600;font-size:10px;padding:5px 4px;border-bottom:1px solid var(--border-l);white-space:nowrap}
+  .an-tbl td{padding:6px 4px;border-bottom:1px dashed #f0e9df;white-space:nowrap}
+  .an-tbl td.r,.an-tbl th.r{text-align:right}
+  .an-tbl-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  @media(max-width:600px){ .an-tbl th.k-lite,.an-tbl td.k-lite{display:none} }
+</style>
+</head>
+<body>
+{% include 'topbar.html' %}
+
+<div class="container">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 14px;flex-wrap:wrap;gap:8px">
+    <div>
+      <div class="title">📈 经营分析</div>
+      <div class="sub">趋势 · 环比 · 结构 · 客户（点任意条目看明细）</div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="an-tabs" id="anGranTabs" style="margin:0">
+        <button class="an-tab active" data-g="week" onclick="setGran('week')">周</button>
+        <button class="an-tab" data-g="day" onclick="setGran('day')">日</button>
+        <button class="an-tab" data-g="month" onclick="setGran('month')">月</button>
+      </div>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAn)"><span class="btn-icon">🔄</span> 刷新</button>
+    </div>
+  </div>
+
+  <div id="anKpis" class="an-kpis"></div>
+  <div id="anProgress" class="an-note" style="display:none;margin:-4px 0 12px"></div>
+
+  <div class="an-card">
+    <div class="an-sec">📈 趋势<span class="mini">点柱子看那期的单</span></div>
+    <div class="an-tabs" id="anMetricTabs">
+      <button class="an-tab active" data-m="revenue" onclick="setMetric('revenue')">收入</button>
+      <button class="an-tab" data-m="orders" onclick="setMetric('orders')">单数</button>
+      <button class="an-tab" data-m="avg_price" onclick="setMetric('avg_price')">客单价</button>
+    </div>
+    <div class="an-chart" id="anChart"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">🍱 套餐结构<span class="mini" id="anPkgHint"></span></div>
+    <div id="anPackages"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">👥 客户性别<span class="mini" id="anGenderHint"></span></div>
+    <div id="anGender"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">📍 场地分布<span class="mini">点看这一场的单</span></div>
+    <div id="anPlaces"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">⏰ 时段分布<span class="mini">几点高峰 → 安排人力</span></div>
+    <div id="anHours"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">📅 星期分布<span class="mini">哪些天有生意</span></div>
+    <div id="anWeekdays"></div>
+  </div>
+
+  <div class="an-card">
+    <div class="an-sec">🔁 回头客<span class="mini">按电话识别（名字会重名）</span></div>
+    <div id="anRepeat"></div>
+    <div class="an-note">回头客是用<b>电话</b>认出来的（名字会重名，不可靠）；同一电话下过 ≥2 单就算回头客，按单数排序——排前面的值得单独维护。<br>
+      ⚠️ 打标的是<b>内部/自己人下的单</b>（联系人含"刘和牛""自取"等）——它们不是真实客户，建议在订单页改个名字或删掉，否则会把分析数字带偏。</div>
+  </div>
+
+  <div class="an-note">
+    口径（只在这里算一次）：收入＝实收货款（不含押金）；客单价＝收入÷单数；环比＝当前期 vs 上一期；
+    「结构/分布」用最近 4 期合并统计，避免当期样本太小失真。数据与订单页/财务页同一份。
+  </div>
+</div>
+
+<div id="anModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:990;align-items:center;justify-content:center;padding:12px">
+  <div class="an-sheet">
+    <div class="an-sheet-head">
+      <div>
+        <div class="ttl" id="anSheetTitle">明细</div>
+        <div class="sub" id="anSheetSub"></div>
+      </div>
+      <button class="btn btn-sm" onclick="closeAnSheet()">✖</button>
+    </div>
+    <div class="an-sheet-body" id="anSheetBody"></div>
+  </div>
+</div>
+
+<script>
+const AN_M = {revenue:'收入', orders:'单数', avg_price:'客单价'};
+const AN_WD = ['周日','周一','周二','周三','周四','周五','周六'];
+let anData = null, anGran = 'week', anMetric = 'revenue', anPeriods = 8;
+
+function anFmtY(n){
+  n = Number(n||0);
+  const a = Math.abs(n);
+  const s = a >= 10000 ? (n/10000).toFixed(1)+'万' : Math.round(n).toLocaleString('zh-CN');
+  return '¥' + s;
+}
+function anNum(n){ return Number(n||0).toLocaleString('zh-CN'); }
+function anPct(v){ return (v===null||v===undefined) ? '—' : ((v>0?'+':'') + v + '%'); }
+function anCls(v){ return (v===null||v===undefined) ? 'flat' : (v>0 ? 'up' : (v<0 ? 'down' : 'flat')); }
+function anEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+
+function setGran(g){
+  anGran = g;
+  document.querySelectorAll('#anGranTabs .an-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.g === g); });
+  loadAn();
+}
+function setMetric(m){
+  anMetric = m;
+  document.querySelectorAll('#anMetricTabs .an-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.m === m); });
+  if(anData) renderChart();
+}
+
+function loadAn(){
+  fetch('/api/analytics/overview?granularity=' + anGran + '&periods=' + anPeriods, {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok){ throw new Error('bad'); }
+      anData = d.data;
+      renderAll();
+    })
+    .catch(function(){
+      document.getElementById('anKpis').innerHTML = '<div class="an-kpi" style="grid-column:1/-1">' +
+        '<div class="lbl">加载失败</div><div class="val">—</div>' +
+        '<div class="d flat">网络异常或系统正在启动，可点右上角刷新</div></div>';
+    });
+}
+
+// 本页自己的刷新（别依赖其它页面里的同名函数）
+function refreshWithFx(fn){
+  var bs = document.querySelectorAll('.btn-refresh');
+  for(var i = 0; i < bs.length; i++){ bs[i].classList.add('spinning'); }
+  setTimeout(function(){
+    for(var j = 0; j < bs.length; j++){ bs[j].classList.remove('spinning'); }
+  }, 800);
+  if(typeof fn === 'function'){ fn(); }
+}
+
+function renderAll(){
+  renderKpis(); renderChart(); renderPackages(); renderGender();
+  renderDist('anPlaces', anData.places, 'place');
+  renderDist('anHours', anData.hours, 'hour');
+  renderDist('anWeekdays', anData.weekdays, 'weekday');
+  renderRepeat();
+}
+
+function renderKpis(){
+  const c = anData.current || {}, dl = anData.delta || {};
+  const items = [
+    ['收入', anFmtY(c.revenue), dl.revenue_pct],
+    ['单数', anNum(c.orders) + ' 单', dl.orders_pct],
+    ['客单价', anFmtY(c.avg_price), dl.avg_pct],
+  ];
+  document.getElementById('anKpis').innerHTML = items.map(function(it){
+    return '<div class="an-kpi"><div class="lbl">' + it[0] + '</div>' +
+      '<div class="val">' + it[1] + '</div>' +
+      '<div class="d ' + anCls(it[2]) + '">' + anPct(it[2]) + ' <span class="vs">vs ' + anEsc(dl.prev_label||'上一期') + '</span></div></div>';
+  }).join('');
+  var pg = document.getElementById('anProgress');
+  if(pg){
+    if(dl.in_progress){
+      pg.style.display = 'block';
+      pg.innerHTML = '⚠️「' + anEsc(dl.cur_label||'本期') + '」还在进行中（已过 ' + dl.days_passed + '/' + dl.days_total +
+        ' 天），所以上面的环比天然偏低。<b>看日均更准</b>：本期日均 ' + anFmtY(dl.cur_per_day) +
+        ' vs 上期日均 ' + anFmtY(dl.pre_per_day) +
+        '（<b style="color:' + (dl.per_day_pct >= 0 ? '#27ae60' : '#c0392b') + '">' + anPct(dl.per_day_pct) + '</b>）';
+    } else { pg.style.display = 'none'; }
+  }
+}
+
+function renderChart(){
+  const ps = anData.periods || [];
+  const m = anMetric;
+  if(!ps.length){ document.getElementById('anChart').innerHTML = '<div class="an-empty">还没有数据</div>'; return; }
+  const max = Math.max.apply(null, ps.map(function(p){ return Number(p[m]||0); }).concat([1]));
+  document.getElementById('anChart').innerHTML = ps.map(function(p){
+    const h = Math.max(3, Math.round(Number(p[m]||0) / max * 100));
+    const val = (m === 'orders') ? (anNum(p[m]) + '单') : anFmtY(p[m]);
+    const short = String(p.label||'').split('~')[0];
+    return '<div class="an-bar-wrap" onclick="drillPeriod(\'' + p.start + '\',\'' + anEsc(p.label) + '\')" title="点看这一期的单">' +
+      '<div class="an-bar-v">' + val + '</div>' +
+      '<div class="an-bar" style="height:' + h + '%"></div>' +
+      '<div class="an-bar-l">' + anEsc(short) + '</div></div>';
+  }).join('');
+}
+
+function renderRow(name, right, pct, barPct, onclick){
+  return '<div class="an-row" onclick="' + onclick + '">' +
+    '<div style="flex:1 1 auto;min-width:0">' +
+      '<div class="nm">' + anEsc(name) + '</div>' +
+      '<div class="an-barline"><i style="width:' + barPct + '%"></i></div>' +
+    '</div>' +
+    '<span class="num">' + right + '</span>' +
+    (pct === null ? '' : '<span class="pctn">' + pct + '</span>') +
+  '</div>';
+}
+
+function renderPackages(){
+  const arr = anData.packages || [];
+  const hint = document.getElementById('anPkgHint');
+  if(hint) hint.textContent = '近 4 期 · ' + anData.recent_orders + ' 单 · 占比按份数';
+  if(!arr.length){ document.getElementById('anPackages').innerHTML = '<div class="an-empty">最近 4 期没有订单</div>'; return; }
+  const maxShare = Math.max.apply(null, arr.map(function(p){ return p.share; }).concat([1]));
+  document.getElementById('anPackages').innerHTML = arr.map(function(p){
+    return renderRow(p.name + '（' + p.people + '）', p.portions + ' 份',
+      p.share + '%', Math.round(p.share / maxShare * 100),
+      "drillPkg('" + anEsc(p.name).replace(/'/g, '') + "')");
+  }).join('');
+}
+
+function renderGender(){
+  const g = anData.gender || {female:0,male:0,unknown:0};
+  const hint = document.getElementById('anGenderHint');
+  if(hint) hint.textContent = '可识别 ' + (g.known_ratio||0) + '% 的联系人';
+  const tot = (g.female + g.male + g.unknown) || 1;
+  const fp = Math.round(g.female / tot * 100), mp = Math.round(g.male / tot * 100);
+  document.getElementById('anGender').innerHTML =
+    '<div class="an-gender">' +
+      '<i class="an-g-f" style="width:' + fp + '%"></i>' +
+      '<i class="an-g-m" style="width:' + mp + '%"></i>' +
+      '<i class="an-g-u" style="width:' + (100 - fp - mp) + '%"></i>' +
+    '</div>' +
+    '<div class="an-legend">' +
+      '<span onclick="drillGender(\'f\')" style="cursor:pointer"><i class="an-g-f"></i>女士 ' + g.female + ' 单</span>' +
+      '<span onclick="drillGender(\'m\')" style="cursor:pointer"><i class="an-g-m"></i>先生 ' + g.male + ' 单</span>' +
+      '<span onclick="drillGender(\'u\')" style="cursor:pointer"><i class="an-g-u"></i>看不出 ' + g.unknown + ' 单</span>' +
+    '</div>' +
+    '<div class="an-note">称谓是从联系人名字里认的（"廖女士"/"黄先生"）。看得出性别的那部分里，女士占 ' +
+      (g.female_share||0) + '%——订餐的人以女性为主，客服和内容可以按这个来。</div>';
+}
+
+function renderDist(boxId, arr, kind){
+  const box = document.getElementById(boxId);
+  if(!arr || !arr.length){ box.innerHTML = '<div class="an-empty">最近 4 期没有订单</div>'; return; }
+  const maxO = Math.max.apply(null, arr.map(function(x){ return x.orders; }).concat([1]));
+  box.innerHTML = arr.map(function(x){
+    const right = x.orders + ' 单 <span style="color:#c0392b">' + x.share + '%</span>';
+    return renderRow(x.name, right, null, Math.round(x.orders / maxO * 100),
+      "drill" + kind.charAt(0).toUpperCase() + kind.slice(1) + "('" + anEsc(x.name).replace(/'/g,'') + "')");
+  }).join('');
+}
+
+function renderRepeat(){
+  const arr = anData.repeat || [];
+  if(!arr.length){ document.getElementById('anRepeat').innerHTML = '<div class="an-empty">最近还没有回头客（同一电话下过 ≥2 单）</div>'; return; }
+  const maxO = Math.max.apply(null, arr.map(function(x){ return x.orders; }).concat([1]));
+  document.getElementById('anRepeat').innerHTML = arr.map(function(x){
+    return renderRow((x.internal ? '⚠️ ' : '') + x.name + ' · ' + String(x.phone).slice(-4),
+      x.orders + ' 单 <span style="color:#c0392b">' + anFmtY(x.revenue) + '</span>',
+      '近' + String(x.last_date||'').slice(5), Math.round(x.orders / maxO * 100),
+      "drillPhone('" + anEsc(x.phone) + "')");
+  }).join('');
+}
+
+/* ===== 下钻 ===== */
+function anOrders(){ return (anData && anData.orders) || []; }
+function openAnSheet(title, sub, list){
+  document.getElementById('anSheetTitle').textContent = title;
+  const sum = list.reduce(function(s,o){ return s + (o.amount||0); }, 0);
+  document.getElementById('anSheetSub').textContent = sub + ' · ' + list.length + ' 单 · ' + anFmtY(sum);
+  const body = document.getElementById('anSheetBody');
+  if(!list.length){ body.innerHTML = '<div class="an-empty">这个条件下没有订单</div>'; }
+  else{
+    body.innerHTML = '<div class="an-tbl-wrap"><table class="an-tbl"><thead><tr>' +
+      '<th>日期</th><th>客户</th><th class="k-lite">场地</th><th class="r">金额</th><th class="k-lite">套餐</th>' +
+      '</tr></thead><tbody>' + list.map(function(o){
+        return '<tr><td>' + anEsc(String(o.date||'').slice(5)) + '<div style="font-size:10px;color:#999">' +
+          anEsc(o.hour ? o.hour + '点' : '') + '</div></td>' +
+          '<td>' + anEsc(o.name||'-') + '</td>' +
+          '<td class="k-lite">' + anEsc(o.address||'-') + '</td>' +
+          '<td class="r" style="font-weight:700">' + anFmtY(o.amount) + '</td>' +
+          '<td class="k-lite">' + anEsc((o.pkgs||[]).join('/') || '-') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  document.getElementById('anModal').style.display = 'flex';
+}
+function closeAnSheet(){ document.getElementById('anModal').style.display = 'none'; }
+
+function drillPeriod(start, label){
+  openAnSheet('📅 ' + label, '这一期', anOrders().filter(function(o){ return o.period === start; }));
+}
+function drillPkg(name){
+  openAnSheet('🍱 ' + name, '最近 4 期', anOrders().filter(function(o){ return (o.pkgs||[]).indexOf(name) >= 0; }));
+}
+function drillPlace(name){
+  openAnSheet('📍 ' + name, '最近 4 期', anOrders().filter(function(o){ return (o.address || '（未填）') === name; }));
+}
+function drillHour(name){
+  openAnSheet('⏰ ' + name, '最近 4 期', anOrders().filter(function(o){
+    return ((o.hour ? o.hour + '点' : '') || '（未填）') === name; }));
+}
+function drillWeekday(name){
+  openAnSheet('📅 ' + name, '最近 4 期', anOrders().filter(function(o){
+    const d = new Date(o.date + 'T00:00:00');
+    return !isNaN(d) && AN_WD[d.getDay()] === name; }));
+}
+function drillGender(g){
+  const t = {f:'女士', m:'先生', u:'看不出性别'};
+  openAnSheet('👥 ' + (t[g]||g), '最近 4 期', anOrders().filter(function(o){ return (o.gender||'u') === g; }));
+}
+function drillPhone(ph){
+  openAnSheet('🔁 ' + ph, '这位客户的全部订单', anOrders().filter(function(o){ return o.phone === ph; }));
+}
+
+loadAn();
+</script>
+</body>
+</html>
