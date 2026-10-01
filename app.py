@@ -3591,23 +3591,42 @@ def analytics_overview():
               "female_share": round(gc["f"] / known * 100, 1) if known else 0.0}
 
     # 回头客（按电话聚合；名字会重名，不能用来识别客户）
-    inter_re = _re.compile(r"(刘和牛|测试|test|自取|内部)")
+    # ⚠️「刘和牛」是门店前期代客下单时用的**自己店名**——那些是**真实订单**，
+    #    金额已计入全部财务/结构统计，绝不能当内部测试单剔除；
+    #    但一个店名电话代表不了"同一位回头客"，所以不参与回头客排名，单独汇总说明。
+    # ⚠️ 识别只看联系人姓名：**不要匹配地址**——"自取/自提"是地址值，
+    #    真实客户选自取会被误判成内部单（原来那版就埋了这个雷）。
+    proxy_re = _re.compile(r"(刘和牛|测试|test|内部单)")
     rp = {}
+    proxy = {"orders": 0, "revenue": 0.0, "names": [], "phones": [], "first": "", "last": ""}
     for r in rows:
+        nm_raw = r["contact_name"] or ""
         ph = (r["contact_phone"] or "").strip()
+        if proxy_re.search(nm_raw):
+            proxy["orders"] += 1
+            proxy["revenue"] += float(r["amount"] or 0)
+            if nm_raw and nm_raw not in proxy["names"]:
+                proxy["names"].append(nm_raw)
+            if ph and ph not in proxy["phones"]:
+                proxy["phones"].append(ph)
+            bd = r["booking_date"] or ""
+            if bd and (not proxy["first"] or bd < proxy["first"]):
+                proxy["first"] = bd
+            if bd > proxy["last"]:
+                proxy["last"] = bd
+            continue
         if len(ph) < 7:
             continue
-        e = rp.setdefault(ph, {"phone": ph, "name": r["contact_name"] or "", "orders": 0,
-                               "revenue": 0.0, "last_date": "", "internal": False})
+        e = rp.setdefault(ph, {"phone": ph, "name": nm_raw, "orders": 0,
+                               "revenue": 0.0, "last_date": ""})
         e["orders"] += 1
         e["revenue"] += float(r["amount"] or 0)
-        if inter_re.search(r["contact_name"] or "") or inter_re.search(r["address"] or ""):
-            e["internal"] = True
         if (r["booking_date"] or "") > e["last_date"]:
             e["last_date"] = r["booking_date"]
-            e["name"] = r["contact_name"] or e["name"]
+            e["name"] = nm_raw or e["name"]
+    proxy["revenue"] = round(proxy["revenue"], 2)
     repeat = sorted([v for v in rp.values() if v["orders"] >= 2],
-                    key=lambda x: (1 if x.get("internal") else 0, -x["orders"]))
+                    key=lambda x: -x["orders"])
     for v in repeat:
         v["revenue"] = round(v["revenue"], 2)
         v["avg_price"] = round(v["revenue"] / max(1, v["orders"]), 2)
@@ -3617,7 +3636,7 @@ def analytics_overview():
         "periods": periods, "current": cur, "previous": pre, "delta": delta,
         "recent_from": recent_from.isoformat(), "recent_orders": len(recent),
         "packages": packages, "places": places, "hours": hours, "weekdays": weekdays,
-        "gender": gender, "repeat": repeat[:30],
+        "gender": gender, "repeat": repeat[:30], "proxy": proxy,
         "orders": recs,          # 明细：供前端点条目下钻
     }})
 

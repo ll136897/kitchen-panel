@@ -114,8 +114,9 @@
   <div class="an-card">
     <div class="an-sec">🔁 回头客<span class="mini">按电话识别（名字会重名）</span></div>
     <div id="anRepeat"></div>
+    <div id="anProxyNote" class="an-note" style="display:none"></div>
     <div class="an-note">回头客是用<b>电话</b>认出来的（名字会重名，不可靠）；同一电话下过 ≥2 单就算回头客，按单数排序——排前面的值得单独维护。<br>
-      ⚠️ 打标的是<b>内部/自己人下的单</b>（联系人含"刘和牛""自取"等）——它们不是真实客户，建议在订单页改个名字或删掉，否则会把分析数字带偏。</div>
+      代客下单的单（见上）无法对应到具体客户，所以不参与这个排名；想恢复它们的客户归属，可以在订单页把联系人改成真实客户名。</div>
   </div>
 
   <div class="an-note">
@@ -295,15 +296,32 @@ function renderDist(boxId, arr, kind){
 }
 
 function renderRepeat(){
+  renderProxyNote();   // 先渲染说明（它跟"有没有回头客"无关）
   const arr = anData.repeat || [];
+  const px = anData.proxy || {};
   if(!arr.length){ document.getElementById('anRepeat').innerHTML = '<div class="an-empty">最近还没有回头客（同一电话下过 ≥2 单）</div>'; return; }
   const maxO = Math.max.apply(null, arr.map(function(x){ return x.orders; }).concat([1]));
   document.getElementById('anRepeat').innerHTML = arr.map(function(x){
-    return renderRow((x.internal ? '⚠️ ' : '') + x.name + ' · ' + String(x.phone).slice(-4),
+    return renderRow(x.name + ' · ' + String(x.phone).slice(-4),
       x.orders + ' 单 <span style="color:#c0392b">' + anFmtY(x.revenue) + '</span>',
       '近' + String(x.last_date||'').slice(5), Math.round(x.orders / maxO * 100),
       "drillPhone('" + anEsc(x.phone) + "')");
   }).join('');
+  renderProxyNote();
+}
+
+/* 代客下单说明：这些单是真实生意（钱照算），只是没法归到具体客户，所以不进回头客排名 */
+function renderProxyNote(){
+  const px = (anData && anData.proxy) || {};
+  const el = document.getElementById('anProxyNote');
+  if(!el) return;
+  if(!(px.orders > 0)){ el.style.display = 'none'; return; }
+  const who = (px.names || []).join('、') || '门店名';
+  el.style.display = 'block';
+  el.innerHTML = 'ℹ️ 另有 <b>' + px.orders + ' 单</b>（' + anFmtY(px.revenue) + '）是用门店名「' + anEsc(who) + '」<b>代客下单</b>的' +
+    (px.first ? '（' + anEsc(px.first) + ' ~ ' + anEsc(px.last) + '）' : '') +
+    '：这些是<b>真实订单，金额已计入上面所有统计</b>；但因无法对应到具体客户，不参与回头客排名。' +
+    '想让它们回到客户维度，可在订单页把联系人改成真实客户名。';
 }
 
 /* ===== 下钻 ===== */
