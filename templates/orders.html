@@ -60,6 +60,13 @@
   .month-group.cur .month-name{color:var(--primary)}
   .month-meta{margin-left:auto;font-size:12px;font-weight:600;color:#9a3412;opacity:.9;white-space:nowrap}
   .month-body{margin-top:10px}
+  /* 日期条按月折叠（与备餐页/财务页一致） */
+  .dm-head{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:10px;border:1px solid var(--border);background:#fff;color:#9a3412;cursor:pointer;font-size:13px;font-weight:700}
+  .dm-head:hover{background:#faf5ed}
+  .dm-head.cur{border-color:var(--primary);color:var(--primary);background:#fffaf9}
+  .dm-caret{font-size:11px}
+  .dm-meta{margin-left:2px;font-weight:600;opacity:.85}
+  .dm-days{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px 4px}
 </style>
 </head>
 <body>
@@ -229,18 +236,60 @@ function loadOrders(){
   });
 }
 
-// ===== 搜索 + 日期快捷切换（同款备餐页）=====
+// ===== 搜索 + 日期快捷切换 =====
 function onSearch(v){ filterText = (v||'').trim(); renderOrders(); }
 function clearSearch(){ const b=document.getElementById('searchBox'); if(b) b.value=''; filterText=''; renderOrders(); }
-function setOrderDate(d){ filterDate = d; renderOrderDateChips(); renderOrders(); }
+
+// 有订单的日期条：按月折叠（默认展开当月；当月没单就展开最近有单的那个月）
+let dateExpandedMonths = new Set(), dateCollapsedMonths = new Set(), dateInitedMonths = new Set();
+function orderMonthLabel(k){
+  const p = k.split('-');
+  return (p.length===2 && p[0]) ? (p[0]+'年'+parseInt(p[1],10)+'月') : k;
+}
+function dateMonthCollapsed(k){ return dateCollapsedMonths.has(k) && !dateExpandedMonths.has(k); }
+function toggleDateMonth(k){
+  if(dateMonthCollapsed(k)){ dateCollapsedMonths.delete(k); dateExpandedMonths.add(k); }
+  else { dateExpandedMonths.delete(k); dateCollapsedMonths.add(k); }
+  renderOrderDateChips();
+}
+function setOrderDate(d){
+  filterDate = d;
+  if(d){                                    // 选中的那天若在收起的月份里 → 自动展开那个月
+    const k = d.slice(0,7);
+    if(dateMonthCollapsed(k)){ dateExpandedMonths.add(k); dateCollapsedMonths.delete(k); }
+  }
+  renderOrderDateChips();
+  renderOrders();
+}
 function renderOrderDateChips(){
   const box = document.getElementById('orderDateChips');
   if(!box) return;
   const counts = {};
   allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date] = (counts[o.booking_date]||0)+1; });
   const dates = Object.keys(counts).sort().reverse();
-  let html = `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')">全部日期</button>`;
-  html += dates.map(d=>`<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`).join('');
+  const groups = {}, order = [];
+  dates.forEach(d=>{ const k = d.slice(0,7); if(!groups[k]){ groups[k] = []; order.push(k); } groups[k].push(d); });
+  const curM = thisMonthKey(), newest = order.length ? order[0] : '';
+  order.forEach(k=>{                        // 往月首次出现 → 默认收起；最新月保持展开
+    if(dateInitedMonths.has(k)) return;
+    dateInitedMonths.add(k);
+    if(k < curM && k !== newest) dateCollapsedMonths.add(k);
+  });
+  let html = `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')" style="flex:0 0 auto">全部日期</button>`;
+  html += order.map(k=>{
+    const arr = groups[k];
+    const collapsed = dateMonthCollapsed(k);
+    const cnt = arr.reduce((s,d)=> s + counts[d], 0);
+    return `<div style="flex:1 1 100%">
+      <button class="dm-head${k===curM?' cur':''}" onclick="toggleDateMonth('${k}')">
+        <span class="dm-caret">${collapsed?'▸':'▾'}</span>
+        ${orderMonthLabel(k)}
+        <span class="dm-meta">${arr.length}天 · ${cnt}单</span>
+      </button>
+      ${collapsed ? '' : `<div class="dm-days">${arr.map(d=>
+        `<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`).join('')}</div>`}
+    </div>`;
+  }).join('');
   box.innerHTML = html;
 }
 
