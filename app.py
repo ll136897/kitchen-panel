@@ -1266,10 +1266,11 @@ def api_parse():
 
     db = g.db
     cur = db.cursor()
-    from parser import split_orders
+    from parser import split_orders, split_chunks
     chunks_in = data.get("chunks")
     if isinstance(chunks_in, list) and any((c or "").strip() for c in chunks_in):
-        parts = [(c, "manual") for c in chunks_in if (c or "").strip()]
+        # 前端回传的 chunks 也可能"一段含多单"（人工调整/历史分段）→ 再细拆一层
+        parts = [(c, "manual") for c in split_chunks(chunks_in)]
     else:
         parts = split_orders(raw)
 
@@ -1344,10 +1345,10 @@ def create_order():
         return jsonify({"ok": False, "msg": "文本为空"}), 400
 
     # 自动拆分多单（不再需要手工加 ---）；前端调整过的 chunks 优先
-    from parser import split_orders
+    from parser import split_orders, split_chunks
     chunks_in = data.get("chunks")
     if isinstance(chunks_in, list) and any((c or "").strip() for c in chunks_in):
-        chunks = [c.strip() for c in chunks_in if (c or "").strip()]
+        chunks = split_chunks(chunks_in)     # 一段含多单时再细拆，避免只入库最后 1 单
     else:
         chunks = [c for c, _ in split_orders(raw)]
     if not chunks:

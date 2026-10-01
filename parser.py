@@ -934,20 +934,97 @@ def _order_signals(text):
     return hits
 
 
-def split_orders(raw):
-    """把一大段文本拆成多个订单。
+def _looks_like_order(text):
+    """像一条真订单吗？至少要命中 2 类特征。
 
-    返回：[(chunk, reason)]，reason ∈ explicit / wechat / block / single
-    拆不出来就原样返回一段（single），保证一定能入库、不会丢内容。
+    ⚠️ 只用"有没有特征"不够：微信抬头行"张三 2026-09-28 15:30"本身带日期，
+    会被误判成订单段 → 入库出一条空订单。要求 ≥2 类才能把它排除掉。
     """
-    text = (raw or "").replace("\r\n", "\n").strip()
-    if not text:
-        return []
+    return len(_order_signals(text)) >= 2
 
+
+# 每个订单开头的"锚点行"：只认时间类字段——它们在同一单里只出现一次。
+# ⚠️ 不要放"预约项目"："预约时间"和"预约项目"在一条订单里会同时出现，两个都当锚点会把一单切成两半。
+# ⚠️ 更不要用"联系人/联系电话/地址"——同一单里也各出现一次，会把一单切成好几段。
+_ANCHOR_RE = re.compile(r"^[ \t　]*(?:预约时间|预约日期|预约时段)[ \t　]*[:：]")
+
+
+def _subsplit_by_anchor(block):
+    """把"一段里其实含多单"的内容，按订单起始行（预约时间: …）继续拆开。
+
+    用途：外层用 --- 或空行只切出了"大块"（块内还有好几单）时，再细拆一层，
+    避免整块被当成一单入库（只会取到最后一个联系人的值，前面的单全丢）。
+
+    返回 ≥1 段；拆不出来就原样返回一段。
+    """
+    block = (block or "").strip()
+    if not block:
+        return []
+    lines = block.split("\n")
+    idxs = [i for i, l in enumerate(lines) if _ANCHOR_RE.match(l or "")]
+    if len(idxs) < 2:
+        return [block]
+    segs = []
+    head = "\n".join(lines[:idxs[0]]).strip()          # 锚点之前的零碎内容并入第一单
+    for j, i in enumerate(idxs):
+        end = idxs[j + 1] if j + 1 < len(idxs) else len(lines)
+        seg = "\n".join(lines[i:end]).strip()
+        if j == 0 and head:
+            seg = head + "\n" + seg
+        if seg:
+            segs.append(seg)
+    # 兜底：切出来但完全没有订单特征的碎片，并回上一段（防止把备注里的同名字段误当新单）
+    merged = []
+    for s in segs:
+        if merged and not _looks_like_order(s):
+            merged[-1] = merged[-1] + "\n" + s
+        else:
+            merged.append(s)
+    return merged or [block]
+
+
+def split_chunks(chunks):
+    """前端回传的 chunks 也可能"一段里含多单" → 逐段再细拆一次"""
+    out = []
+    for c in (chunks or []):
+        if not (c or "").strip():
+            continue
+        out.extend(_subsplit_by_anchor(c))
+    return out
+
+
+def _clean_blocks(blocks):
+    """丢掉"只有聊天抬头、没有订单信息"的碎片段，并把它的内容并给下一条消息。
+
+    例：微信里一条消息常是
+        张三 2026-09-28 15:30        ← 抬头行
+        预约时间:9.28 15:30          ← 订单正文
+    抬头正则会把抬头行切成独立一段（无任何订单特征），直接入库会多出一条空订单。
+    """
+    out, pending = [], ""
+    for b in blocks:
+        b = (b or "").strip()
+        if not b:
+            continue
+        if not _looks_like_order(b):
+            pending = (pending + "\n" + b).strip()
+            continue
+        out.append((pending + "\n" + b).strip() if pending else b)
+        pending = ""
+    if pending:
+        if out:
+            out[-1] = (out[-1] + "\n" + pending).strip()
+        else:
+            out.append(pending)
+    return out
+
+
+def _split_blocks(text):
+    """第一层切分：显式分隔符 → 微信抬头 → 空行分段。返回 (blocks, reason)"""
     # 1) 显式分隔符（老用法优先，尊重用户自己的标记）
     parts = [p.strip() for p in _SEP_RE.split(text) if p.strip()]
     if len(parts) > 1:
-        return [(p, "explicit") for p in parts]
+        return parts, "explicit"
 
     # 2) 微信消息抬头 → 每条消息一段
     lines = text.split("\n")
@@ -960,7 +1037,7 @@ def split_orders(raw):
         blocks.append("\n".join(lines[start:]).strip())
         blocks = [b for b in blocks if b]
         if len(blocks) > 1:
-            return [(b, "wechat") for b in blocks]
+            return blocks, "wechat"
 
     # 3) 空行分段：得有足够的订单特征才敢拆
     blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
@@ -970,6 +1047,31 @@ def split_orders(raw):
         multi_date = sum(1 for s in sigs if "date" in s) >= 2
         multi_body = sum(1 for s in sigs if ({"pkg", "phone"} & set(s))) >= 2
         if enough or (multi_date and multi_body):
-            return [(b, "block") for b in blocks]
+            return blocks, "block"
 
-    return [(text, "single")]
+    return [text], "single"
+
+
+def split_orders(raw):
+    """把一大段文本拆成多个订单。
+
+    返回：[(chunk, reason)]，reason ∈ explicit / wechat / block / anchor / single
+    拆不出来就原样返回一段（single），保证一定能入库、不会丢内容。
+
+    ⚠️ 第一层切法（--- / 微信抬头 / 空行）**命中后还要再按"预约时间:"细拆一层**，
+    否则"用 --- 把 13 单分成两块"这种情况会每块只入库 1 单、丢掉其余 11 单。
+    """
+    text = (raw or "").replace("\r\n", "\n").strip()
+    if not text:
+        return []
+
+    blocks, reason = _split_blocks(text)
+    blocks = _clean_blocks(blocks) or blocks     # 去掉"只有聊天抬头"的空段
+    out = []
+    for b in blocks:
+        subs = _subsplit_by_anchor(b)
+        if len(subs) > 1:
+            out.extend((s, "anchor") for s in subs)
+        else:
+            out.append((b, reason))
+    return out
