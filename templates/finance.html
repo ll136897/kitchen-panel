@@ -65,6 +65,50 @@
   .pf-row .eq{font-size:12px;color:#8a7364}
   .pf-total{display:flex;justify-content:space-between;padding:7px 0;font-size:13px}
   .pf-total.big{font-size:16px;font-weight:800;border-top:2px solid #3a2416;margin-top:6px;padding-top:9px}
+  /* ===== 点数字看明细（财务软件式下钻）===== */
+  .fin-kpi-item.clickable{cursor:pointer;position:relative;transition:box-shadow .15s,transform .15s}
+  .fin-kpi-item.clickable:hover{box-shadow:0 3px 10px rgba(0,0,0,.13);transform:translateY(-1px)}
+  .fin-kpi-item.clickable .val::after{content:'›';font-size:13px;opacity:.35;margin-left:4px}
+  /* 有账日期条：点一天直接看那天的账（不用再点"完成"） */
+  .bd-month{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .bd-mhead{padding:5px 11px;border:1px solid var(--border);border-radius:999px;background:#fff;
+    font-size:12px;font-weight:700;color:#9a3412;cursor:pointer}
+  .bd-mhead.cur{border-color:#3a2416;color:#3a2416;background:#fdf8f2}
+  .bd-day{padding:6px 11px;border:1px solid var(--border);border-radius:9px;background:#fff;
+    font-size:12px;font-weight:700;cursor:pointer;color:#6b4f3a;display:inline-flex;align-items:center;gap:5px}
+  .bd-day:hover{background:#faf5ed}
+  .bd-day.active{background:#3a2416;color:#fff;border-color:#3a2416}
+  .bd-day .n{font-size:10px;font-weight:600;opacity:.75}
+  .bd-days{margin:0 0 10px 8px;display:flex;gap:6px;flex-wrap:wrap}
+  /* 明细抽屉 */
+  .kpi-sheet{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+  .kpi-sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border-l);background:#fdfaf6}
+  .kpi-sheet-head .ttl{font-weight:800;font-size:15px;color:#3a2416}
+  .kpi-sheet-head .sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
+  .kpi-sheet-body{overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 16px 20px}
+  .kpi-sec{font-size:12px;font-weight:800;color:#3a2416;margin:14px 0 2px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .kpi-sec .mini{font-weight:600;font-size:10px;color:var(--muted)}
+  .kpi-tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .kpi-tbl th{text-align:left;color:var(--muted);font-weight:600;font-size:10px;padding:5px 4px;border-bottom:1px solid var(--border-l);white-space:nowrap}
+  .kpi-tbl td{padding:6px 4px;border-bottom:1px dashed #f0e9df;white-space:nowrap}
+  .kpi-tbl td.r,.kpi-tbl th.r{text-align:right}
+  .kpi-tbl tr.sub td{background:#fbf8f4;color:#7a6a5c;font-size:11px}
+  .kpi-line{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed #f0e9df;font-size:13px}
+  .kpi-line:last-child{border-bottom:none}
+  .kpi-line.total{border-top:2px solid #3a2416;border-bottom:none;font-weight:800;font-size:15px;margin-top:4px;padding-top:9px}
+  .kpi-line .nm{flex:1;min-width:0}
+  .kpi-line .hint{font-size:10px;color:#999;flex:1 1 100%;line-height:1.5}
+  .kpi-line .amt{font-weight:800}
+  .kpi-lk{font-size:11px;color:#2c6fb0;text-decoration:none;white-space:nowrap}
+  .kpi-act{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 2px}
+  .kpi-empty{padding:26px;text-align:center;color:var(--muted);font-size:13px}
+  .kpi-tbl-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  @media(max-width:600px){ .kpi-tbl th.k-lite,.kpi-tbl td.k-lite{display:none} }
+  .kpi-tbl-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  @media(max-width:600px){ .kpi-tbl th.k-lite,.kpi-tbl td.k-lite{display:none} }
+  .kpi-note{font-size:11px;color:#7a6a5c;background:#fbf6ef;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.6}
+  .kpi-bar{height:6px;border-radius:4px;background:#efe7dc;overflow:hidden;margin-top:3px}
+  .kpi-bar > i{display:block;height:100%;background:#c98b5a}
   .pf-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .place-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed #efe7dc}
   .place-row input.pname{flex:1 1 110px;min-width:0;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px}
@@ -124,6 +168,9 @@
     <button class="qchip" data-q="lastmonth">上月</button>
   </div>
 
+  <!-- 有账日期条：点一天直接看那天的账（不用再开原生日期选择器、点"完成"） -->
+  <div id="billDates" style="margin-bottom:12px"></div>
+
   <!-- 利润总览 -->
   <div class="fin-card">
     <div class="fin-kpi" id="kpiBox"></div>
@@ -156,7 +203,7 @@
   </div>
 
   <!-- 成本与利润设置 -->
-  <div class="fin-card">
+  <div class="fin-card" id="cfgCard">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
       <div class="sec-title" style="margin:0"><span class="dot" style="background:#2471a3"></span>⚙️ 成本与利润设置</div>
       <button class="btn btn-primary btn-sm" onclick="saveCfg()">💾 保存设置</button>
@@ -227,7 +274,7 @@
   </div>
 
   <!-- 食材成本管理（改价后全局同步） -->
-  <div class="fin-card">
+  <div class="fin-card" id="ingCard">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
       <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>🥩 食材单价管理</div>
       <div style="font-size:11px;color:#888">改价后自动同步到所有菜单/订单成本</div>
@@ -256,12 +303,26 @@
   </div>
 </div>
 
+<!-- KPI 明细抽屉：点"收入/成本合计/利润…"下钻看明细，明细里可改 -->
+<div id="kpiModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:990;align-items:center;justify-content:center;padding:12px">
+  <div class="kpi-sheet">
+    <div class="kpi-sheet-head">
+      <div>
+        <div class="ttl" id="kpiTitle">明细</div>
+        <div class="sub" id="kpiSub"></div>
+      </div>
+      <button class="btn btn-sm" onclick="closeKpi()">✖</button>
+    </div>
+    <div class="kpi-sheet-body" id="kpiBody"></div>
+  </div>
+</div>
+
 <script>
 const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
 const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
 
-let currentRange = 'month';
+let currentRange = 'day';     // 默认看"今天"（与工具栏高亮一致）
 let cfgData = null;
 
 // ===== 日期范围 =====
@@ -311,6 +372,7 @@ function quickJump(q){
 }
 document.querySelectorAll('.qchip').forEach(b=>b.addEventListener('click', ()=>quickJump(b.dataset.q)));
 document.getElementById('rangeDate').value = fmtDate(new Date());
+document.querySelectorAll('.qchip').forEach(b=>b.classList.toggle('active', b.dataset.q==='today'));
 
 async function fetchJSONRetry(url, tries){
   tries = tries || 4;
@@ -323,6 +385,79 @@ async function fetchJSONRetry(url, tries){
   }
   return null;
 }
+
+// ===== 有账日期条：点一天直接看那天的账 =====
+let billDates = [], bdCollapsed = new Set(), bdExpanded = new Set(), bdInited = new Set();
+function bdCurMonth(){ return fmtDate(new Date()).slice(0,7); }
+function bdMonthLabel(k){
+  const p = k.split('-');
+  return (p.length===2 && p[0]) ? (p[0]+'年'+parseInt(p[1],10)+'月') : k;
+}
+function renderBillDates(){
+  const box = document.getElementById('billDates');
+  if(!box) return;
+  if(!billDates.length){ box.innerHTML = ''; return; }
+  const groups = {}, order = [];
+  billDates.forEach(d=>{
+    const k = (d.date||'').slice(0,7);
+    if(!groups[k]){ groups[k] = []; order.push(k); }
+    groups[k].push(d);
+  });
+  order.sort().reverse();                    // 月份新的在前
+  const curM = bdCurMonth(), newest = order[0];
+  order.forEach(k=>{                         // 往月首次出现→默认收起；最新月保持展开
+    if(bdInited.has(k)) return;
+    bdInited.add(k);
+    if(k < curM && k !== newest) bdCollapsed.add(k);
+  });
+  const sel = document.getElementById('rangeDate').value;
+  box.innerHTML = order.map(k=>{
+    const arr = groups[k];
+    const collapsed = bdCollapsed.has(k) && !bdExpanded.has(k);
+    const cnt = arr.reduce((s,d)=> s+(d.cnt||0), 0);
+    const amt = arr.reduce((s,d)=> s+(d.amount||0), 0);
+    const days = arr.slice().sort((a,b)=> a.date < b.date ? 1 : (a.date > b.date ? -1 : 0));
+    return `<div>
+      <div class="bd-month">
+        <button class="bd-mhead${k===curM?' cur':''}" onclick="toggleBdMonth('${k}')">
+          ${collapsed?'▸':'▾'} ${bdMonthLabel(k)}
+          <span class="n" style="font-weight:600;opacity:.8">${arr.length}天 · ${cnt}单 · ¥${Math.round(amt)}</span>
+        </button>
+      </div>
+      ${collapsed ? '' : `<div class="bd-days">${days.map(d=>
+        `<button class="bd-day${d.date===sel?' active':''}" onclick="pickBillDate('${d.date}')">
+           ${d.date.slice(5).replace('-','.')}<span class="n">${d.cnt}单 · ¥${Math.round(d.amount||0)}</span>
+         </button>`).join('')}</div>`}
+    </div>`;
+  }).join('');
+}
+function toggleBdMonth(k){
+  const collapsed = bdCollapsed.has(k) && !bdExpanded.has(k);
+  if(collapsed){ bdCollapsed.delete(k); bdExpanded.add(k); }
+  else { bdExpanded.delete(k); bdCollapsed.add(k); }
+  renderBillDates();
+}
+// 点日期 → 直接切到那一天的账（不再需要打开原生日期选择器、点"完成"）
+function pickBillDate(date){
+  document.getElementById('rangeDate').value = date;
+  currentRange = 'day';
+  document.querySelectorAll('.range-tab').forEach(b=>b.classList.toggle('active', b.dataset.range==='day'));
+  document.querySelectorAll('.qchip').forEach(b=>b.classList.remove('active'));
+  if(date === fmtDate(new Date())){
+    document.querySelectorAll('.qchip').forEach(b=>b.classList.toggle('active', b.dataset.q==='today'));
+  }
+  renderBillDates();
+  loadAll();
+}
+function loadBillDates(){
+  fetchJSONRetry('/api/finance/dates').then(res=>{
+    if(!res || !res.ok) return;
+    billDates = res.data || [];
+    renderBillDates();
+  });
+}
+
+let pfData = null, payData = null;   // 当前区间的利润/货款数据（供明细抽屉复用）
 
 function loadAll(){
   const r = getRangeDates();
@@ -338,12 +473,15 @@ function loadAll(){
         '<button class="btn btn-primary btn-sm" onclick="loadAll()">🔄 重新加载</button></div>';
       return;
     }
-    renderProfitKpi(pfRes.data.totals||{});
-    renderProfitOrders(pfRes.data.orders||[]);
-    if(sumRes) renderPayKpi(sumRes.data||{});
+    pfData = pfRes.data || {};
+    renderProfitKpi(pfData.totals||{});
+    renderProfitOrders(pfData.orders||[]);
+    if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
+    if(kpiOpenKey) renderKpiBody();      // 明细抽屉开着 → 跟着一起刷新
   });
   loadCfg();
   loadCostItems();
+  loadBillDates();
 }
 
 function fmtY(n){
@@ -358,32 +496,32 @@ function renderProfitKpi(t){
   const rev = t.revenue||0, cost = t.cost||0, profit = t.profit||0;
   const alertCnt = (t.loss||0) + (t.warn||0);
   document.getElementById('kpiBox').innerHTML = `
-    <div class="fin-kpi-item neutral">
+    <div class="fin-kpi-item neutral clickable" onclick="openKpi('revenue')" title="点开：收入明细（每单情况）">
       <div class="lbl">💵 收入</div>
       <div class="val">${fmtY(rev)}</div>
       <div class="sub">${t.order_cnt||0} 单</div>
     </div>
-    <div class="fin-kpi-item negative">
+    <div class="fin-kpi-item negative clickable" onclick="openKpi('cost')" title="点开：成本明细（逐项）">
       <div class="lbl">💸 成本合计</div>
       <div class="val">${fmtY(cost)}</div>
       <div class="sub">食材 ${fmtY(t.food||0)} + 其他 ${fmtY(t.other||0)}</div>
     </div>
-    <div class="fin-kpi-item ${profit>=0?'positive':'negative'}">
+    <div class="fin-kpi-item ${profit>=0?'positive':'negative'} clickable" onclick="openKpi('profit')" title="点开：利润怎么来的">
       <div class="lbl">✅ 现金利润</div>
       <div class="val">${fmtY(profit)}</div>
       <div class="sub">真实毛利率 ${t.margin||0}%</div>
     </div>
-    <div class="fin-kpi-item ${(t.net||0)>=0?'positive':'negative'}">
+    <div class="fin-kpi-item ${(t.net||0)>=0?'positive':'negative'} clickable" onclick="openKpi('net')" title="点开：净利怎么算的">
       <div class="lbl">🏗️ 含固定开销净利</div>
       <div class="val">${fmtY(t.net||0)}</div>
       <div class="sub">${t.fixed_monthly>0 ? ('每单摊 ¥'+(t.fixed_alloc_per_order||0)) : '未设固定开销'}</div>
     </div>
-    <div class="fin-kpi-item neutral">
+    <div class="fin-kpi-item neutral clickable" onclick="openKpi('margin')" title="点开：每单毛利率">
       <div class="lbl">📊 平均真实毛利率</div>
       <div class="val">${t.avg_margin||0}%</div>
       <div class="sub">警戒线 ${t.margin_alert||40}%</div>
     </div>
-    <div class="fin-kpi-item ${alertCnt?'negative':'positive'}">
+    <div class="fin-kpi-item ${alertCnt?'negative':'positive'} clickable" onclick="openKpi('alert')" title="点开：要留意的单">
       <div class="lbl">⚠️ 需要留意</div>
       <div class="val">${alertCnt} 单</div>
       <div class="sub">亏本 ${t.loss||0} · 偏低 ${t.warn||0}</div>
@@ -393,37 +531,338 @@ function renderProfitKpi(t){
 
 function renderPayKpi(s){
   document.getElementById('payBox').innerHTML = `
-    <div class="fin-kpi-item positive">
+    <div class="fin-kpi-item positive clickable" onclick="openKpi('pay_paid')" title="点开：已收货款是哪些单">
       <div class="lbl">✅ 已收货款</div>
       <div class="val">${fmtY(s.paid_amount)}</div>
     </div>
-    <div class="fin-kpi-item negative">
+    <div class="fin-kpi-item negative clickable" onclick="openKpi('pay_unpaid')" title="点开：还没收的单">
       <div class="lbl">❌ 未收货款</div>
       <div class="val">${fmtY(s.unpaid_amount)}</div>
       <div class="sub">应收账款</div>
     </div>
-    <div class="fin-kpi-item neutral">
+    <div class="fin-kpi-item neutral clickable" onclick="openKpi('pay_partial')" title="点开：部分收款的单">
       <div class="lbl">⏳ 部分收款</div>
       <div class="val">${fmtY(s.partial_amount)}</div>
     </div>
-    <div class="fin-kpi-item negative">
+    <div class="fin-kpi-item negative clickable" onclick="openKpi('dep_pending')" title="点开：押金还没退的单">
       <div class="lbl">🔒 待退押金</div>
       <div class="val">${fmtY(s.deposit_pending)}</div>
     </div>
-    <div class="fin-kpi-item positive">
+    <div class="fin-kpi-item positive clickable" onclick="openKpi('dep_returned')" title="点开：已退押金的单">
       <div class="lbl">✅ 已退押金</div>
       <div class="val">${fmtY(s.deposit_returned)}</div>
     </div>
-    <div class="fin-kpi-item neutral">
+    <div class="fin-kpi-item neutral clickable" onclick="openKpi('dep_forfeited')" title="点开：扣留押金的单">
       <div class="lbl">⛔ 扣留押金</div>
       <div class="val">${fmtY(s.deposit_forfeited)}</div>
     </div>
-    <div class="fin-kpi-item neutral">
+    <div class="fin-kpi-item neutral clickable" onclick="openKpi('stock')" title="点开：库存占用明细">
       <div class="lbl">📦 库存占用资金</div>
       <div class="val">${fmtY((s.stock_value||0)+(s.tool_stock_value||0))}</div>
       <div class="sub">食材 ${fmtY(s.stock_value||0)} + 工具 ${fmtY(s.tool_stock_value||0)}</div>
     </div>
   `;
+}
+
+// ===== 明细抽屉：点 KPI 数字下钻；明细里可直接改，并跳到相关页面 =====
+let kpiOpenKey = null, kpiOpenKind = null;
+const KIND_UI = [
+  ['food',      '🥩 食材成本',        '套餐用量 × 食材单价（含一次性餐具、包装）'],
+  ['labor',     '👷 打包切配人工',    '首单 + 每多一个 10 人单（单越大越省）'],
+  ['outsource', '🏕️ 搭建/回收外包费', '按人数折算单数 × 场地单价'],
+  ['fuel',      '🚚 配送费',          '配送/跑腿费用'],
+  ['consume',   '🔥 额外耗材',        '炭、气罐这类'],
+  ['other',     '📌 其他开销',        '临时多出来的开销'],
+];
+function kpiEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function ordersOf(){ return (pfData && pfData.orders) || []; }
+function totOf(){ return (pfData && pfData.totals) || {}; }
+function rangeTxt(){
+  const r = getRangeDates();
+  if(!r.from) return '全部时间';
+  if(currentRange === 'day') return r.from;
+  return r.from + ' ~ ' + r.to + (currentRange==='week' ? '（本周）' : '（本月）');
+}
+function kpiEmpty(t){ return `<div class="kpi-empty">${t}</div>`; }
+function paySelect(o){
+  return `<select class="select-mini" onchange="setPay(${o.id}, this.value)">
+    <option value="unpaid" ${o.payment_status==='unpaid'?'selected':''}>未收</option>
+    <option value="partial" ${o.payment_status==='partial'?'selected':''}>部分</option>
+    <option value="paid" ${o.payment_status==='paid'?'selected':''}>已收</option>
+  </select>`;
+}
+function depSelect(o){
+  const cur = (o.deposit_status==='returned'||o.deposit_status==='forfeited') ? o.deposit_status : 'pending';
+  return `<select class="select-mini" onchange="setDep(${o.id}, this.value)">
+    <option value="pending" ${cur==='pending'?'selected':''}>待退</option>
+    <option value="returned" ${cur==='returned'?'selected':''}>已退</option>
+    <option value="forfeited" ${cur==='forfeited'?'selected':''}>扣留</option>
+  </select>`;
+}
+function orderLinks(o){
+  return `<a class="kpi-lk" href="/prep?focus=${o.id}" target="_blank">备餐</a>
+          <a class="kpi-lk" href="/orders" target="_blank">订单</a>
+          <button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="kpiEditCost(${o.id})">改</button>`;
+}
+
+function openKpi(key){
+  kpiOpenKey = key; kpiOpenKind = null;
+  document.getElementById('kpiModal').style.display = 'flex';
+  renderKpiBody();
+}
+function closeKpi(){
+  kpiOpenKey = null;
+  document.getElementById('kpiModal').style.display = 'none';
+}
+function kpiEditCost(oid){ openPf(oid); }        // 复用单笔弹窗（它在更上层）
+function kpiToggleKind(k){ kpiOpenKind = (kpiOpenKind===k) ? null : k; renderKpiBody(); }
+
+function renderKpiBody(){
+  const map = {
+    revenue:     ['💵 收入明细',          kpiRevenue],
+    cost:        ['💸 成本明细',          kpiCost],
+    profit:      ['✅ 现金利润怎么来的',   kpiProfit],
+    net:         ['🏗️ 含固定开销净利',    kpiNet],
+    margin:      ['📊 每单真实毛利率',     kpiMargin],
+    alert:       ['⚠️ 需要留意的单',       kpiAlert],
+    pay_paid:    ['✅ 已收货款',          ()=>kpiPayList('paid')],
+    pay_unpaid:  ['❌ 未收货款（应收）',   ()=>kpiPayList('unpaid')],
+    pay_partial: ['⏳ 部分收款',          ()=>kpiPayList('partial')],
+    dep_pending: ['🔒 待退押金',          ()=>kpiDepList('pending')],
+    dep_returned:['✅ 已退押金',          ()=>kpiDepList('returned')],
+    dep_forfeited:['⛔ 扣留押金',         ()=>kpiDepList('forfeited')],
+    stock:       ['📦 库存占用资金',       kpiStock],
+  };
+  const it = map[kpiOpenKey];
+  if(!it) return;
+  document.getElementById('kpiTitle').textContent = it[0];
+  document.getElementById('kpiSub').innerHTML = rangeTxt() + ' · 和订单页/备餐页同一份数据，改了这里那边同步变';
+  document.getElementById('kpiBody').innerHTML = it[1]();
+}
+
+// —— 收入：多少单、每单情况，可改收款与成本 ——
+function kpiRevenue(){
+  const os = ordersOf(), t = totOf();
+  if(!os.length) return kpiEmpty('这个区间没有订单');
+  const paid = os.filter(o=>o.payment_status==='paid');
+  const rest = os.filter(o=>o.payment_status!=='paid');
+  const rows = os.map(o=>`<tr>
+      <td>${kpiEsc((o.booking_date||'').slice(5))}<div style="font-size:10px;color:#999">${kpiEsc(o.address||'')}</div></td>
+      <td>${kpiEsc(o.contact_name||'-')}</td>
+      <td class="r">${fmtY(o.revenue)}</td>
+      <td>${paySelect(o)}</td>
+      <td class="r k-lite">${fmtY(o.cost_total)}</td>
+      <td class="r k-lite" style="font-weight:700">${fmtY(o.profit)}</td>
+      <td class="r">${orderLinks(o)}</td>
+    </tr>`).join('');
+  return `
+    <div class="kpi-sec">逐单（${os.length} 单）<span class="mini">点「改」调这单成本 · 下拉改收款</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl">
+      <thead><tr><th>日期/场地</th><th>客户</th><th class="r">收入</th><th>收款</th><th class="r k-lite">成本</th><th class="r k-lite">利润</th><th class="r">操作</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div>
+    <div class="kpi-line total"><span>收入合计（${os.length} 单）</span><span>${fmtY(t.revenue)}</span></div>
+    <div class="kpi-line"><span class="nm">其中已收</span><span>${fmtY(paid.reduce((s,o)=>s+(o.revenue||0),0))} · ${paid.length} 单</span></div>
+    <div class="kpi-line"><span class="nm">未收 / 部分</span><span>${fmtY(rest.reduce((s,o)=>s+(o.revenue||0),0))} · ${rest.length} 单</span></div>
+    <div class="kpi-line"><span class="nm">平均每单收入</span><span>${fmtY(os.length ? (t.revenue||0)/os.length : 0)}</span></div>
+    <div class="kpi-note">💡 收入＝订单的实收货款（押金是代收要退的，不算收入）。改收款状态：上方下拉或订单页；改这单成本：点「改」。</div>
+  `;
+}
+
+// —— 成本：按类型分项 + 逐单，可跳设置改参数 ——
+function kpiCost(){
+  const os = ordersOf(), t = totOf(), bk = t.by_kind || {};
+  if(!os.length) return kpiEmpty('这个区间没有订单');
+  const total = KIND_UI.reduce((s,[k])=> s + (bk[k]||0), 0) || 1;
+  const rows = KIND_UI.map(([k,label,hint])=>{
+    const amt = bk[k] || 0;
+    const who = os.filter(o=> (o.by_kind||{})[k]);
+    const open = kpiOpenKind === k;
+    const sub = open ? `<tr class="sub"><td colspan="4">${
+      who.map(o=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0">
+          <span>${kpiEsc(o.contact_name||'-')} <span style="color:#aaa">${kpiEsc((o.booking_date||'').slice(5))}</span></span>
+          <span style="display:flex;align-items:center;gap:6px">${fmtY((o.by_kind||{})[k])}
+            <button class="btn btn-sm" style="font-size:10px;padding:1px 6px" onclick="kpiEditCost(${o.id})">改</button></span>
+        </div>`).join('') || '<div class="muted">无</div>'
+    }</td></tr>` : '';
+    return `<tr>
+        <td><b>${label}</b><div style="font-size:10px;color:#999;white-space:normal">${hint}</div>
+            <div class="kpi-bar"><i style="width:${(amt/total*100).toFixed(1)}%"></i></div></td>
+        <td class="r" style="font-weight:700">${fmtY(amt)}</td>
+        <td class="r">${(amt/total*100).toFixed(0)}%</td>
+        <td class="r"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="kpiToggleKind('${k}')">${open?'收起':('逐单 '+who.length)}</button></td>
+      </tr>${sub}`;
+  }).join('');
+  return `
+    <div class="kpi-sec">按成本类型<span class="mini">点「逐单 N」看是哪些单，点「改」调单笔</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>成本项</th><th class="r">金额</th><th class="r">占比</th><th class="r"></th></tr></thead>
+      <tbody>${rows}</tbody></table></div></div>
+    <div class="kpi-line total"><span>成本合计</span><span>${fmtY(t.cost)}</span></div>
+    <div class="kpi-line"><span class="nm">平均每单成本</span><span>${fmtY(os.length ? (t.cost||0)/os.length : 0)}</span></div>
+    ${(t.fixed_alloc>0) ? `<div class="kpi-line"><span class="nm">其中：固定开销摊销（每单 ${fmtY(t.fixed_alloc_per_order)}）</span><span>${fmtY(t.fixed_alloc)}</span></div>` : ''}
+    <div class="kpi-act">
+      <button class="btn btn-sm btn-primary" onclick="gotoCostCfg('place')">⚙️ 改场地单价</button>
+      <button class="btn btn-sm" onclick="gotoCostCfg('labor')">👷 改人工参数</button>
+      <button class="btn btn-sm" onclick="gotoCostCfg('fixed')">🏗️ 改固定开销</button>
+      <button class="btn btn-sm" onclick="gotoCostCfg('ing')">🥩 改食材单价</button>
+    </div>
+    <div class="kpi-note">💡 食材成本自动跟着「食材单价」和套餐用量走；人工/场地/固定开销是参数，改了立刻影响所有单。单笔多用可点「改」单独调（不影响其他单）。</div>
+  `;
+}
+
+// —— 利润：收入 − 成本 = 现金利润 ——
+function kpiProfit(){
+  const os = ordersOf(), t = totOf();
+  if(!os.length) return kpiEmpty('这个区间没有订单');
+  const mbase = t.margin_base || 0;
+  const list = os.slice().sort((a,b)=> (a.profit||0) - (b.profit||0));
+  const worst = list.slice(0, 8);
+  return `
+    <div class="kpi-sec">钱的流向</div>
+    <div class="kpi-line"><span class="nm">💵 收入（实收货款）</span><span class="amt">${fmtY(t.revenue)}</span></div>
+    <div class="kpi-line"><span class="nm">💸 － 成本合计<div class="hint">食材 + 人工 + 搭建 + 配送 + 耗材 + 其他</div></span><span class="amt" style="color:#c0392b">${fmtY(-(t.cost||0))}</span></div>
+    <div class="kpi-line total"><span>＝ 现金利润</span><span style="color:${(t.profit||0)>=0?'#27ae60':'#c0392b'}">${fmtY(t.profit)}</span></div>
+    <div class="kpi-line"><span class="nm">真实毛利率<div class="hint">利润 ÷（收入 − 代收代付的配送搭建费 ${fmtY(t.delivery)}）</div></span><span class="amt">${t.margin||0}%</span></div>
+    <div class="kpi-line"><span class="nm">平均每单利润</span><span class="amt">${fmtY(os.length ? (t.profit||0)/os.length : 0)}</span></div>
+    <div class="kpi-sec">最不赚钱的几单</div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">操作</th></tr></thead>
+      <tbody>${worst.map(o=>`<tr>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
+        <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#27ae60'}">${fmtY(o.profit)}</td>
+        <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="kpi-note">💡 现金利润＝实际到手的钱；没算装备折旧、场地月租摊销——那部分看下一项「含固定开销净利」。</div>
+  `;
+}
+
+// —— 净利：现金利润 − 固定开销摊销 ——
+function kpiNet(){
+  const os = ordersOf(), t = totOf();
+  const fm = t.fixed_monthly || 0;
+  const per = t.fixed_alloc_per_order || 0;
+  return `
+    <div class="kpi-sec">净利怎么算的</div>
+    <div class="kpi-line"><span class="nm">现金利润</span><span class="amt">${fmtY(t.profit)}</span></div>
+    <div class="kpi-line"><span class="nm">🏗️ － 固定开销摊销<div class="hint">每月固定开销 ${fmtY(fm)} ÷ 摊销单数 = 每单 ${fmtY(per)}</div></span>
+      <span class="amt" style="color:#c0392b">${fm>0 ? fmtY(-(t.fixed_alloc||0)) : '¥0（未设置）'}</span></div>
+    <div class="kpi-line total"><span>＝ 净利（含固定开销）</span><span style="color:${(t.net||0)>=0?'#27ae60':'#c0392b'}">${fmtY(t.net)}</span></div>
+    <div class="kpi-line"><span class="nm">本期单数</span><span>${os.length} 单</span></div>
+    ${fm<=0 ? `<div class="kpi-note">⚠️ 你还没填「每月固定开销」（装备折旧、工具添置、场地月租这类），所以净利＝现金利润，偏乐观。<br>
+      想算清楚，点下面的按钮填一个月度数。</div>` : ''}
+    <div class="kpi-act">
+      <button class="btn btn-sm btn-primary" onclick="gotoCostCfg('fixed')">🏗️ 改固定开销 / 警戒线</button>
+    </div>
+  `;
+}
+
+// —— 毛利率：逐单 ——
+function kpiMargin(){
+  const os = ordersOf(), t = totOf();
+  if(!os.length) return kpiEmpty('这个区间没有订单');
+  const alert = t.margin_alert || 40;
+  const list = os.slice().sort((a,b)=> (a.margin||0) - (b.margin||0));
+  return `
+    <div class="kpi-sec">逐单真实毛利率（低的在前）<span class="mini">警戒线 ${alert}%</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">利润</th><th class="r">毛利率</th><th class="r">操作</th></tr></thead>
+      <tbody>${list.map(o=>`<tr>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td class="r">${fmtY(o.profit)}</td>
+        <td class="r"><span class="pf-tag ${pfTagCls(o.alert)}">${o.margin}%</span></td>
+        <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="kpi-line total"><span>平均毛利率</span><span>${t.avg_margin||0}%</span></div>
+    <div class="kpi-note">💡 毛利率分母扣掉了代收代付的配送搭建费，比"利润÷收入"更贴近真实。低于 ${alert}% 标黄、亏本标红。</div>
+  `;
+}
+
+// —— 需要留意 ——
+function kpiAlert(){
+  const os = ordersOf(), t = totOf();
+  const loss = os.filter(o=>o.alert==='loss');
+  const warn = os.filter(o=>o.alert==='warn');
+  if(!loss.length && !warn.length) return kpiEmpty('👍 这个区间没有亏本或偏低的单');
+  const tbl = (arr, title) => arr.length ? `
+    <div class="kpi-sec">${title}（${arr.length} 单）</div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">毛利率</th><th class="r">操作</th></tr></thead>
+      <tbody>${arr.map(o=>`<tr>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
+        <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#b95c00'}">${fmtY(o.profit)}</td>
+        <td class="r">${o.margin}%</td>
+        <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>` : '';
+  return tbl(loss,'🚨 亏本') + tbl(warn,'⚠️ 毛利率偏低')
+    + `<div class="kpi-note">💡 常见原因：成本项填错、套餐价偏低、搭建单数多算、食材单价该更新。点「改」进单笔核对。</div>`;
+}
+
+// —— 货款 / 押金 列表（可直接改） ——
+function kpiPayList(st){
+  const os = ordersOf().filter(o=>o.payment_status===st);
+  if(!os.length) return kpiEmpty('这个区间没有这类订单');
+  const sum = os.reduce((s,o)=> s+(o.revenue||0), 0);
+  const title = {paid:'已收货款', unpaid:'未收货款（应收）', partial:'部分收款'}[st];
+  return `
+    <div class="kpi-sec">${title}（${os.length} 单）<span class="mini">下拉可直接改</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">金额</th><th>收款</th><th class="r">操作</th></tr></thead>
+      <tbody>${os.map(o=>`<tr>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td class="r">${fmtY(o.revenue)}</td><td>${paySelect(o)}</td><td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="kpi-line total"><span>合计（${os.length} 单）</span><span>${fmtY(sum)}</span></div>
+    ${st==='unpaid' ? '<div class="kpi-note">💡 这是应收账款——单子做了但钱还没到。催收后在这里把状态改成「已收」，财务数字会同步更新。</div>' : ''}
+  `;
+}
+function kpiDepList(st){
+  const os = ordersOf().filter(o=>{
+    const cur = (o.deposit_status==='returned'||o.deposit_status==='forfeited') ? o.deposit_status : 'pending';
+    return cur === st;
+  });
+  if(!os.length) return kpiEmpty('这个区间没有这类押金');
+  const sum = os.reduce((s,o)=> s+(o.deposit||0), 0);
+  const title = {pending:'待退押金（客户还没退还餐具）', returned:'已退押金', forfeited:'扣留押金（转收入/赔偿）'}[st];
+  return `
+    <div class="kpi-sec">${title}（${os.length} 单）</div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">押金</th><th>状态</th><th class="r">操作</th></tr></thead>
+      <tbody>${os.map(o=>`<tr>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td class="r">${fmtY(o.deposit)}</td><td>${depSelect(o)}</td><td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="kpi-line total"><span>合计（${os.length} 单）</span><span>${fmtY(sum)}</span></div>
+    <div class="kpi-note">💡 押金不属于收入（要退给客户）；只有「扣留」那部分才算补偿收入。餐具回收后记得把状态改成「已退」。</div>
+  `;
+}
+
+// —— 库存占用 ——
+function kpiStock(){
+  const s = payData || {};
+  const food = s.stock_value || 0, tool = s.tool_stock_value || 0;
+  return `
+    <div class="kpi-sec">压在库存上的钱</div>
+    <div class="kpi-line"><span class="nm">🥩 食材库存价值<div class="hint">现存食材数量 × 采购单价</div></span><span class="amt">${fmtY(food)}</span></div>
+    <div class="kpi-line"><span class="nm">🔧 工具/装备库存价值</span><span class="amt">${fmtY(tool)}</span></div>
+    <div class="kpi-line total"><span>合计占用资金</span><span>${fmtY(food+tool)}</span></div>
+    <div class="kpi-act">
+      <a class="btn btn-sm btn-primary" href="/config" target="_blank">📦 去库存页看明细</a>
+      <a class="btn btn-sm" href="/menu" target="_blank">🥩 食材单价管理</a>
+    </div>
+    <div class="kpi-note">💡 库存不是费用，是"压在货上的钱"。想少占资金就少囤、快周转；损耗对账（实际出库 vs 理论用量）攒够出库记录后能看出漏在哪。</div>
+  `;
+}
+
+// 跳到下方设置区并高亮（明细抽屉里的"去改"入口）
+function gotoCostCfg(target){
+  closeKpi();
+  const focusEl = {'place':document.getElementById('placeBox'),
+                   'labor':document.getElementById('cfgLabor'),
+                   'fixed':document.getElementById('cfgFixedMonthly'),
+                   'ing':null}[target];
+  const card = (target==='ing') ? document.getElementById('ingCard') : document.getElementById('cfgCard');
+  const node = card || focusEl;
+  if(node){
+    node.scrollIntoView({behavior:'smooth', block:'center'});
+    node.style.transition = 'box-shadow .3s';
+    node.style.boxShadow = '0 0 0 3px #f0b16a';
+    setTimeout(()=>{ node.style.boxShadow = ''; }, 1800);
+  }
+  if(focusEl && focusEl.focus) setTimeout(()=>{ try{ focusEl.focus(); }catch(e){} }, 450);
 }
 
 function renderProfitOrders(orders){

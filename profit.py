@@ -340,13 +340,24 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
     rows = cur.execute("SELECT o.id FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
-                       "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0}
+                       "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
+                       "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
+                       "fuel_cost": 0.0, "consume_cost": 0.0, "other_cost": 0.0,
+                       "fixed_alloc": 0.0}
+    by_kind = {}
     for r in rows:
         p = order_profit(db, r["id"], cfg)
         if not p:
             continue
         food = next((i["amount"] for i in p["items"] if i["kind"] == "food"), 0.0)
         other = round(p["cost_total"] - food, 2)
+        # 按成本类型汇总（供财务页"成本明细"逐项展开）
+        bk = {}
+        for it in p["items"]:
+            k = it.get("kind") or "other"
+            bk[k] = round(bk.get(k, 0.0) + float(it.get("amount") or 0), 2)
+        for k, v in bk.items():
+            by_kind[k] = round(by_kind.get(k, 0.0) + v, 2)
         tot["revenue"] += p["revenue"]
         tot["food"] += food
         tot["other"] += other
@@ -354,6 +365,13 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
         tot["profit"] += p["cash_profit"]
         tot["net"] += p["net_profit"]
         tot["delivery"] += p.get("delivery_passthrough", 0.0)
+        tot["food_cost"] += bk.get("food", 0.0)
+        tot["labor_cost"] += bk.get("labor", 0.0)
+        tot["outsource_cost"] += bk.get("outsource", 0.0)
+        tot["fuel_cost"] += bk.get("fuel", 0.0)
+        tot["consume_cost"] += bk.get("consume", 0.0)
+        tot["other_cost"] += bk.get("other", 0.0)
+        tot["fixed_alloc"] += p.get("fixed_alloc", 0.0)
         if p["alert"] == "loss":
             tot["loss"] += 1
         elif p["alert"] == "warn":
@@ -366,9 +384,12 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
             "payment_status": p["payment_status"],
             "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"],
+            "fixed_alloc": p.get("fixed_alloc", 0.0),
+            "by_kind": bk,                      # 这一单的成本分项（供"成本明细"逐单展开）
         })
     tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
     tot["order_cnt"] = len(orders)
+    tot["by_kind"] = {k: round(v, 2) for k, v in by_kind.items()}
     _mbase = tot["revenue"] - tot["delivery"]
     tot["margin_base"] = round(_mbase, 2)
     tot["margin"] = round(tot["profit"] / _mbase * 100, 1) if _mbase > 0 else 0.0

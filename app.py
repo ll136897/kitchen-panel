@@ -3369,6 +3369,24 @@ def finance_profit_overview():
     return jsonify({"ok": True, "data": ov})
 
 
+@app.route("/api/finance/dates")
+def finance_dates():
+    """有账的日期（供财务页日期条一键切换）：每天的单数、收入合计。
+
+    只统计未取消、未删除的订单；收入按实收货款（amount）汇总。
+    """
+    rows = g.db.execute("""
+        SELECT booking_date AS d, COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS amt
+        FROM orders
+        WHERE status!='cancelled' AND deleted_at IS NULL AND booking_date IS NOT NULL AND booking_date!=''
+        GROUP BY booking_date
+        ORDER BY booking_date DESC
+    """).fetchall()
+    return jsonify({"ok": True, "data": [
+        {"date": r["d"], "cnt": r["cnt"], "amount": round(float(r["amt"] or 0), 2)} for r in rows
+    ]})
+
+
 @app.route("/api/finance/payment/<int:oid>", methods=["POST"])
 def update_payment(oid):
     """更新订单货款状态"""
