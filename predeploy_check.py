@@ -53,15 +53,27 @@ def warn(name, detail=""):
 
 
 def force_delete(path):
-    """Windows 下 rm/os.remove 会被沙箱拦，用 Win32 API 直接删"""
-    try:
-        import ctypes
-        ctypes.windll.kernel32.DeleteFileW(os.path.abspath(path))
-    except Exception:
+    """Windows 下 rm/os.remove 会被沙箱拦，用 Win32 API 直接删
+
+    注意：Windows 上文件被占用时删除会**静默失败**（返回 0），所以这里重试几次，
+    否则会留下 _predeploy_check.db 之类的残留（sqlite 连接刚关、句柄还没释放）
+    """
+    import time as _t
+    p = os.path.abspath(path)
+    for i in range(5):
         try:
-            os.remove(path)
+            import ctypes
+            if ctypes.windll.kernel32.DeleteFileW(p):
+                return
         except Exception:
-            pass
+            try:
+                os.remove(p)
+                return
+            except Exception:
+                pass
+        if not os.path.exists(p):
+            return
+        _t.sleep(0.4 * (i + 1))
 
 
 def run(cmd, **kw):
@@ -214,6 +226,35 @@ def check_boot():
     env.pop("GITHUB_TOKEN", None)
     # 给个固定默认管理员密码，自检才能以老板身份登录、带会话测受保护页
     env.setdefault("ADMIN_PW", "kaorou888")
+
+    # 在**数据库副本**上跑自检（2026-10-02 加）：
+    # 以前直接用 kitchen.db，可线上库恢复过来后管理员密码已被用户改过 →
+    # 自检用默认密码登录必然 401，后面所有"带会话"的检查全部跳过，报一堆假失败。
+    # 现在复制一份、清空 users（app 启动时会用 ADMIN_PW 重建老板号），
+    # 既不动线上库，又能拿着真实数据量测页面/接口。
+    tmp_db = os.path.join(HERE, "_predeploy_check.db")
+    if os.path.exists(DB):
+        import shutil as _shutil
+        for suf in ("", "-wal", "-shm"):
+            force_delete(tmp_db + suf)
+        _shutil.copy2(DB, tmp_db)
+        _c = None
+        try:
+            # ⚠️ `with sqlite3.connect(...)` 只负责 commit，**不会关闭连接**（本项目踩过的坑），
+            # 连接不关 → 副本文件被本进程占住 → 后面删不掉、留下残留
+            _c = sqlite3.connect(tmp_db)
+            _c.execute("DELETE FROM users")
+            _c.commit()
+            print("     · 自检库：kitchen.db 副本（已清空 users，启动时重建 admin）")
+        except Exception as e:
+            print("     · 自检库：副本可用，但清空 users 失败（%s）" % e)
+        finally:
+            if _c is not None:
+                _c.close()
+        env["KITCHEN_DB_PATH"] = tmp_db
+    else:
+        print("     · 自检库：没有 kitchen.db，用全新空库")
+
     logf = open(os.path.join(HERE, "_predeploy_server.log"), "w", encoding="utf-8")
     proc = subprocess.Popen([PY, "app.py"], cwd=HERE, env=env,
                             stdout=logf, stderr=subprocess.STDOUT)
@@ -320,6 +361,8 @@ def check_boot():
             proc.kill()
         logf.close()
         force_delete(os.path.join(HERE, "_predeploy_server.log"))
+        for suf in ("", "-wal", "-shm"):
+            force_delete(tmp_db + suf)
 
 
 def _dump_log(only_errors=False):

@@ -3,7 +3,9 @@ import sqlite3
 import os
 from contextlib import closing
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "kitchen.db")
+# 默认用项目目录下的 kitchen.db；可用环境变量 KITCHEN_DB_PATH 指向别的库
+# （部署前自检 predeploy_check.py 会指向一份副本，这样既不动线上库、又能测真实数据量）
+DB_PATH = os.environ.get("KITCHEN_DB_PATH") or os.path.join(os.path.dirname(__file__), "kitchen.db")
 
 
 class _ClosingConn(sqlite3.Connection):
