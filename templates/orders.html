@@ -50,6 +50,7 @@
   .sort-chip:hover{filter:brightness(.97)}
   .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .sort-sep{width:1px;height:16px;background:var(--border);margin:0 2px}
+  .sort-hint{flex-basis:100%;font-size:11px;color:#9a3412;opacity:.85;margin-top:-2px}
   /* 按月分组：月份条可展开/收回 */
   .month-group{margin-bottom:8px}
   .month-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border:1px solid var(--border);border-radius:10px;cursor:pointer;user-select:none;font-weight:700;color:#5a4a3a}
@@ -111,9 +112,10 @@
   <div class="date-chips" id="orderDateChips"></div>
   <div class="sort-chips" id="orderSortChips">
     <span class="sort-label">排序</span>
-    <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="按出餐日期+时间从早到晚，上午的排在上面">📅 出餐日期·早→晚</button>
+    <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="最近的日期在最上面；同一天里按出餐时间 上午→下午">📅 出餐日期·最近在上</button>
     <button class="sort-chip" data-mode="join" onclick="setSort('join')" title="按录入先后，最后加入的在最上面">🆔 加入顺序·最新在上</button>
     <span class="sort-sep"></span>
+    <span class="sort-hint" id="sortHint"></span>
     <button class="sort-chip active" id="monthChip" onclick="toggleMonthMode()">📆 按月分组</button>
     <button class="sort-chip" id="collapseAllChip" onclick="toggleCollapseAll()">⇕ 全部收起</button>
   </div>
@@ -198,6 +200,8 @@ function orderDt(o){
 }
 // 出餐时间（卡片上大字显示的那个）——排序也用同一口径，避免"看到的和排的不一致"
 function orderTime(o){ return (o.meal_time || o.booking_time || o.pickup_time || ''); }
+// 排序用的"时间"部分：没填时间的单放当天最后
+function orderTm(o){ return orderTime(o) || '99:99'; }
 // date 是否落在以 anchorDate 为基准的 周/月 范围内
 function inScope(dateStr, anchorDate, scope){
   if(!dateStr || !anchorDate) return false;
@@ -325,6 +329,10 @@ function renderSortChips(){
   const box = document.getElementById('orderSortChips');
   if(!box) return;
   box.querySelectorAll('.sort-chip[data-mode]').forEach(b=>b.classList.toggle('active', b.dataset.mode===sortMode));
+  const sh = document.getElementById('sortHint');
+  if(sh) sh.textContent = (sortMode==='join')
+    ? '当前：最后加入的排最上面；新单会出现在第一位'
+    : '当前：最近的日期在最上面；同一天里按出餐时间 上午→下午';
 }
 function joinKey(o){ return o.created_at || ('0000000000'+(o.id||0)).slice(-10); }
 
@@ -492,12 +500,14 @@ function renderOrders(){
     } else hint.style.display='none';
   }
   // 排序
-  //  · 出餐日期：按 出餐日期+时间 从早到晚（同一天里，上午的在上、下午的在下）
+  //  · 出餐日期：**最近的日期在最上面**（今天/最近的在最前）；同一天里按时间 上午→下午
   //  · 加入顺序：按录入先后，**最后加入的在最上面**
   list = list.slice().sort((a,b)=>{
     if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return cb<ca?-1:(cb>ca?1:0); }
-    const da=orderDt(a), db=orderDt(b);
-    return da<db?-1:(da>db?1:0);
+    const da = a.booking_date || '', db = b.booking_date || '';
+    if(da !== db) return da < db ? 1 : -1;          // 日期：近的在上
+    const ta = orderTm(a), tb = orderTm(b);
+    return ta < tb ? -1 : (ta > tb ? 1 : 0);        // 同一天：时间早→晚
   });
 
   if(!groupField){
