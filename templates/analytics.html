@@ -162,7 +162,7 @@ function setGran(g){
   document.querySelectorAll('#anGranTabs .an-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.g === g); });
   loadAn();
 }
-// 录入人筛选：全部 / 我录的 / 某人录的（两人的单都算进系统，但可以分开看）
+// 署名筛选：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）
 function setBy(v){ anBy = v; loadAn(); }
 function anPrettyName(n){
   n = (n || '').trim();
@@ -178,10 +178,10 @@ function renderByRow(){
   const mine = (AN_CUR && AN_CUR.id) ? String(AN_CUR.id) : '';
   const total = cs.reduce(function(s, c){ return s + c.orders; }, 0);
   el.style.display = 'block';
-  el.innerHTML = '<span style="font-weight:700;color:#9a3412">录入人</span> ' +
+  el.innerHTML = '<span style="font-weight:700;color:#9a3412">署名</span> ' +
     '<button class="an-tab' + (anBy === '' ? ' active' : '') + '" onclick="setBy(\'\')">全部 ' + total + '</button> ' +
     cs.map(function(c){
-      const label = (c.id && c.id === mine) ? ('我录的 ' + c.orders) : (anPrettyName(c.name) + ' ' + c.orders);
+      const label = (c.id && c.id === mine) ? ('我署名的 ' + c.orders) : (anPrettyName(c.name) + ' ' + c.orders);
       const val = (c.id && c.id === mine) ? 'me' : (c.id === '' ? '0' : c.id);
       return '<button class="an-tab' + (anBy === val ? ' active' : '') + '" onclick="setBy(\'' + val + '\')">' +
              anEsc(label) + '</button>';

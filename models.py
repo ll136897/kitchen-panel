@@ -252,7 +252,17 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN stock_deducted_at TEXT")
         if "discount" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0")
-        # 录入人（2026-10-02）：订单归属到"谁录的"，用于权限（店员只能改自己录的单）
+        # 实际录入人（2026-10-02 晚）：谁在系统里敲进这一单，纯审计用。
+        # 和 created_by 的区别：created_by = **署名**（这单算谁的，可以在录入时选给另一个人，
+        # 也可以事后改），entered_by = 真正操作的人（代对方录单时两者不同）。
+        # 权限只看署名（created_by）；entered_by 只在订单详情里提示"由谁代录"。
+        if "entered_by" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN entered_by INTEGER")
+        if "entered_by_name" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN entered_by_name TEXT")
+        # 老数据：created_by 当初既是"录入人"也是"归属"，两者补成一致
+        # （放在下面 created_by 建好之后再补，见后文）
+        # 署名（2026-10-02）：订单归属到"谁的署名"，用于权限（只能改自己署名的单）+ 独立统计
         _was_created_by = "created_by" in cols
         if not _was_created_by:
             cur.execute("ALTER TABLE orders ADD COLUMN created_by INTEGER")
@@ -272,6 +282,12 @@ def init_db():
                     print("[迁移] 历史订单已归到老板名下：%s" % (_boss["name"] or _boss["id"]))
             except Exception as _e:
                 print("[迁移] 历史订单归属跳过：", _e)
+        # 老数据的 entered_by 补成和署名一致（当初两者就是一个字段）
+        try:
+            cur.execute("UPDATE orders SET entered_by=created_by, entered_by_name=created_by_name "
+                        "WHERE entered_by IS NULL AND created_by IS NOT NULL")
+        except Exception as _e2:
+            print("[迁移] entered_by 回填跳过：", _e2)
 
         # 订单→套餐明细
         cur.execute("""

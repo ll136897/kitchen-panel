@@ -43,7 +43,7 @@
   <label>角色</label>
   <select id="nr">
     <option value="boss" selected>老板（全权限，含改原数据/配置）</option>
-    <option value="partner">合伙人（页面功能全都能用；不能改原数据、不能改别人录的订单）</option>
+    <option value="partner">合伙人（页面功能全都能用；不能改原数据、不能改别人署名的订单）</option>
     <option value="staff">店员/帮手（仅订单/备餐/库存）</option>
   </select>
   <label>初始密码</label>
@@ -76,7 +76,7 @@
   <div class="msg" id="pwMsg"></div>
 </div>
 
-<p class="tip">说明：<b>老板</b>全权限；<b>合伙人</b>所有页面都能看、功能都能用，但改不了「原数据/配置」（食材单价、套餐、设置、成本参数、账号）和<b>别人录的订单</b>；<b>店员</b>只能看到「订单 / 备餐 / 库存」。禁用等于停用该账号（数据保留）。</p>
+<p class="tip">说明：<b>老板</b>全权限；<b>合伙人</b>所有页面都能看、功能都能用，但改不了「原数据/配置」（食材单价、套餐、设置、成本参数、账号）和<b>别人署名的订单</b>；<b>店员</b>只能看到「订单 / 备餐 / 库存」。禁用等于停用该账号（数据保留）。</p>
 
 <script>
 async function load(){

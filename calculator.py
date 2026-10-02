@@ -459,11 +459,15 @@ def calc_order_requirements(order_id):
     return {"ingredients": ingredients_result, "tools": sort_tools(tools_result, "need")}
 
 
-def calc_dashboard():
+def calc_dashboard(signer_clause="", signer_params=()):
     """
     全局库存面板数据。
     套餐可备份数：按该套餐每套餐所需食材，用剩余库存（减已汇总需求）反算。
+
+    signer_clause / signer_params：按"署名"筛选（orders.created_by），只作用于
+    **今日订单/今日营收/待备预约列表**；库存面板与告警仍是全店口径（库存是共用的）。
     """
+    _sp = tuple(signer_params or ())
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM orders WHERE status IN ('pending','preparing') AND deleted_at IS NULL")
@@ -474,11 +478,12 @@ def calc_dashboard():
         # 已取消的单单独计数，供前端提示，避免"数字比列表多"造成"丢单"误解。
         _today = today_cst().isoformat()
         cur.execute("SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as amt "
-                    "FROM orders WHERE booking_date = ? AND status != 'cancelled' AND deleted_at IS NULL",
-                    (_today,))
+                    "FROM orders WHERE booking_date = ? AND status != 'cancelled' AND deleted_at IS NULL"
+                    + signer_clause,
+                    (_today,) + _sp)
         today = cur.fetchone()
         cur.execute("SELECT COUNT(*) FROM orders WHERE booking_date = ? AND status = 'cancelled' "
-                    "AND deleted_at IS NULL", (_today,))
+                    "AND deleted_at IS NULL" + signer_clause, (_today,) + _sp)
         today_cancelled_count = cur.fetchone()[0]
         cur.execute("SELECT status, COUNT(*) as c FROM orders WHERE deleted_at IS NULL GROUP BY status")
         status_map = {r["status"]: r["c"] for r in cur.fetchall()}
@@ -583,13 +588,14 @@ def calc_dashboard():
         cur = conn.cursor()
         cur.execute("""
             SELECT id, booking_date, booking_time, meal_time, address, contact_name,
-                   contact_phone, amount, status, note
+                   contact_phone, amount, status, note, created_by, created_by_name
             FROM orders
             WHERE status IN ('pending','preparing')
               AND deleted_at IS NULL
               AND booking_date IS NOT NULL AND booking_date != ''
+        """ + signer_clause + """
             ORDER BY booking_date, booking_time
-        """)
+        """, _sp)
         for r in cur.fetchall():
             o = dict(r)
             cur.execute("""

@@ -307,7 +307,7 @@
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="date" id="datePick" class="date-picker" onchange="onDatePicked()">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
-      <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value))">📥 导出备餐表(Excel)</button>
+      <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value)+(prepBy?('&by='+encodeURIComponent(prepBy)):''))">📥 导出备餐表(Excel)</button>
       <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。
            详细说明只在电脑端显示（手机端只看颜色和数字），点一下开关。 -->
       <button id="kaBtn" class="ka-chip" onclick="toggleKeepAlive()"
@@ -327,6 +327,9 @@
   <!-- 备餐保活：防手机锁屏 + 每 5 分钟给系统发心跳，避免它休眠 -->
   <!-- 有备餐订单的日期快捷切换条 -->
   <div class="date-chips" id="dateChips"></div>
+
+  <!-- 署名筛选：默认全部，可按"我署名的 / 某人署名的"分开看 -->
+  <div class="sign-bar" id="prepSignBar" style="display:none"></div>
 
   <!-- 用的是"上次缓存的数据"时在这里说明（系统唤醒期间也能先干活） -->
   <div id="prepStale" style="font-size:12px;color:#8a4b00;font-weight:600;margin:-4px 0 10px"></div>
@@ -390,6 +393,32 @@ const CAT_LABEL = {
   staple:'🍚 主食', other:'📦 其他', tool:'🔧 工具'
 };
 const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
+
+// ===== 署名筛选（这单算谁的）：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）=====
+const CUR_USER = {{ (cur_user or {})|tojson }};
+let SIGNERS = [];
+let prepBy = '';
+function renderPrepSignBar(){
+  const el = document.getElementById('prepSignBar');
+  if(!el) return;
+  if(SIGNERS.length < 2){ el.style.display='none'; return; }
+  let html = '<span class="sign-lbl">署名</span>' +
+    '<button class="sign-chip '+(prepBy===''?'active':'')+'" onclick="setPrepBy(\'\')">全部</button>';
+  SIGNERS.forEach(function(u){
+    const v = u.is_me ? 'me' : String(u.id);
+    const label = u.is_me ? '我署名的' : u.name;
+    html += '<button class="sign-chip '+(prepBy===v?'active':'')+'" onclick="setPrepBy(\''+v+'\')">👤 '+label+'</button>';
+  });
+  el.innerHTML = html;
+  el.style.display = '';
+}
+function setPrepBy(v){ prepBy = v; renderPrepSignBar(); loadPrepDates(false); loadPrep(); }
+function loadSigners(){
+  return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(function(d){
+    SIGNERS = (d && d.data) || [];
+    renderPrepSignBar();
+  }).catch(function(){ SIGNERS = []; });
+}
 // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
 const FIXED_ORDER = [
   ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
@@ -610,7 +639,7 @@ function prepStaleNote(txt){
 }
 
 function loadPrepDates(autoSwitch){
-  return fetchJSONRetry('/api/prep/dates').then(res=>{
+  return fetchJSONRetry('/api/prep/dates' + (prepBy ? ('?by='+encodeURIComponent(prepBy)) : '')).then(res=>{
     if(!res || !res.ok){
       const box = document.getElementById('dateChips');
       if(box) box.innerHTML = '<div class="muted" style="padding:6px;font-size:14px">'+
@@ -817,7 +846,7 @@ function loadPrep(){
     const mins = Math.max(1, Math.round((Date.now() - cached.t) / 60000));
     prepStaleNote('⏳ ' + mins + ' 分钟前的数据，正在取最新…');
   }
-  return fetchJSONRetry('/api/prep/merged?date='+d).then(d2=>{
+  return fetchJSONRetry('/api/prep/merged?date='+d + (prepBy ? ('&by='+encodeURIComponent(prepBy)) : '')).then(d2=>{
     if(!d2 || !d2.ok){
       const box = document.getElementById('ordersList');
       const haveCache = !!cached;
@@ -1398,6 +1427,7 @@ loadPrepDates(true).then(()=>{
     if(!isNaN(foid)) enterFocus(foid);
   }
 });   // 首次加载，自动切到有订单的日期
+loadSigners();   // 加载"署名"候选（老板+合伙人），用于筛选条
 setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）

@@ -52,9 +52,9 @@
       <label>👤 联系人<input type="text" id="edName"></label>
       <label>📞 电话<input type="tel" id="edPhone"></label>
       <label style="grid-column:1/-1">📍 地址<input type="text" id="edAddr"></label>
-      <label id="edOwnerWrap" style="display:none;grid-column:1/-1">👤 录入人（这单算谁的）
+      <label id="edOwnerWrap" style="display:none;grid-column:1/-1">👤 署名（这单算谁的）
         <select id="edOwner" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
-        <span class="edit-hint">只有老板能改。改完这单就归到那个人名下（她/他就能自己改了）</span>
+        <span class="edit-hint">改成谁，这单就归到谁名下（他就成了能改的人，你如果改给别人就改不动了）。另外一方也能在这里把单署回给自己。</span>
       </label>
     </div>
     <div class="edit-hint" id="calcHint" style="margin-top:8px;font-size:13px;font-weight:600;color:#8a5a2b"></div>
@@ -120,8 +120,8 @@ function prettyName(n){
 }
 function ownerText(o){
   if(!o) return '-';
-  if(o.created_by && CUR_USER && o.created_by === CUR_USER.id) return '我录的';
-  return o.created_by ? (prettyName(o.created_by_name) + ' 录的') : '未标注';
+  if(o.created_by && CUR_USER && o.created_by === CUR_USER.id) return '我署名的';
+  return o.created_by ? (prettyName(o.created_by_name) + ' 署名的') : '未标注';
 }
 // 没有权限时：藏掉"编辑本单"，换成一句说明（服务端也会拦，这里只是别让人白点）
 function applyPermUI(o){
@@ -131,7 +131,7 @@ function applyPermUI(o){
   if(btn) btn.style.display = ok ? '' : 'none';
   if(note){
     note.style.display = ok ? 'none' : 'inline-block';
-    note.textContent = ok ? '' : ('🔒 这单是「' + (o.created_by_name || '别人') + '」录的，你只能查看（备餐/出餐单照常可用）');
+    note.textContent = ok ? '' : ('🔒 这单是「' + (o.created_by_name || '别人') + '」署名的，你只能查看（备餐/出餐单照常可用）');
   }
   if(!ok && typeof toggleEdit === 'function') toggleEdit(false);
 }
@@ -159,7 +159,9 @@ function loadDetail(){
       <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
       <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
       <div class="cell"><div class="k">📋 状态</div><div class="v">${stMap[o.status]||o.status}</div></div>
-      <div class="cell"><div class="k">👤 录入人</div><div class="v">${ownerText(o)}</div></div>
+      <div class="cell"><div class="k">👤 署名</div><div class="v">${ownerText(o)}</div></div>
+      ${(o.entered_by && o.created_by && o.entered_by !== o.created_by) ?
+        `<div class="cell"><div class="k">✍️ 代录</div><div class="v" style="font-size:13px;color:var(--muted)">由 ${prettyName(o.entered_by_name)} 代为录入</div></div>` : ''}
       <div class="cell" style="grid-column:1/-1"><div class="k">📝 备注</div><div class="v">${o.note||'-'}</div></div>
     `;
     applyPermUI(o);
@@ -247,25 +249,28 @@ function toggleEdit(show){
   const willShow = (typeof show === 'boolean') ? show : (!c.style.display || c.style.display === 'none');
   // 没权限的人不允许打开编辑区（服务端也会拦）
   if(willShow && curOrder && !canTouch(curOrder)){
-    alert('这单不是你录的，你没有修改权限（只能改自己录的订单）');
+    alert('这单不是你署名的，你没有修改权限（只能改自己署名的订单）');
     return;
   }
   c.style.display = willShow ? 'block' : 'none';
   if(willShow){ loadPkgs(fillEdit); loadOwners(); }
 }
-// 老板专属：加载"录入人"下拉（含每个账号）
+// 能改这一单的人就能改"署名"（老板全权；其他人只能改自己署名的单，服务端同样判定）
+// 候选人来自 /api/signers（老板/合伙人/自己）——不能用 /api/users，那个是老板专属
 function loadOwners(){
   const wrap = document.getElementById('edOwnerWrap');
   const sel = document.getElementById('edOwner');
-  if(!wrap || !sel || !isBoss()) return;
+  if(!wrap || !sel) return;
+  if(!(curOrder && canTouch(curOrder))){ wrap.style.display = 'none'; return; }
   wrap.style.display = '';
-  fetch('/api/users').then(r=>r.json()).then(function(d){
-    const us = (d && d.users) || [];
-    sel.innerHTML = '<option value="">（未标注）</option>' + us.map(function(u){
-      return '<option value="' + u.id + '">' + (u.name || u.username) + '（' + u.username +
-             (u.role === 'boss' ? ' · 老板' : '') + '）</option>';
-    }).join('');
-    if(curOrder) sel.value = curOrder.created_by || '';
+  fetch('/api/signers').then(r=>r.json()).then(function(d){
+    const us = (d && d.data) || [];
+    sel.innerHTML = us.map(function(u){
+      return '<option value="' + u.id + '">' + (u.name || ('用户' + u.id)) +
+             (u.is_me ? '（我）' : '') +
+             (u.role === 'boss' ? ' · 老板' : (u.role === 'partner' ? ' · 合伙人' : '')) + '</option>';
+    }).join('') || '<option value="">（未标注）</option>';
+    if(curOrder) sel.value = curOrder.created_by || sel.options[0].value;
   }).catch(function(){ wrap.style.display = 'none'; });
 }
 
@@ -375,9 +380,9 @@ function saveEdit(){
     address: document.getElementById('edAddr').value,
     packages: pkgs
   };
-  // 只有老板能改"录入人"（下拉存在说明是老板）
+  // 改"署名"（这单算谁的）：能改这一单的人就能改署名（服务端会按署名候选校验）
   const ow = document.getElementById('edOwner');
-  if(ow) body.created_by = ow.value;
+  if(ow && ow.value) body.signer = ow.value;
   const m = document.getElementById('editMsg');
   m.textContent = '保存中…';
   fetch('/api/orders/'+curOrder.id+'/edit',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})

@@ -168,6 +168,9 @@
     <button class="qchip" data-q="lastmonth">上月</button>
   </div>
 
+  <!-- 署名筛选：默认全部，可按"我署名的 / 某人署名的"分开看（两人都计入，但能区分） -->
+  <div class="sign-bar" id="finSignBar" style="display:none"></div>
+
   <!-- 有账日期条：点一天直接看那天的账（不用再开原生日期选择器、点"完成"） -->
   <div id="billDates" style="margin-bottom:12px"></div>
 
@@ -322,6 +325,40 @@ const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
 const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
 
+// ===== 署名筛选（这单算谁的）：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）=====
+const CUR_USER = {{ (cur_user or {})|tojson }};
+let SIGNERS = [];
+let finBy = '';
+function finSignerCounts(){
+  const m = {};
+  ((pfData && pfData.orders) || []).forEach(function(o){ const k=String(o.created_by); m[k]=(m[k]||0)+1; });
+  return m;
+}
+function renderFinSignBar(counts){
+  const el = document.getElementById('finSignBar');
+  if(!el) return;
+  if(SIGNERS.length < 2){ el.style.display='none'; return; }
+  const c = counts || {};
+  const total = (pfData && pfData.orders) ? pfData.orders.length : 0;
+  let html = '<span class="sign-lbl">署名</span>' +
+    '<button class="sign-chip '+(finBy===''?'active':'')+'" onclick="setFinBy(\'\')">全部 '+total+'</button>';
+  SIGNERS.forEach(function(u){
+    const v = u.is_me ? 'me' : String(u.id);
+    const cnt = c[String(u.id)] || 0;
+    const label = u.is_me ? ('我署名的 '+cnt) : (u.name+' '+cnt);
+    html += '<button class="sign-chip '+(finBy===v?'active':'')+'" onclick="setFinBy(\''+v+'\')">👤 '+label+'</button>';
+  });
+  el.innerHTML = html;
+  el.style.display = '';
+}
+function setFinBy(v){ finBy = v; renderFinSignBar(finSignerCounts()); loadAll(); }
+function loadSigners(){
+  return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(function(d){
+    SIGNERS = (d && d.data) || [];
+    renderFinSignBar(finSignerCounts());
+  }).catch(function(){ SIGNERS = []; });
+}
+
 let currentRange = 'day';     // 默认看"今天"（与工具栏高亮一致）
 let cfgData = null;
 
@@ -449,8 +486,8 @@ function pickBillDate(date){
   renderBillDates();
   loadAll();
 }
-function loadBillDates(){
-  fetchJSONRetry('/api/finance/dates').then(res=>{
+function loadBillDates(by){
+  fetchJSONRetry('/api/finance/dates' + (by ? ('?'+by) : '')).then(res=>{
     if(!res || !res.ok) return;
     billDates = res.data || [];
     renderBillDates();
@@ -461,10 +498,14 @@ let pfData = null, payData = null;   // 当前区间的利润/货款数据（供
 
 function loadAll(){
   const r = getRangeDates();
-  const qs = (r.from ? `date_from=${r.from}&date_to=${r.to}` : '');
+  const params = [];
+  if(r.from) params.push('date_from='+encodeURIComponent(r.from));
+  if(r.to)   params.push('date_to='+encodeURIComponent(r.to));
+  if(finBy)  params.push('by='+encodeURIComponent(finBy));
+  const q = params.length ? ('?'+params.join('&')) : '';
   Promise.all([
-    fetchJSONRetry('/api/finance/profit-overview' + (qs ? '?'+qs : '')),
-    fetchJSONRetry('/api/finance/summary' + (qs ? '?'+qs : ''))
+    fetchJSONRetry('/api/finance/profit-overview' + q),
+    fetchJSONRetry('/api/finance/summary' + q)
   ]).then(([pfRes, sumRes])=>{
     if(!pfRes){
       const box = document.getElementById('kpiBox');
@@ -477,11 +518,12 @@ function loadAll(){
     renderProfitKpi(pfData.totals||{});
     renderProfitOrders(pfData.orders||[]);
     if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
+    renderFinSignBar(finSignerCounts());   // 署名筛选条按当前区间更新计数
     if(kpiOpenKey) renderKpiBody();      // 明细抽屉开着 → 跟着一起刷新
   });
   loadCfg();
   loadCostItems();
-  loadBillDates();
+  loadBillDates(finBy ? ('by='+encodeURIComponent(finBy)) : '');
 }
 
 function fmtY(n){
@@ -1332,6 +1374,7 @@ function saveCost(iid, val, unit, inModal){
 function editIngCost(iid, val, inModal){ saveCost(iid, val, '', inModal); }
 
 loadAll();
+loadSigners();
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){

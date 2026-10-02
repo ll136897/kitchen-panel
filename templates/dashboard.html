@@ -66,11 +66,18 @@
       <button class="btn" onclick="clearText()">🗑️ 清空</button>
     </div>
     <div id="pasteCount" class="muted" style="font-size:12px;margin-top:6px"></div>
+    <!-- 这单算谁的（署名）：默认自己，可以改成对方——方便替对方录单 -->
+    <div class="sign-bar" id="signPick" style="display:none;margin-top:8px"></div>
+    <div class="sign-note" id="signPickNote" style="display:none">👆 这单会记在选中的那个人名下（他能改、你也还能改你的）；署名不算谁敲进系统的，代录也会留痕。</div>
     <div id="ocrStatus" style="display:none;margin:8px 0;padding:10px;background:#fff7e6;border-radius:8px;border:1px dashed var(--accent);font-size:13px">
       <span id="ocrProgress">🔄 正在识别图片文字...</span>
     </div>
     <div id="parsePreview" class="parse-preview"></div>
   </div>
+
+  <!-- ======== 今日数据：可按署名分开看 ======== -->
+  <div class="sign-bar" id="dashSignBar" style="display:none"></div>
+  <div class="sign-note" id="dashSignNote" style="display:none">👆 只影响下面的「今日订单 / 今日营收 / 待备预约」；库存和告警是全店口径（库存是共用的）。</div>
 
   <!-- ======== KPI 大卡 ======== -->
   <div class="kpi-row" id="kpiRow"></div>
@@ -110,6 +117,62 @@
 </div>
 
 <script>
+// ====== 署名（这单算谁的）======
+// 默认署自己的名；有多个候选人时（老板+合伙人）可以改成对方 → 替对方录单
+const CUR_USER = {{ (cur_user or {})|tojson }};
+let SIGNERS = [];          // 可署名的人（/api/signers）
+let pickSigner = 'me';     // 录入时选的署名（'me' 或 用户id 字符串）
+let dashSigner = '';       // 今日数据的署名筛选（''=全部 | 'me' | 用户id）
+
+function signerLabel(u, short){
+  const n = u.name || ('用户' + u.id);
+  return u.is_me ? ('我（' + n + '）') : n;
+}
+function renderSignBars(){
+  // 1) 录入时"这单算谁的"
+  const pick = document.getElementById('signPick');
+  const note = document.getElementById('signPickNote');
+  if(pick){
+    if(SIGNERS.length > 1){
+      pick.style.display = '';
+      if(note) note.style.display = '';
+      pick.innerHTML = '<span class="sign-lbl">这单算谁的</span>' + SIGNERS.map(function(u){
+        const v = u.is_me ? 'me' : String(u.id);
+        return `<button class="sign-chip ${pickSigner===v?'active':''}" onclick="setPickSigner('${v}')">👤 ${signerLabel(u)}</button>`;
+      }).join('');
+    } else {
+      pick.style.display = 'none';
+      if(note) note.style.display = 'none';
+    }
+  }
+  // 2) 今日数据按署名筛选
+  const bar = document.getElementById('dashSignBar');
+  const dnote = document.getElementById('dashSignNote');
+  if(bar){
+    if(SIGNERS.length > 1){
+      bar.style.display = '';
+      if(dnote) dnote.style.display = '';
+      bar.innerHTML = '<span class="sign-lbl">今天的数据</span>' +
+        `<button class="sign-chip ${dashSigner===''?'active':''}" onclick="setDashSigner('')">全部</button>` +
+        SIGNERS.map(function(u){
+          const v = u.is_me ? 'me' : String(u.id);
+          return `<button class="sign-chip ${dashSigner===v?'active':''}" onclick="setDashSigner('${v}')">👤 ${signerLabel(u)}</button>`;
+        }).join('');
+    } else {
+      bar.style.display = 'none';
+      if(dnote) dnote.style.display = 'none';
+    }
+  }
+}
+function setPickSigner(v){ pickSigner = v; renderSignBars(); }
+function setDashSigner(v){ dashSigner = v; renderSignBars(); loadDash(); }
+function loadSigners(){
+  return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(function(d){
+    SIGNERS = (d && d.data) || [];
+    renderSignBars();
+  }).catch(function(){ SIGNERS = []; });
+}
+
 // ====== 统一模式切换 ======
 window.currentMode = 'order';  // 'order' 或 'stock'
 window._pendingStockItems = null;
@@ -476,16 +539,17 @@ function confirmOrder(){
 // 用预览里剩下的 chunk 入库；若后端发现"一模一样的订单"(duplicate)，弹框让用户确认后再 force 提交
 function postOrderChunks(chunks, force){
   fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({chunks:chunks, force:!!force})})
+      body:JSON.stringify({chunks:chunks, force:!!force, signer:pickSigner})})
     .then(r=>r.json()).then(d=>{
       if(d.ok){
         clearText();
         document.getElementById('parsePreview').classList.remove('show');
         loadDash();
+        const who = d.signer_name ? ('（署名：' + d.signer_name + '）') : '';
         if(d.batch){
-          showStockToast(`✅ 批量入库 ${d.count} 单`);
+          showStockToast(`✅ 批量入库 ${d.count} 单` + who);
         } else {
-          showStockToast(`✅ 订单 #${d.order_id} 已入库`);
+          showStockToast(`✅ 订单 #${d.order_id} 已入库` + who);
         }
         return;
       }
@@ -578,7 +642,8 @@ function progressBar(pct){
 function round(v){ return (Math.round(v*100)/100).toString().replace(/\.00$/,''); }
 
 function loadDash(){
-  fetch('/api/dashboard').then(r=>r.json()).then(d=>{
+  const qs = dashSigner ? ('?by=' + encodeURIComponent(dashSigner)) : '';
+  fetch('/api/dashboard' + qs, {cache:'no-store'}).then(r=>r.json()).then(d=>{
     if(!d.ok) return;
     const data = d.data;
 
@@ -699,6 +764,7 @@ function loadDash(){
   });
 }
 loadDash();
+loadSigners();
 setInterval(loadDash, 30000);
 
 // ===== 刷新特效（全站通用）=====

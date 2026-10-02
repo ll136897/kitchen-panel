@@ -480,9 +480,11 @@ def _inject_user():
     return {"cur_user": getattr(g, "cur_user", None)}
 
 
-# ===== 订单归属与权限（2026-10-02）=====
-# 老板（role=boss）全权；其他人（role=staff）**只能改/删自己录的订单**。
-# 每条订单记 orders.created_by（用户 id）+ created_by_name（当时的名字，便于显示）。
+# ===== 订单署名与权限（2026-10-02）=====
+# 订单有两个"人"的概念：
+#   created_by / created_by_name  = **署名**（这单算谁的）——决定权限，也是各页面筛选维度
+#   entered_by / entered_by_name  = 实际录入人（谁敲进去的），纯审计，只在订单详情里提示"代录"
+# 规则：老板全权；其他人只能改/删**自己署名**的订单；录入时可以选择署谁的名（互相代录）。
 def _cur_uid():
     u = getattr(g, "cur_user", None) or {}
     return u.get("id")
@@ -494,7 +496,7 @@ def _is_boss():
 
 
 def _can_touch_order(db, oid):
-    """当前用户能不能改/删这一单"""
+    """当前用户能不能改/删这一单（看署名，不看谁录的）"""
     if _is_boss():
         return True
     row = db.execute("SELECT created_by FROM orders WHERE id=?", (oid,)).fetchone()
@@ -503,8 +505,76 @@ def _can_touch_order(db, oid):
     return row["created_by"] is not None and row["created_by"] == _cur_uid()
 
 
-# 店员越权时的统一回复
-NO_PERM_MSG = "无权限：这单是别人录的，你只能修改/删除自己录的订单"
+def _signer_candidates(db=None):
+    """可以当"署名"的人：启用中的老板/合伙人 + 自己（每人只能署自己或对方的名）。
+
+    店员不在候选里——除非他自己就是登录人（那他默认署自己）。
+    返回 [{id, name, role, is_me}]，自己排第一个。"""
+    db = db or g.db
+    me = getattr(g, "cur_user", None) or {}
+    rows = db.execute("""
+        SELECT id, name, username, role FROM users
+        WHERE COALESCE(active,1)=1 AND role IN ('boss','partner')
+        ORDER BY CASE role WHEN 'boss' THEN 0 ELSE 1 END, id
+    """).fetchall()
+    out, seen = [], set()
+    if me.get("id"):
+        out.append({"id": me["id"], "name": me.get("name") or me.get("username") or "",
+                    "role": me.get("role") or "staff", "is_me": True})
+        seen.add(me["id"])
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        out.append({"id": r["id"], "name": r["name"] or r["username"] or "",
+                    "role": r["role"], "is_me": False})
+        seen.add(r["id"])
+    return out
+
+
+def _resolve_signer(db, raw):
+    """把前端传来的署名（用户 id / 'me' / 空）解析成 (uid, name)。
+
+    不在候选清单里的一律忽略 → 退回"署自己"，避免有人把单署给不该署的人。"""
+    me = getattr(g, "cur_user", None) or {}
+    cand = _signer_candidates(db)
+    want = None
+    if raw in (None, "", "me"):
+        want = me.get("id")
+    else:
+        try:
+            want = int(raw)
+        except (TypeError, ValueError):
+            want = me.get("id")
+    for c in cand:
+        if c["id"] == want:
+            return c["id"], c["name"]
+    return me.get("id"), (me.get("name") or me.get("username") or "")
+
+
+def _signer_clause(args, alias=""):
+    """按署名筛选的 SQL 片段 + 参数：?by=me | 0(=未标注) | <user_id> | 空(=全部)"""
+    by = (args.get("by") or "").strip()
+    if not by:
+        return "", []
+    col = (alias + "." if alias else "") + "created_by"
+    if by == "me":
+        return " AND %s = ? " % col, [_cur_uid()]
+    if by == "0":
+        return " AND %s IS NULL " % col, []
+    try:
+        return " AND %s = ? " % col, [int(by)]
+    except (TypeError, ValueError):
+        return "", []
+
+
+@app.route("/api/signers")
+def api_signers():
+    """可署名的人（录入订单时选"这单算谁的"）"""
+    return jsonify({"ok": True, "data": _signer_candidates()})
+
+
+# 别人署名时的统一回复
+NO_PERM_MSG = "无权限：这单不是你的署名，你只能修改/删除自己署名的订单"
 
 
 def _deny_order():
@@ -1305,7 +1375,7 @@ def order_detail(oid):
 @app.route("/history")
 @app.route("/finance")
 def finance_page():
-    return render_template("finance.html")
+    return render_template("finance.html", cur_user=g.cur_user)
 
 
 @app.route("/analytics")
@@ -1316,7 +1386,7 @@ def analytics_page():
 
 @app.route("/prep")
 def prep_page():
-    return render_template("prep.html")
+    return render_template("prep.html", cur_user=g.cur_user)
 
 
 @app.route("/menu")
@@ -1464,20 +1534,23 @@ def create_order():
     order_ids = []
     results = []
     _u = getattr(g, "cur_user", None) or {}
+    # 署名：默认自己，可以署对方的名（互相代录）—— 见 _resolve_signer
+    _sign_uid, _sign_name = _resolve_signer(db, data.get("signer"))
+    _entered_name = _u.get("name") or _u.get("username") or ""
     for chunk, parsed in zip(chunks, parsed_chunks):
         matched = match_packages_in_db(parsed["packages"])
         cur.execute("""
             INSERT INTO orders
             (raw_text, booking_date, booking_time, address, contact_name,
              contact_phone, amount, deposit, meal_time, pickup_time, note, status,
-             created_by, created_by_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)
+             created_by, created_by_name, entered_by, entered_by_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)
         """, (
             chunk, parsed["booking_date"], parsed["booking_time"],
             parsed["address"], parsed["contact_name"], parsed["contact_phone"],
             parsed["amount"], parsed["deposit"], parsed["meal_time"],
             parsed["pickup_time"], parsed["note"],
-            _u.get("id"), _u.get("name") or _u.get("username") or "",
+            _sign_uid, _sign_name, _u.get("id"), _entered_name,
         ))
         order_id = cur.lastrowid
         order_ids.append(order_id)
@@ -1496,6 +1569,8 @@ def create_order():
     # 单/批量都带上 count 与 order_ids，前端不用区分两种返回
     return jsonify({"ok": True, "batch": len(results) > 1, "count": len(results),
                     "order_ids": order_ids, "orders": results,
+                    "signer_id": _sign_uid, "signer_name": _sign_name,
+                    "entered_by_name": _entered_name,
                     "order_id": order_ids[0] if results else None})
 
 
@@ -1505,12 +1580,13 @@ def list_orders():
     cur = db.cursor()
     purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
     show_deleted = request.args.get("deleted") == "1"
-    # 列表要带上"录入人"，前端用来区分订单归属、以及决定给不给改的按钮
+    # 列表要带上"署名"（created_by）和"实际录入人"（entered_by）：
+    # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
         cur.execute("""
             SELECT id, booking_date, booking_time, address, contact_name,
                    contact_phone, amount, deposit, note, status, created_at, deleted_at,
-                   created_by, created_by_name
+                   created_by, created_by_name, entered_by, entered_by_name
             FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 500
         """)
     else:
@@ -1520,7 +1596,7 @@ def list_orders():
         cur.execute("""
             SELECT id, booking_date, booking_time, address, contact_name,
                    contact_phone, amount, deposit, note, status, created_at,
-                   created_by, created_by_name
+                   created_by, created_by_name, entered_by, entered_by_name
             FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 5000
         """)
     orders = [dict(r) for r in cur.fetchall()]
@@ -1603,25 +1679,15 @@ def edit_order(oid):
         return (data.get(k) or "").strip()
 
     sets, params = [], []
-    # 改「录入人」只有老板能做（把历史订单转给店员，或纠正录错的人）
-    if "created_by" in data and _is_boss():
-        try:
-            _nb = int(data.get("created_by"))
-        except (TypeError, ValueError):
-            _nb = None
-        _nu = None
-        if _nb:
-            _nu = cur.execute("SELECT id, name, username FROM users WHERE id=?", (_nb,)).fetchone()
-        if _nu:
-            sets.append("created_by=?")
-            params.append(_nu["id"])
-            sets.append("created_by_name=?")
-            params.append(_nu["name"] or _nu["username"] or "")
-        elif _nb is None or _nb == 0:
-            sets.append("created_by=?")
-            params.append(None)
-            sets.append("created_by_name=?")
-            params.append("")
+    # 改「署名」：能改这一单的人就能改署名（老板全权；其他人只能改自己署名的单）。
+    # 只能在候选清单里选（老板/合伙人/自己），避免把单署给不该署的人。
+    _sign_raw = data.get("signer", data.get("created_by"))
+    if _sign_raw is not None:
+        _sid, _sname = _resolve_signer(db, _sign_raw)
+        sets.append("created_by=?")
+        params.append(_sid)
+        sets.append("created_by_name=?")
+        params.append(_sname)
     for k in ("booking_date", "booking_time", "meal_time", "note",
               "address", "contact_name", "contact_phone"):
         if k in data:
@@ -1792,7 +1858,9 @@ def order_requirements(oid):
 # ===== 库存面板 =====
 @app.route("/api/dashboard")
 def dashboard_api():
-    return jsonify({"ok": True, "data": calc_dashboard()})
+    """录入页数据。可选 by=me|0|<user_id>：只影响今日订单/今日营收/待备预约列表"""
+    _sc, _sp = _signer_clause(request.args)
+    return jsonify({"ok": True, "data": calc_dashboard(_sc, _sp)})
 
 
 # ===== 库存调整 =====
@@ -2899,8 +2967,9 @@ def export_prep_matrix():
     cur.execute("""
         SELECT id, booking_date, booking_time, address, contact_name, status
         FROM orders WHERE booking_date=? AND status IN ('pending','preparing') AND deleted_at IS NULL
+    """ + _signer_clause(request.args)[0] + """
         ORDER BY id
-    """, (date,))
+    """, (date,) + tuple(_signer_clause(request.args)[1]))
     orders = [dict(r) for r in cur.fetchall()]
     if not orders:
         return jsonify({"ok": False, "msg": f"{date} 无待备订单"}), 400
@@ -3253,7 +3322,8 @@ def api_history():
 @app.route("/api/finance/summary")
 def finance_summary():
     """财务总览：收入、成本、毛利、押金、应收
-    可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤"""
+    可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤
+             by=me|0|<user_id>，按"署名"（orders.created_by）过滤"""
     db = g.db
     cur = db.cursor()
     date_from = request.args.get("date_from")
@@ -3267,6 +3337,10 @@ def finance_summary():
     if date_to:
         date_clause += " AND o.booking_date <= ?"
         params.append(date_to)
+    # 署名筛选（同一份条件用于下面每条查询，保证 KPI 和明细口径一致）
+    _sc, _sp = _signer_clause(request.args, "o")
+    date_clause += _sc
+    params.extend(_sp)
     # 收入（非取消订单）
     r = cur.execute(f"""
         SELECT COUNT(*) as order_cnt,
@@ -3325,7 +3399,8 @@ def finance_summary():
 @app.route("/api/finance/orders")
 def finance_orders():
     """订单财务明细列表
-    可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤"""
+    可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤
+             by=me|0|<user_id>，按"署名"过滤"""
     db = g.db
     cur = db.cursor()
     date_from = request.args.get("date_from")
@@ -3338,6 +3413,9 @@ def finance_orders():
     if date_to:
         date_clause += " AND o.booking_date <= ?"
         params.append(date_to)
+    _sc, _sp = _signer_clause(request.args, "o")
+    date_clause += _sc
+    params.extend(_sp)
     rows = cur.execute(f"""
         SELECT o.id, o.booking_date, o.contact_name, o.contact_phone, o.address,
                o.amount, o.deposit, o.payment_status, o.deposit_status, o.status,
@@ -3490,9 +3568,12 @@ def clear_order_cost(oid):
 
 @app.route("/api/finance/profit-overview")
 def finance_profit_overview():
-    """期间利润汇总：现金利润 + 含固定开销摊销的净利，含每单利润与标红"""
+    """期间利润汇总：现金利润 + 含固定开销摊销的净利，含每单利润与标红
+    可选 by=me|0|<user_id> 按"署名"筛选（固定开销仍按每单摊销，不会全压到一个人头上）"""
     from profit import period_overview
-    ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"))
+    _sc, _sp = _signer_clause(request.args, "o")
+    ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
+                         extra_clause=_sc, extra_params=_sp)
     return jsonify({"ok": True, "data": ov})
 
 
@@ -3501,14 +3582,17 @@ def finance_dates():
     """有账的日期（供财务页日期条一键切换）：每天的单数、收入合计。
 
     只统计未取消、未删除的订单；收入按实收货款（amount）汇总。
+    可选 by=me|0|<user_id> 按"署名"筛选。
     """
+    _sc, _sp = _signer_clause(request.args)
     rows = g.db.execute("""
         SELECT booking_date AS d, COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS amt
         FROM orders
         WHERE status!='cancelled' AND deleted_at IS NULL AND booking_date IS NOT NULL AND booking_date!=''
+    """ + _sc + """
         GROUP BY booking_date
         ORDER BY booking_date DESC
-    """).fetchall()
+    """, _sp).fetchall()
     return jsonify({"ok": True, "data": [
         {"date": r["d"], "cnt": r["cnt"], "amount": round(float(r["amt"] or 0), 2)} for r in rows
     ]})
@@ -4295,11 +4379,14 @@ def prep_merged():
     else:
         from calculator import today_cst as _today_cst
         date = request.args.get("date") or _today_cst().isoformat()
+        # 署名筛选（?by=...）：只看某个人署名的单
+        _sc, _sp = _signer_clause(request.args)
         cur.execute("""
             SELECT id FROM orders
             WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date = ?
+        """ + _sc + """
             ORDER BY booking_time
-        """, (date,))
+        """, (date,) + tuple(_sp))
         order_ids = [r["id"] for r in cur.fetchall()]
     data = calc_merged_prep(order_ids)
     return jsonify({"ok": True, "data": data, "order_ids": order_ids})
@@ -4307,17 +4394,20 @@ def prep_merged():
 
 @app.route("/api/prep/dates")
 def prep_dates():
-    """列出所有有 pending/preparing 订单的日期，供前端做日期快捷切换"""
+    """列出所有有 pending/preparing 订单的日期，供前端做日期快捷切换。
+    可选 by=me|0|<user_id> 按"署名"筛选（日期条上的单数跟着变）"""
     from calculator import today_cst as _today_cst
     db = g.db
     cur = db.cursor()
+    _sc, _sp = _signer_clause(request.args)
     cur.execute("""
         SELECT booking_date, COUNT(*) as cnt
         FROM orders
         WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date IS NOT NULL AND booking_date != ''
+    """ + _sc + """
         GROUP BY booking_date
         ORDER BY booking_date
-    """)
+    """, _sp)
     today = _today_cst().isoformat()
     dates = []
     for r in cur.fetchall():

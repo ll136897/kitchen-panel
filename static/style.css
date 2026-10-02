@@ -316,3 +316,22 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
   .cap-chip .cap-num{font-size:22px}
   .preview-grid{grid-template-columns:1fr 1fr}
 }
+
+/* ---- 署名（这单算谁的）：全站统一的小胶囊 + 标签 ----
+   用在：录入页选署名、订单页/财务页/备餐页/分析页 按署名筛选 */
+.sign-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.sign-bar .sign-lbl{font-size:12px;color:var(--muted);font-weight:700;flex:0 0 auto}
+.sign-chip{
+  padding:5px 12px;border:1px solid var(--border);background:#fff;border-radius:16px;
+  font-size:13px;font-weight:600;color:var(--txt);cursor:pointer;line-height:1.35;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.sign-chip:hover{background:#faf5ed}
+.sign-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.sign-chip .cnt{opacity:.7;font-size:11px;margin-left:3px}
+.sign-chip.active .cnt{opacity:.85}
+.sign-note{font-size:11px;color:var(--muted);margin:-6px 0 10px}
+@media(max-width:600px){
+  .sign-bar{gap:5px}
+  .sign-chip{padding:4px 10px;font-size:12px}
+}
