@@ -81,6 +81,14 @@ except Exception as _imp_err:                  # 导入期就炸 = 应用根本�
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
+# 响应体 gzip 压缩：订单/仪表盘等接口返回 60~80KB JSON，Render 免费实例网络慢，
+# 开启压缩后传输体积通常降到 1/5~1/8，首屏和 30s 轮询明显变快。Flask-Compress 做这件事。
+try:
+    from flask_compress import Compress
+    Compress(app)
+except Exception as _ce:
+    print("[init] ⚠️ flask_compress 未安装，响应不压缩：", _ce)
+
 # 会话密钥：登录态靠它签名。务必用环境变量固定一把（Render 里配 SECRET_KEY），
 # 否则免费实例重启会随机换密钥 → 全员被踢下线。本地测试没配就给个开发用默认值（仅本地）。
 app.secret_key = os.environ.get("SECRET_KEY") or "dev-insecure-secret-key-CHANGE-ME"

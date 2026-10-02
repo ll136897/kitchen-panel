@@ -325,8 +325,10 @@ def order_profit(db, oid, cfg=None):
 
 
 # ---------- 期间汇总 ----------
-def period_overview(db, date_from=None, date_to=None, cfg=None):
-    """期间利润汇总：现金口径 + 含固定开销摊销口径"""
+def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
+    """期间利润汇总：现金口径 + 含固定开销摊销口径
+    extra_clause/extra_params：额外过滤（如按"署名" by= 筛选），直接拼进 WHERE。
+    """
     cfg = cfg or get_config(db)
     cur = db.cursor()
     clause = "o.status!='cancelled' AND o.deleted_at IS NULL"
@@ -337,6 +339,9 @@ def period_overview(db, date_from=None, date_to=None, cfg=None):
     if date_to:
         clause += " AND o.booking_date <= ?"
         params.append(date_to)
+    if extra_clause:
+        clause += " " + extra_clause
+        params.extend(extra_params)
     rows = cur.execute("SELECT o.id FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,

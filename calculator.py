@@ -470,13 +470,19 @@ def calc_dashboard(signer_clause="", signer_params=()):
     _sp = tuple(signer_params or ())
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM orders WHERE status IN ('pending','preparing') AND deleted_at IS NULL")
+        # 库存占用只算"未来/当天的、且还没扣过库存的"预约——历史单与已扣库存的单
+        # 不该继续占库存（否则历史遗留的 pending 单会无限膨胀库存占用计算，越积越慢）。
+        _today = today_cst().isoformat()
+        cur.execute(
+            "SELECT id FROM orders WHERE status IN ('pending','preparing') AND deleted_at IS NULL "
+            "AND stock_deducted_at IS NULL AND booking_date >= ?",
+            (_today,),
+        )
         order_ids = [r["id"] for r in cur.fetchall()]
 
         # ---- 今日统计 ----
         # 口径统一为"预约日期=今天(北京时间)"且未取消，与下方"待备预约"列表一致；
         # 已取消的单单独计数，供前端提示，避免"数字比列表多"造成"丢单"误解。
-        _today = today_cst().isoformat()
         cur.execute("SELECT COUNT(*) as c, COALESCE(SUM(amount),0) as amt "
                     "FROM orders WHERE booking_date = ? AND status != 'cancelled' AND deleted_at IS NULL"
                     + signer_clause,

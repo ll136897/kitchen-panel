@@ -431,6 +431,16 @@ def init_db():
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 
+        # 性能索引：orders 表此前无任何索引，所有筛选（按预约日期/署名/状态）都是全表扫描。
+        # 数据量小感知不到，但订单越多越慢；一次性建好即可（IF NOT EXISTS 幂等）。
+        try:
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_booking_date ON orders(booking_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_created_by ON orders(created_by)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_status_deleted ON orders(status, deleted_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_booking_status ON orders(booking_date, status, deleted_at)")
+        except Exception as _e:
+            print("[迁移] 建索引跳过：", _e)
+
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
 
