@@ -106,7 +106,7 @@
 // 当前登录人（服务端注入）——决定"编辑本单"给不给用
 const CUR_USER = {{ (cur_user or {})|tojson }};
 function isBoss(){ return (CUR_USER && CUR_USER.role) === 'boss'; }
-// 财务敏感信息（成本/毛利）：刘和牛与孙梦都能看，店员看不到
+// 财务敏感信息（成本/毛利）：刘与孙都能看，店员看不到
 function canViewFinance(){ return !!(CUR_USER && (CUR_USER.role === 'boss' || CUR_USER.role === 'partner')); }
 function canTouch(o){
   if(isBoss()) return true;
@@ -115,7 +115,7 @@ function canTouch(o){
 function prettyName(n){
   n = (n || '').trim();
   if(!n) return '未标注';
-  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘和牛';
+  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘';
   return n;
 }
 function ownerText(o){
@@ -256,7 +256,7 @@ function toggleEdit(show){
   if(willShow){ loadPkgs(fillEdit); loadOwners(); }
 }
 // 能改这一单的人就能改"署名"（谁署名的单谁就能改，服务端同样判定）
-// 候选人来自 /api/signers（刘和牛/孙梦/自己）——不能用 /api/users（那是账号管理专属）
+// 候选人来自 /api/signers（刘/孙/自己）——不能用 /api/users（那是账号管理专属）
 function loadOwners(){
   const wrap = document.getElementById('edOwnerWrap');
   const sel = document.getElementById('edOwner');
@@ -414,7 +414,7 @@ function showRefreshToast(){
 }
 loadDetail();
 loadPkgs();
-// 「这单赚多少」含成本/毛利 → 刘和牛与孙梦都能看，店员看不到（店员连请求都不发）
+// 「这单赚多少」含成本/毛利 → 刘与孙都能看，店员看不到（店员连请求都不发）
 if(canViewFinance()){ loadProfit(); }
 else { const _pc = document.getElementById('profitCard'); if(_pc) _pc.style.display = 'none'; }
 

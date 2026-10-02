@@ -702,7 +702,7 @@ def ensure_admin_user():
                 pw = os.environ.get("ADMIN_PW") or "kaorou888"
                 conn.execute(
                     "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
-                    ("admin", "管理员(老板)", "boss", generate_password_hash(pw), 1, _now()))
+                    ("admin", "刘", "boss", generate_password_hash(pw), 1, _now()))
                 print("[init] 已创建默认老板账号 admin / %s —— 请尽快在“账号”页修改密码" % pw)
     except Exception as e:
         print("[init] ensure_admin_user 跳过：", e)
@@ -1350,6 +1350,11 @@ def order_detail(oid):
     if not r:
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
     o = dict(r)
+    # 署名显示名取实时账号名（视图层覆盖，绝不改历史快照 created_by_name）
+    if o.get("created_by") is not None:
+        _cn = cur.execute("SELECT name FROM users WHERE id=?", (o["created_by"],)).fetchone()
+        if _cn:
+            o["created_by_name"] = _cn["name"]
     # 套餐
     cur.execute("""
         SELECT op.*, p.name as pkg_name, p.min_people, p.max_people, p.price as std_price
@@ -1584,20 +1589,24 @@ def list_orders():
     # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
         cur.execute("""
-            SELECT id, booking_date, booking_time, address, contact_name,
-                   contact_phone, amount, deposit, note, status, created_at, deleted_at,
-                   created_by, created_by_name, entered_by, entered_by_name
-            FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 500
+            SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
+                   o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at, o.deleted_at,
+                   o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
+                   o.entered_by, o.entered_by_name
+            FROM orders o LEFT JOIN users u ON o.created_by = u.id
+            WHERE o.deleted_at IS NOT NULL ORDER BY o.id DESC LIMIT 500
         """)
     else:
         # ⚠️ 以前这里是 LIMIT 100 —— 订单超过 100 单后**订单页会静默丢掉最早的单**
         #    （117 单时 9 月只显示 58 单、实际 75 单）。订单页的筛选/排序/按月分组
         #    全在前端做，必须拿全量，所以放宽到 5000（够用多年，仍留个上限防跑飞）。
         cur.execute("""
-            SELECT id, booking_date, booking_time, address, contact_name,
-                   contact_phone, amount, deposit, note, status, created_at,
-                   created_by, created_by_name, entered_by, entered_by_name
-            FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 5000
+            SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
+                   o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at,
+                   o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
+                   o.entered_by, o.entered_by_name
+            FROM orders o LEFT JOIN users u ON o.created_by = u.id
+            WHERE o.deleted_at IS NULL ORDER BY o.id DESC LIMIT 5000
         """)
     orders = [dict(r) for r in cur.fetchall()]
     # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。
@@ -3675,13 +3684,14 @@ def analytics_overview():
         by_clause, by_params = " AND created_by = ? ", [int(by)]
 
     rows = db.execute("""
-        SELECT id, booking_date, booking_time, contact_name, contact_phone, address,
-               amount, status, payment_status, created_by, created_by_name
-        FROM orders
-        WHERE status!='cancelled' AND deleted_at IS NULL
-              AND booking_date IS NOT NULL AND booking_date!=''
+        SELECT o.id, o.booking_date, o.booking_time, o.contact_name, o.contact_phone, o.address,
+               o.amount, o.status, o.payment_status, o.created_by,
+               COALESCE(u.name, o.created_by_name) AS created_by_name
+        FROM orders o LEFT JOIN users u ON o.created_by = u.id
+        WHERE o.status!='cancelled' AND o.deleted_at IS NULL
+              AND o.booking_date IS NOT NULL AND o.booking_date!=''
     """ + by_clause + """
-        ORDER BY booking_date DESC, id DESC
+        ORDER BY o.booking_date DESC, o.id DESC
     """, by_params).fetchall()
 
     def to_date(v):
@@ -3723,9 +3733,10 @@ def analytics_overview():
 
     # 录入人清单（不受当前筛选影响，用来渲染筛选按钮）
     _cr = db.execute("""
-        SELECT created_by AS uid, COALESCE(NULLIF(TRIM(created_by_name),''),'') AS nm, COUNT(*) c
-        FROM orders WHERE status!='cancelled' AND deleted_at IS NULL
-        GROUP BY created_by ORDER BY c DESC
+        SELECT o.created_by AS uid, COALESCE(u.name, '') AS nm, COUNT(*) c
+        FROM orders o LEFT JOIN users u ON o.created_by = u.id
+        WHERE o.status!='cancelled' AND o.deleted_at IS NULL
+        GROUP BY o.created_by ORDER BY c DESC
     """).fetchall()
     creators = [{"id": ("" if r["uid"] is None else str(r["uid"])),
                  "name": (r["nm"] or ""), "orders": r["c"]} for r in _cr]

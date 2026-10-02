@@ -411,28 +411,22 @@ def init_db():
         except Exception as _e:
             print("[迁移] 合伙人角色升级跳过：", _e)
 
-        # 一次性迁移（2026-10-02）：老板账号显示名规范化。
-        # 界面上不要出现"管理员/老板"这类带权限层级的字眼，署名维度只用
-        # "刘和牛 / 孙梦"两个人名区分。把历史遗留的账号名统一成门店/主理人名。
+        # 一次性迁移（2026-10-02）："署名"维度只用两个人名区分 —— 刘（老板）、孙（合伙人）。
+        # ⚠️ 刘和牛是**门店名**，不是人名，绝不能当账号显示名用（之前误用过，已纠正）。
+        # 只改账号的 name（id 不变 → 历史订单的 created_by 不变 → 筛选/权限完全不受影响），
+        # 绝不批量改写历史订单的 created_by_name 快照（那等于篡改历史数据，用户明确不要）。
         try:
-            cur.execute("UPDATE users SET name='刘和牛' WHERE username='admin' AND name<>'刘和牛'")
+            cur.execute("UPDATE users SET name='刘' WHERE username='admin' AND name<>'刘'")
             if cur.rowcount:
-                print("[迁移] 已把老板账号显示名规范为 刘和牛")
+                print("[迁移] 已把老板账号显示名规范为 刘")
         except Exception as _e:
             print("[迁移] 老板账号改名跳过：", _e)
-
-        # 历史订单的署名快照同步（当时 created_by_name 存的是"管理员(老板)"）
         try:
-            cur.execute(
-                "UPDATE orders SET created_by_name='刘和牛' "
-                "WHERE created_by=(SELECT id FROM users WHERE username='admin') "
-                "AND (created_by_name IS NULL OR created_by_name='' "
-                "OR created_by_name LIKE '%管理员%' OR created_by_name LIKE '%老板%')"
-            )
+            cur.execute("UPDATE users SET name='孙' WHERE username='sunmeng' AND name<>'孙'")
             if cur.rowcount:
-                print(f"[迁移] 已同步 {cur.rowcount} 条历史订单的署名显示名")
+                print("[迁移] 已把合伙人账号显示名规范为 孙")
         except Exception as _e:
-            print("[迁移] 历史订单署名同步跳过：", _e)
+            print("[迁移] 合伙人账号改名跳过：", _e)
 
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
