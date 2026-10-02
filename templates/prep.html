@@ -406,7 +406,7 @@ function renderPrepSignBar(){
     '<button class="sign-chip '+(prepBy===''?'active':'')+'" onclick="setPrepBy(\'\')">全部</button>';
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
-    const label = u.is_me ? '我署名的' : u.name;
+    const label = u.name + (u.is_me ? '（我）' : '');
     html += '<button class="sign-chip '+(prepBy===v?'active':'')+'" onclick="setPrepBy(\''+v+'\')">👤 '+label+'</button>';
   });
   el.innerHTML = html;
@@ -1427,7 +1427,7 @@ loadPrepDates(true).then(()=>{
     if(!isNaN(foid)) enterFocus(foid);
   }
 });   // 首次加载，自动切到有订单的日期
-loadSigners();   // 加载"署名"候选（老板+合伙人），用于筛选条
+loadSigners();   // 加载"署名"候选（刘和牛+孙梦），用于筛选条
 setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）

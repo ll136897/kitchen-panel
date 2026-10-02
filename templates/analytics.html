@@ -167,7 +167,7 @@ function setBy(v){ anBy = v; loadAn(); }
 function anPrettyName(n){
   n = (n || '').trim();
   if(!n) return '未标注';
-  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '老板';
+  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘和牛';
   return n;
 }
 function renderByRow(){
@@ -181,7 +181,7 @@ function renderByRow(){
   el.innerHTML = '<span style="font-weight:700;color:#9a3412">署名</span> ' +
     '<button class="an-tab' + (anBy === '' ? ' active' : '') + '" onclick="setBy(\'\')">全部 ' + total + '</button> ' +
     cs.map(function(c){
-      const label = (c.id && c.id === mine) ? ('我署名的 ' + c.orders) : (anPrettyName(c.name) + ' ' + c.orders);
+      const isMine = (c.id && c.id === mine); const label = anPrettyName(c.name) + (isMine ? '（我）' : '') + ' ' + c.orders;
       const val = (c.id && c.id === mine) ? 'me' : (c.id === '' ? '0' : c.id);
       return '<button class="an-tab' + (anBy === val ? ' active' : '') + '" onclick="setBy(\'' + val + '\')">' +
              anEsc(label) + '</button>';

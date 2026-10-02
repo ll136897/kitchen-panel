@@ -345,7 +345,7 @@ function renderFinSignBar(counts){
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
     const cnt = c[String(u.id)] || 0;
-    const label = u.is_me ? ('我署名的 '+cnt) : (u.name+' '+cnt);
+    const label = u.name + (u.is_me ? '（我）' : '') + ' ' + cnt;
     html += '<button class="sign-chip '+(finBy===v?'active':'')+'" onclick="setFinBy(\''+v+'\')">👤 '+label+'</button>';
   });
   el.innerHTML = html;

@@ -171,7 +171,8 @@ function canTouch(o){
 function prettyName(n){
   n = (n || '').trim();
   if(!n) return '未标注';
-  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '老板';
+  // 历史遗留的"管理员(老板)"归一为门店主理人名（与启动迁移保持一致）
+  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘和牛';
   return n;
 }
 function creatorLabel(o){
@@ -349,7 +350,7 @@ function renderOrderDateChips(){
   box.innerHTML = html;
 }
 
-// 署名筛选：我署名的 / 某人署名的（老板和店员都看得到，用来分清"谁的单"）
+// 署名筛选：全部 / 刘和牛 / 孙梦（两人都能看，用来分开看各自录的单）
 function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
 function ownerKey(o){ return (o && o.created_by) ? String(o.created_by) : ''; }
 function renderOrderOwnerChips(){
@@ -513,7 +514,7 @@ function buildCard(o, isAnchor){
   </div>`;
 }
 
-// 卡片上的"谁署名的"标签（老板=金色，我=蓝色，别人=灰色）
+// 卡片上的"谁署名的"标签（署名=主色，我=蓝色，别人=灰色）
 // 署名的和实际录入的不是同一个人时（代录），在 title 里说明，不占卡片位置
 function ownerChip(o){
   const mine = o && o.created_by && CUR_USER && o.created_by === CUR_USER.id;

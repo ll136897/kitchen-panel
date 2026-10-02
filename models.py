@@ -411,6 +411,29 @@ def init_db():
         except Exception as _e:
             print("[迁移] 合伙人角色升级跳过：", _e)
 
+        # 一次性迁移（2026-10-02）：老板账号显示名规范化。
+        # 界面上不要出现"管理员/老板"这类带权限层级的字眼，署名维度只用
+        # "刘和牛 / 孙梦"两个人名区分。把历史遗留的账号名统一成门店/主理人名。
+        try:
+            cur.execute("UPDATE users SET name='刘和牛' WHERE username='admin' AND name<>'刘和牛'")
+            if cur.rowcount:
+                print("[迁移] 已把老板账号显示名规范为 刘和牛")
+        except Exception as _e:
+            print("[迁移] 老板账号改名跳过：", _e)
+
+        # 历史订单的署名快照同步（当时 created_by_name 存的是"管理员(老板)"）
+        try:
+            cur.execute(
+                "UPDATE orders SET created_by_name='刘和牛' "
+                "WHERE created_by=(SELECT id FROM users WHERE username='admin') "
+                "AND (created_by_name IS NULL OR created_by_name='' "
+                "OR created_by_name LIKE '%管理员%' OR created_by_name LIKE '%老板%')"
+            )
+            if cur.rowcount:
+                print(f"[迁移] 已同步 {cur.rowcount} 条历史订单的署名显示名")
+        except Exception as _e:
+            print("[迁移] 历史订单署名同步跳过：", _e)
+
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 

@@ -42,9 +42,9 @@
   <input id="nn" placeholder="如 张总 / 小王">
   <label>角色</label>
   <select id="nr">
-    <option value="boss" selected>老板（全权限，含改原数据/配置）</option>
-    <option value="partner">合伙人（页面功能全都能用；不能改原数据、不能改别人署名的订单）</option>
-    <option value="staff">店员/帮手（仅订单/备餐/库存）</option>
+    <option value="boss" selected>老板</option>
+    <option value="partner">合伙人</option>
+    <option value="staff">店员</option>
   </select>
   <label>初始密码</label>
   <div class="pw-wrap">
@@ -76,7 +76,7 @@
   <div class="msg" id="pwMsg"></div>
 </div>
 
-<p class="tip">说明：<b>老板</b>全权限；<b>合伙人</b>所有页面都能看、功能都能用，但改不了「原数据/配置」（食材单价、套餐、设置、成本参数、账号）和<b>别人署名的订单</b>；<b>店员</b>只能看到「订单 / 备餐 / 库存」。禁用等于停用该账号（数据保留）。</p>
+<p class="tip">说明：禁用等于停用该账号（数据保留）。新增账号后，对方用账号密码登录即可一起录入与查看。</p>
 
 <script>
 async function load(){
@@ -85,10 +85,9 @@ async function load(){
   const box=document.getElementById('list');box.innerHTML='';
   (d.users||[]).forEach(u=>{
     const div=document.createElement('div');div.className='row';
-    const rl=u.role==='boss'?'老板':(u.role==='partner'?'合伙人':'店员');
     const ds=u.active?'':'（已禁用）';
     div.innerHTML=`<span class="nm">${u.name||u.username}</span>
-      <span class="rl ${u.role}">${rl}</span><span class="ds">${u.username}${ds}</span>
+      <span class="ds">${u.username}${ds}</span>
       <span class="acts">
         ${IS_BOSS ? `<button class="ghost" onclick="toggle(${u.id})">${u.active?'禁用':'启用'}</button>
         <button class="ghost" onclick="resetPw(${u.id})">重置密码</button>

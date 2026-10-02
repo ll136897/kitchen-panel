@@ -106,7 +106,7 @@
 // 当前登录人（服务端注入）——决定"编辑本单"给不给用
 const CUR_USER = {{ (cur_user or {})|tojson }};
 function isBoss(){ return (CUR_USER && CUR_USER.role) === 'boss'; }
-// 财务敏感信息（成本/毛利）：老板和合伙人都能看，店员看不到
+// 财务敏感信息（成本/毛利）：刘和牛与孙梦都能看，店员看不到
 function canViewFinance(){ return !!(CUR_USER && (CUR_USER.role === 'boss' || CUR_USER.role === 'partner')); }
 function canTouch(o){
   if(isBoss()) return true;
@@ -115,7 +115,7 @@ function canTouch(o){
 function prettyName(n){
   n = (n || '').trim();
   if(!n) return '未标注';
-  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '老板';
+  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘和牛';
   return n;
 }
 function ownerText(o){
@@ -247,16 +247,16 @@ function loadPkgs(cb){
 function toggleEdit(show){
   const c = document.getElementById('editCard');
   const willShow = (typeof show === 'boolean') ? show : (!c.style.display || c.style.display === 'none');
-  // 没权限的人不允许打开编辑区（服务端也会拦）
+  // 不是自己署名的单不允许打开编辑区（服务端也会拦）
   if(willShow && curOrder && !canTouch(curOrder)){
-    alert('这单不是你署名的，你没有修改权限（只能改自己署名的订单）');
+    alert('这单是 ' + (curOrder.created_by_name || '别人') + ' 署名的，你只能改自己署名的订单');
     return;
   }
   c.style.display = willShow ? 'block' : 'none';
   if(willShow){ loadPkgs(fillEdit); loadOwners(); }
 }
-// 能改这一单的人就能改"署名"（老板全权；其他人只能改自己署名的单，服务端同样判定）
-// 候选人来自 /api/signers（老板/合伙人/自己）——不能用 /api/users，那个是老板专属
+// 能改这一单的人就能改"署名"（谁署名的单谁就能改，服务端同样判定）
+// 候选人来自 /api/signers（刘和牛/孙梦/自己）——不能用 /api/users（那是账号管理专属）
 function loadOwners(){
   const wrap = document.getElementById('edOwnerWrap');
   const sel = document.getElementById('edOwner');
@@ -267,8 +267,7 @@ function loadOwners(){
     const us = (d && d.data) || [];
     sel.innerHTML = us.map(function(u){
       return '<option value="' + u.id + '">' + (u.name || ('用户' + u.id)) +
-             (u.is_me ? '（我）' : '') +
-             (u.role === 'boss' ? ' · 老板' : (u.role === 'partner' ? ' · 合伙人' : '')) + '</option>';
+             (u.is_me ? '（我）' : '') + '</option>';
     }).join('') || '<option value="">（未标注）</option>';
     if(curOrder) sel.value = curOrder.created_by || sel.options[0].value;
   }).catch(function(){ wrap.style.display = 'none'; });
@@ -415,7 +414,7 @@ function showRefreshToast(){
 }
 loadDetail();
 loadPkgs();
-// 「这单赚多少」含成本/毛利 → 老板和合伙人能看，店员看不到（店员连请求都不发）
+// 「这单赚多少」含成本/毛利 → 刘和牛与孙梦都能看，店员看不到（店员连请求都不发）
 if(canViewFinance()){ loadProfit(); }
 else { const _pc = document.getElementById('profitCard'); if(_pc) _pc.style.display = 'none'; }
 
