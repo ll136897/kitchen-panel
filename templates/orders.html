@@ -51,6 +51,12 @@
   .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .sort-sep{width:1px;height:16px;background:var(--border);margin:0 2px}
   .sort-hint{flex-basis:100%;font-size:11px;color:#9a3412;opacity:.85;margin-top:-2px}
+  /* 订单归属：谁录的（我=蓝、别人=灰、未标注=淡） */
+  .chip.who{font-weight:700}
+  .chip.who-me{background:#e8f1fb;color:#1b5e9e;border:1px solid #bcd8f2}
+  .chip.who-other{background:#f3efe9;color:#6b5b4b;border:1px solid var(--border)}
+  .chip.who-none{background:#f6f6f6;color:#999;border:1px solid #e5e5e5}
+  .lock-note{font-size:12px;color:#9a8f83;background:#f7f4ef;border:1px dashed var(--border);border-radius:8px;padding:6px 10px}
   /* 按月分组：月份条可展开/收回 */
   .month-group{margin-bottom:8px}
   .month-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border:1px solid var(--border);border-radius:10px;cursor:pointer;user-select:none;font-weight:700;color:#5a4a3a}
@@ -110,6 +116,7 @@
     <button class="btn btn-sm btn-refresh" onclick="clearSearch()">✕ 清除</button>
   </div>
   <div class="date-chips" id="orderDateChips"></div>
+  <div class="date-chips" id="orderOwnerChips"></div>
   <div class="sort-chips" id="orderSortChips">
     <span class="sort-label">排序</span>
     <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="最近的日期在最上面；同一天里按出餐时间 上午→下午">📅 出餐日期·最近在上</button>
@@ -153,6 +160,24 @@
 </div>
 
 <script>
+// 当前登录人（服务端注入）——用来区分"谁录的"、并决定给不给"改单"按钮
+const CUR_USER = {{ (cur_user or {})|tojson }};
+function isBoss(){ return (CUR_USER && CUR_USER.role) === 'boss'; }
+// 能不能改/删这一单：老板全权；其他人只能动自己录的（和服务端判定保持一致）
+function canTouch(o){
+  if(isBoss()) return true;
+  return !!(o && o.created_by && CUR_USER && o.created_by === CUR_USER.id);
+}
+function prettyName(n){
+  n = (n || '').trim();
+  if(!n) return '未标注';
+  if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '老板';
+  return n;
+}
+function creatorLabel(o){
+  if(o && o.created_by && CUR_USER && o.created_by === CUR_USER.id) return '我录的';
+  return (o && o.created_by_name) ? (prettyName(o.created_by_name) + ' 录的') : '未标注';
+}
 function statusLabel(s){
   const map = {
     pending:   ['⏳ 待备',    'tag-orange'],
@@ -175,6 +200,7 @@ let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
 let filterMonth = '';      // 按月份筛选（''=全部月份）；选某天后会自动带上它所在的月
+let filterOwner = '';      // 按"录入人"筛选（''=全部 | 'me'=我录的 | 用户id数字=某人录的）
 let sortMode = 'date';     // 排序方式：'date'=出餐日期（早→晚） | 'join'=加入顺序（最新在上）
 let monthMode = true;             // 是否按月分组显示（默认开）
 let collapsedMonths = new Set();  // 手动收起的月份（'YYYY-MM'）
@@ -323,6 +349,28 @@ function renderOrderDateChips(){
   box.innerHTML = html;
 }
 
+// 录入人筛选：我录的 / 某人录的（老板和店员都看得到，用来分清"谁的单"）
+function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
+function ownerKey(o){ return (o && o.created_by) ? String(o.created_by) : ''; }
+function renderOrderOwnerChips(){
+  const box = document.getElementById('orderOwnerChips');
+  if(!box) return;
+  // 从订单里归纳出"有哪些录入人"（不需要额外接口）
+  const cnt = {}, nm = {};
+  allOrders.forEach(o=>{
+    const k = ownerKey(o);
+    cnt[k] = (cnt[k]||0) + 1;
+    if(k && !nm[k]) nm[k] = prettyName(o.created_by_name) || ('用户'+k);
+  });
+  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
+  const others = Object.keys(cnt).filter(k=>k && k!==mine).sort((a,b)=> cnt[b]-cnt[a]);
+  let html = `<span class="sort-label" style="flex:0 0 100%">录入人</span>`;
+  html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrders.length}</button>`;
+  if(mine && cnt[mine]) html += `<button class="date-chip ${filterOwner==='me'?'active':''}" onclick="setOrderOwner('me')">我录的 ${cnt[mine]}</button>`;
+  html += others.map(k=>`<button class="date-chip ${filterOwner===k?'active':''}" onclick="setOrderOwner('${k}')">${nm[k]} ${cnt[k]}</button>`).join('');
+  if(cnt['']) html += `<button class="date-chip ${filterOwner==='0'?'active':''}" onclick="setOrderOwner('0')">未标注 ${cnt['']}</button>`;
+  box.innerHTML = html;
+}
 // 排序切换：出餐日期 / 加入顺序
 function setSort(m){ sortMode = m; renderSortChips(); renderOrders(); }
 function renderSortChips(){
@@ -441,28 +489,36 @@ function buildCard(o, isAnchor){
       <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
     </div>
 
-    <div class="chips">${pkgs}</div>
+    <div class="chips">${pkgs}${ownerChip(o)}</div>
     ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
 
     <div class="btn-row">
-      ${showDeleted ? `
+      ${showDeleted ? (canTouch(o) ? `
         <button class="btn btn-sm btn-success" onclick="restoreOrder(${o.id})">♻️ 恢复</button>
         <button class="btn btn-sm btn-danger" onclick="purgeOrder(${o.id},'${o.contact_name||''}')">🔥 彻底删除</button>
-      ` : `
+      ` : `<span class="lock-note">🔒 这单不是你录的，只能看</span>`) : `
       <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
       <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
       <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="location.href='/prep?focus=${o.id}'">🍱 备餐核对</button>
+      ${canTouch(o) ? `
       ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
       ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
       ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
       ${(o.status==='done'||o.status==='cancelled') ? `<button class="btn btn-sm btn-danger" onclick="delOrder(${o.id},'${o.contact_name||''}')">🗑 删除</button>` : ''}
       ${o.status!=='cancelled' && o.status!=='done' ? `<button class="btn btn-sm btn-danger" onclick="setStatus(${o.id},'cancelled')">❌ 取消</button>` : ''}
+      ` : `<span class="lock-note">🔒 这单不是你录的，只能看（备餐/出餐单照常可用）</span>`}
       `}
     </div>
     <div id="req-${o.id}" class="req-box" style="display:none"></div>
   </div>`;
 }
 
+// 卡片上的"谁录的"标签（老板=金色，我=蓝色，别人=灰色）
+function ownerChip(o){
+  const mine = o && o.created_by && CUR_USER && o.created_by === CUR_USER.id;
+  const cls = mine ? 'who-me' : ((o && o.created_by) ? 'who-other' : 'who-none');
+  return `<span class="chip who ${cls}" title="这单是谁录的">👤 ${creatorLabel(o)}</span>`;
+}
 function renderOrders(){
   const box = document.getElementById('orderList');
   const kpis = document.getElementById('orderKPIs');
@@ -472,6 +528,11 @@ function renderOrders(){
   let scope = allOrders;
   if(filterMonth) scope = scope.filter(o=> (o.booking_date||'').slice(0,7)===filterMonth);
   if(filterDate)  scope = scope.filter(o=> o.booking_date===filterDate);
+  if(filterOwner){
+    if(filterOwner==='me') scope = scope.filter(o=> ownerKey(o) === String(CUR_USER && CUR_USER.id || ''));
+    else if(filterOwner==='0') scope = scope.filter(o=> ownerKey(o) === '');
+    else scope = scope.filter(o=> ownerKey(o) === filterOwner);
+  }
   if(filterText){
     const q = filterText.toLowerCase();
     scope = scope.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
@@ -480,22 +541,26 @@ function renderOrders(){
   const count = {pending:0,preparing:0,done:0,cancelled:0};
   let totalAmt = 0;
   scope.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
-  const scName = filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单'));
-  const scNote = (filterDate||filterMonth||filterText) ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)}`;
+  const scName = filterOwner ? '筛选订单' : (filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单')));
+  const anyFilter = !!(filterDate||filterMonth||filterText||filterOwner);
+  const scNote = anyFilter ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)}`;
   if(kpis) kpis.innerHTML = [
     {cls:'kpi-dark',icon:'📋',num:scope.length,lbl:scName,sub:scNote},
     {cls:'kpi-red',icon:'⏳',num:count.pending,lbl:'待备'},
     {cls:'kpi-orange',icon:'🔥',num:count.preparing,lbl:'备餐中'},
     {cls:'kpi-green',icon:'✅',num:count.done,lbl:'已完成'},
   ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}${k.sub?`<span style="opacity:.7"> · ${k.sub}</span>`:''}</div></div>`).join('');
+  renderOrderOwnerChips();
 
   // 列表用同一份筛选结果
   let list = scope;
   const hint = document.getElementById('orderCountHint');
   if(hint){
-    if(filterText || filterDate || filterMonth){
+    if(anyFilter){
       hint.style.display='block';
-      const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:''].filter(Boolean).join(' · ');
+      const ownerTxt = filterOwner==='me' ? '我录的'
+        : (filterOwner ? ((allOrders.find(o=>ownerKey(o)===filterOwner)||{}).created_by_name || '某人')+' 录的' : '');
+      const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:'', ownerTxt].filter(Boolean).join(' · ');
       hint.textContent = `🔎 ${list.length} 条（共 ${allOrders.length} 条）${scopeTxt?' · '+scopeTxt:''}${filterText?(' · 含“'+filterText+'”'):''} · 合计 ¥${money(totalAmt)}`;
     } else hint.style.display='none';
   }

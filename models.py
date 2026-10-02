@@ -252,6 +252,26 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN stock_deducted_at TEXT")
         if "discount" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0")
+        # 录入人（2026-10-02）：订单归属到"谁录的"，用于权限（店员只能改自己录的单）
+        _was_created_by = "created_by" in cols
+        if not _was_created_by:
+            cur.execute("ALTER TABLE orders ADD COLUMN created_by INTEGER")
+        if "created_by_name" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN created_by_name TEXT")
+        # 首次加这个字段时，把历史订单统一归到第一个老板账号名下：
+        # 这样店员改不到这些单，老板仍全权处理；之后老板可在订单页把某单「改录入人」转给店员。
+        # （新库此刻 users 表还没建 → 抛错被忽略，正常）
+        if not _was_created_by:
+            try:
+                _boss = cur.execute(
+                    "SELECT id, name FROM users WHERE role='boss' ORDER BY id LIMIT 1").fetchone()
+                if _boss:
+                    cur.execute(
+                        "UPDATE orders SET created_by=?, created_by_name=? WHERE created_by IS NULL",
+                        (_boss["id"], (_boss["name"] or "老板")))
+                    print("[迁移] 历史订单已归到老板名下：%s" % (_boss["name"] or _boss["id"]))
+            except Exception as _e:
+                print("[迁移] 历史订单归属跳过：", _e)
 
         # 订单→套餐明细
         cur.execute("""

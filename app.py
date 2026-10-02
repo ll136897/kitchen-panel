@@ -390,14 +390,20 @@ def _required_role(path, method):
     if path.startswith("/static/"):
         return None
     # 老板专属（页面与同名 API 一并拦）
-    for p in ("/config", "/finance", "/menu", "/history", "/admin",
-              "/dashboard", "/api/users"):
+    # 注：以前只拦了页面、没拦同名 API → 店员可以直接请求 /api/finance/* 读到全店财务，
+    #     订单详情里的"这单赚多少"也是靠它。这里一并收口（2026-10-02）
+    for p in ("/config", "/finance", "/api/finance", "/menu", "/api/menu",
+              "/history", "/admin", "/dashboard", "/api/users",
+              "/analytics", "/api/analytics"):
         if path == p or path.startswith(p + "/"):
             return "boss"
     # 写操作默认老板；仅明确放给店员的运营动作才可写
     if method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
         for s in ("/api/stock/consume", "/api/stock/consume/undo",
-                  "/api/stock/loans", "/api/stock/loans/return-all", "/api/prep"):
+                  "/api/stock/loans", "/api/stock/loans/return-all", "/api/prep",
+                  # 订单：店员可以"加单"，也可以改/删——但**只能动自己录的单**，
+                  # 具体能不能动由各接口按录入人（orders.created_by）再判一次（见 _can_touch_order）
+                  "/api/orders", "/api/parse"):
             if path == s or path.startswith(s + "/"):
                 return "staff"
         return "boss"
@@ -438,6 +444,37 @@ def auth_guard():
 @app.context_processor
 def _inject_user():
     return {"cur_user": getattr(g, "cur_user", None)}
+
+
+# ===== 订单归属与权限（2026-10-02）=====
+# 老板（role=boss）全权；其他人（role=staff）**只能改/删自己录的订单**。
+# 每条订单记 orders.created_by（用户 id）+ created_by_name（当时的名字，便于显示）。
+def _cur_uid():
+    u = getattr(g, "cur_user", None) or {}
+    return u.get("id")
+
+
+def _is_boss():
+    u = getattr(g, "cur_user", None) or {}
+    return u.get("role") == "boss"
+
+
+def _can_touch_order(db, oid):
+    """当前用户能不能改/删这一单"""
+    if _is_boss():
+        return True
+    row = db.execute("SELECT created_by FROM orders WHERE id=?", (oid,)).fetchone()
+    if not row:
+        return False
+    return row["created_by"] is not None and row["created_by"] == _cur_uid()
+
+
+# 店员越权时的统一回复
+NO_PERM_MSG = "无权限：这单是别人录的，你只能修改/删除自己录的订单"
+
+
+def _deny_order():
+    return jsonify({"ok": False, "msg": NO_PERM_MSG}), 403
 
 
 @app.route("/login")
@@ -1392,18 +1429,21 @@ def create_order():
 
     order_ids = []
     results = []
+    _u = getattr(g, "cur_user", None) or {}
     for chunk, parsed in zip(chunks, parsed_chunks):
         matched = match_packages_in_db(parsed["packages"])
         cur.execute("""
             INSERT INTO orders
             (raw_text, booking_date, booking_time, address, contact_name,
-             contact_phone, amount, deposit, meal_time, pickup_time, note, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')
+             contact_phone, amount, deposit, meal_time, pickup_time, note, status,
+             created_by, created_by_name)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)
         """, (
             chunk, parsed["booking_date"], parsed["booking_time"],
             parsed["address"], parsed["contact_name"], parsed["contact_phone"],
             parsed["amount"], parsed["deposit"], parsed["meal_time"],
             parsed["pickup_time"], parsed["note"],
+            _u.get("id"), _u.get("name") or _u.get("username") or "",
         ))
         order_id = cur.lastrowid
         order_ids.append(order_id)
@@ -1431,11 +1471,13 @@ def list_orders():
     cur = db.cursor()
     purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
     show_deleted = request.args.get("deleted") == "1"
+    # 列表要带上"录入人"，前端用来区分订单归属、以及决定给不给改的按钮
     if show_deleted:
         cur.execute("""
             SELECT id, booking_date, booking_time, address, contact_name,
-                   contact_phone, amount, deposit, note, status, created_at, deleted_at
-            FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 100
+                   contact_phone, amount, deposit, note, status, created_at, deleted_at,
+                   created_by, created_by_name
+            FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 500
         """)
     else:
         # ⚠️ 以前这里是 LIMIT 100 —— 订单超过 100 单后**订单页会静默丢掉最早的单**
@@ -1443,7 +1485,8 @@ def list_orders():
         #    全在前端做，必须拿全量，所以放宽到 5000（够用多年，仍留个上限防跑飞）。
         cur.execute("""
             SELECT id, booking_date, booking_time, address, contact_name,
-                   contact_phone, amount, deposit, note, status, created_at
+                   contact_phone, amount, deposit, note, status, created_at,
+                   created_by, created_by_name
             FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 5000
         """)
     orders = [dict(r) for r in cur.fetchall()]
@@ -1489,6 +1532,8 @@ def restore_order(oid):
     cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
     if not cur.fetchone():
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     db.execute("UPDATE orders SET deleted_at=NULL WHERE id=?", (oid,))
     db.commit()
     return jsonify({"ok": True, "msg": "已恢复"})
@@ -1501,6 +1546,8 @@ def purge_order(oid):
     cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
     if not cur.fetchone():
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     db.execute("DELETE FROM orders WHERE id=?", (oid,))
     db.commit()
     return jsonify({"ok": True, "msg": "已彻底删除"})
@@ -1515,11 +1562,32 @@ def edit_order(oid):
     cur = db.cursor()
     if not cur.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    if not _can_touch_order(db, oid):
+        return _deny_order()
 
     def _txt(k):
         return (data.get(k) or "").strip()
 
     sets, params = [], []
+    # 改「录入人」只有老板能做（把历史订单转给店员，或纠正录错的人）
+    if "created_by" in data and _is_boss():
+        try:
+            _nb = int(data.get("created_by"))
+        except (TypeError, ValueError):
+            _nb = None
+        _nu = None
+        if _nb:
+            _nu = cur.execute("SELECT id, name, username FROM users WHERE id=?", (_nb,)).fetchone()
+        if _nu:
+            sets.append("created_by=?")
+            params.append(_nu["id"])
+            sets.append("created_by_name=?")
+            params.append(_nu["name"] or _nu["username"] or "")
+        elif _nb is None or _nb == 0:
+            sets.append("created_by=?")
+            params.append(None)
+            sets.append("created_by_name=?")
+            params.append("")
     for k in ("booking_date", "booking_time", "meal_time", "note",
               "address", "contact_name", "contact_phone"):
         if k in data:
@@ -1594,6 +1662,14 @@ def batch_orders():
     ids = [int(x) for x in ids if str(x).isdigit()]
     if not ids:
         return jsonify({"ok": False, "msg": "未选择任何订单"}), 400
+    # 店员只能批量处理自己录的单：有别人的单就直接拒绝（不做"部分执行"，避免误删）
+    if not _is_boss():
+        placeholders0 = ",".join("?" * len(ids))
+        bad = g.db.execute(
+            f"SELECT COUNT(*) c FROM orders WHERE id IN ({placeholders0}) "
+            f"AND (created_by IS NULL OR created_by<>?)", (ids + [_cur_uid()])).fetchone()["c"]
+        if bad:
+            return jsonify({"ok": False, "msg": f"无权限：选中的 {bad} 个订单不是你录的，你只能处理自己录的订单"}), 403
     placeholders = ",".join("?" * len(ids))
     db = g.db
     if action == "delete":
@@ -1619,6 +1695,8 @@ def update_order_status(oid):
         cur = db.execute("SELECT id FROM orders WHERE id=?", (oid,))
         if not cur.fetchone():
             return jsonify({"ok": False, "msg": "订单不存在"}), 404
+        if not _can_touch_order(db, oid):
+            return _deny_order()
         db.execute("UPDATE orders SET deleted_at=datetime('now','localtime') WHERE id=?", (oid,))
         db.commit()
         return jsonify({"ok": True, "msg": "已放进回收站，7 天内可恢复"})
@@ -1626,6 +1704,8 @@ def update_order_status(oid):
     status = data.get("status")
     if status not in ("pending", "preparing", "done", "cancelled"):
         return jsonify({"ok": False, "msg": "状态非法"}), 400
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     db.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
     # 注：原先"转备餐中自动借出工具"已停用 —— 搭建/回收外包、粗放阶段不逐笔登记借还，
     # 自动建借出挂账只会累积噪音；装备数量改以定期盘点为准。
