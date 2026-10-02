@@ -371,16 +371,49 @@ def teardown(exc):
 
 
 # ===================== 登录 / 分角色权限 =====================
-# 角色：boss（老板/合伙人，全权限）| staff（店员/帮手：订单/备餐/库存，看不见财务/设置/菜单）
-# 设计原则（2026-09-29）：
+# 角色（2026-10-02 改为三级）：
+#   boss    老板（全权限，含改"原数据"）
+#   partner 合伙人（页面/功能全都能看能用；**不能改"原数据"**；订单只能改自己录的）
+#   staff   店员/帮手（只看得到 订单/备餐/库存相关；订单只能改自己录的）
+# 设计原则：
 #   - 所有校验在服务端做（before_request），前端隐藏链接只是体验，不是安全；
-#   - 老板专属页面 = 配置/财务/菜单/历史/账号/录入；写操作默认老板，仅放少量店员操作（备餐出库等）。
+#   - 写操作**默认只有老板**；明确列出的才给合伙人/店员，越权在接口里再判一次订单归属。
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime as _dt
+
+# 角色高低：数字越大权限越高；接口声明"需要 partner"= 老板或合伙人
+ROLE_LEVEL = {"staff": 1, "partner": 2, "boss": 3}
 
 
 def _now():
     return _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 「原数据/配置」——只能看、不能改（连合伙人也不行）：食材/装备/套餐/菜品/价格/设置/成本参数/账号/保活
+_BOSSDATA_WRITE = (
+    "/api/ingredients", "/api/tools", "/api/packages", "/api/dishes",
+    "/api/price", "/api/settings", "/api/cost", "/api/users",
+    "/api/keepalive", "/api/catering/save",
+)
+# 店员/帮手也能做的运营写操作（订单/备餐/库存；具体订单能不能动还看是不是自己录的）
+_STAFF_WRITE = (
+    "/api/orders", "/api/parse", "/api/prep", "/api/stock", "/api/ticket",
+)
+# 合伙人可以执行的写操作（= 店员的那些 + 财务/备份等；老板当然也可以）
+_PARTNER_WRITE = _STAFF_WRITE + (
+    "/api/backup", "/api/catering/suggest",
+    # 单笔成本/收款/押金：能不能动由"这单是不是你录的"决定（见 _can_touch_order）
+    "/api/finance/order", "/api/finance/payment", "/api/finance/deposit",
+)
+# 只有老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置/账号等
+_PARTNER_READ = (
+    "/config", "/finance", "/api/finance", "/menu", "/api/menu",
+    "/history", "/admin", "/api/users", "/dashboard", "/analytics", "/api/analytics",
+)
+
+
+def _hit(path, prefixes):
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
 
 
 # 该请求需要什么角色：None=不用登录(匿名可访问)
@@ -389,25 +422,24 @@ def _required_role(path, method):
         return None
     if path.startswith("/static/"):
         return None
-    # 老板专属（页面与同名 API 一并拦）
-    # 注：以前只拦了页面、没拦同名 API → 店员可以直接请求 /api/finance/* 读到全店财务，
-    #     订单详情里的"这单赚多少"也是靠它。这里一并收口（2026-10-02）
-    for p in ("/config", "/finance", "/api/finance", "/menu", "/api/menu",
-              "/history", "/admin", "/dashboard", "/api/users",
-              "/analytics", "/api/analytics"):
-        if path == p or path.startswith(p + "/"):
+    write = (method or "GET").upper() in ("POST", "PUT", "DELETE", "PATCH")
+    if write:
+        # 1) 原数据/配置：只有老板能改（先判，别被后面的规则放过）
+        if _hit(path, _BOSSDATA_WRITE):
             return "boss"
-    # 写操作默认老板；仅明确放给店员的运营动作才可写
-    if method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
-        for s in ("/api/stock/consume", "/api/stock/consume/undo",
-                  "/api/stock/loans", "/api/stock/loans/return-all", "/api/prep",
-                  # 订单：店员可以"加单"，也可以改/删——但**只能动自己录的单**，
-                  # 具体能不能动由各接口按录入人（orders.created_by）再判一次（见 _can_touch_order）
-                  "/api/orders", "/api/parse"):
-            if path == s or path.startswith(s + "/"):
-                return "staff"
+        # 2) 店员也能用的运营写操作（订单/备餐/库存）——必须排在合伙人之前，
+        #    否则 /api/orders 会先被 _PARTNER_WRITE 命中，店员连加单都被拒
+        if _hit(path, _STAFF_WRITE):
+            return "staff"
+        # 3) 合伙人额外可用的写操作（财务/备份等）
+        if _hit(path, _PARTNER_WRITE):
+            return "partner"
+        # 4) 其余写操作默认只有老板
         return "boss"
-    # 其余 GET/HEAD（订单/备餐/库存/出餐单）：登录即可
+    # 读取：这些页面/接口老板和合伙人都能看（店员看不到）
+    if _hit(path, _PARTNER_READ):
+        return "partner"
+    # 其余（订单/备餐/出餐单等）登录即可
     return "staff"
 
 
@@ -434,9 +466,11 @@ def auth_guard():
             return jsonify({"ok": False, "msg": "请先登录"}), 401
         return redirect("/login")
     g.cur_user = user
-    # 角色不够
-    if need == "boss" and user["role"] != "boss":
+    # 角色不够（按等级比：staff 1 < partner 2 < boss 3）
+    if ROLE_LEVEL.get(user["role"], 0) < ROLE_LEVEL.get(need, 1):
         if path.startswith("/api/"):
+            if need == "boss":
+                return jsonify({"ok": False, "msg": "无权限：这是「原数据/配置」，只有老板能改"}), 403
             return jsonify({"ok": False, "msg": "无权限：该操作仅老板/合伙人可用"}), 403
         return "无权限：该页面仅老板/合伙人可访问", 403
 
@@ -529,7 +563,7 @@ def add_user():
     data = request.get_json(force=True) or {}
     un = (data.get("username") or "").strip()
     name = (data.get("name") or "").strip()
-    role = "boss" if data.get("role") == "boss" else "staff"
+    role = data.get("role") if data.get("role") in ("boss", "partner", "staff") else "staff"
     pw = data.get("password") or ""
     if not un or not pw:
         return jsonify({"ok": False, "msg": "用户名和密码必填"}), 400
@@ -3402,6 +3436,8 @@ def set_order_cost(oid):
     cur = db.cursor()
     if not cur.execute("SELECT id FROM orders WHERE id=?", (oid,)).fetchone():
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     kind = (data.get("kind") or "").strip()
     allowed = ("outsource", "fuel", "labor", "consume", "other")
     if kind not in allowed:
@@ -3439,6 +3475,8 @@ def clear_order_cost(oid):
     from profit import order_profit
     data = request.get_json(force=True) or {}
     db = g.db
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     kind = (data.get("kind") or "").strip()
     if kind == "other" and data.get("id"):
         db.execute("DELETE FROM order_costs WHERE id=? AND order_id=?", (data["id"], oid))
@@ -3541,14 +3579,26 @@ def analytics_overview():
         s = prev_start(s)
     starts.reverse()
 
+    # 录入人筛选（按 orders.created_by）：'' / 'me' / 用户 id / '0'=未标注
+    # 「能独立统计」——两人的单都计入系统，但可以单独看各自的经营数据
+    by = (request.args.get("by") or "").strip()
+    by_clause, by_params = "", []
+    if by == "me":
+        by_clause, by_params = " AND created_by = ? ", [_cur_uid()]
+    elif by == "0":
+        by_clause = " AND created_by IS NULL "
+    elif by.isdigit():
+        by_clause, by_params = " AND created_by = ? ", [int(by)]
+
     rows = db.execute("""
         SELECT id, booking_date, booking_time, contact_name, contact_phone, address,
-               amount, status, payment_status
+               amount, status, payment_status, created_by, created_by_name
         FROM orders
         WHERE status!='cancelled' AND deleted_at IS NULL
               AND booking_date IS NOT NULL AND booking_date!=''
+    """ + by_clause + """
         ORDER BY booking_date DESC, id DESC
-    """).fetchall()
+    """, by_params).fetchall()
 
     def to_date(v):
         try:
@@ -3584,7 +3634,17 @@ def analytics_overview():
             "address": r["address"] or "", "amount": amt, "period": st.isoformat(),
             "payment_status": r["payment_status"] or "unpaid",
             "pkgs": order_pkgs.get(r["id"], []), "gender": gen_of(r["contact_name"]),
+            "by": r["created_by"], "by_name": r["created_by_name"] or "",
         })
+
+    # 录入人清单（不受当前筛选影响，用来渲染筛选按钮）
+    _cr = db.execute("""
+        SELECT created_by AS uid, COALESCE(NULLIF(TRIM(created_by_name),''),'') AS nm, COUNT(*) c
+        FROM orders WHERE status!='cancelled' AND deleted_at IS NULL
+        GROUP BY created_by ORDER BY c DESC
+    """).fetchall()
+    creators = [{"id": ("" if r["uid"] is None else str(r["uid"])),
+                 "name": (r["nm"] or ""), "orders": r["c"]} for r in _cr]
 
     def pack(k):
         a = agg[k]
@@ -3720,6 +3780,7 @@ def analytics_overview():
         "recent_from": recent_from.isoformat(), "recent_orders": len(recent),
         "packages": packages, "places": places, "hours": hours, "weekdays": weekdays,
         "gender": gender, "repeat": repeat[:30], "proxy": proxy,
+        "creators": creators, "by": by,
         "orders": recs,          # 明细：供前端点条目下钻
     }})
 
@@ -3730,6 +3791,8 @@ def update_payment(oid):
     data = request.get_json(force=True)
     status = data.get("payment_status", "unpaid")
     db = g.db
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     db.execute("UPDATE orders SET payment_status=? WHERE id=?", (status, oid))
     db.commit()
     return jsonify({"ok": True})
@@ -3741,6 +3804,8 @@ def update_deposit(oid):
     data = request.get_json(force=True)
     status = data.get("deposit_status", "pending")
     db = g.db
+    if not _can_touch_order(db, oid):
+        return _deny_order()
     db.execute("UPDATE orders SET deposit_status=? WHERE id=?", (status, oid))
     db.commit()
     return jsonify({"ok": True})

@@ -106,6 +106,8 @@
 // 当前登录人（服务端注入）——决定"编辑本单"给不给用
 const CUR_USER = {{ (cur_user or {})|tojson }};
 function isBoss(){ return (CUR_USER && CUR_USER.role) === 'boss'; }
+// 财务敏感信息（成本/毛利）：老板和合伙人都能看，店员看不到
+function canViewFinance(){ return !!(CUR_USER && (CUR_USER.role === 'boss' || CUR_USER.role === 'partner')); }
 function canTouch(o){
   if(isBoss()) return true;
   return !!(o && o.created_by && CUR_USER && o.created_by === CUR_USER.id);
@@ -408,8 +410,8 @@ function showRefreshToast(){
 }
 loadDetail();
 loadPkgs();
-// 「这单赚多少」含成本/毛利 → 只有老板看得到（店员隐藏+不请求）
-if(isBoss()){ loadProfit(); }
+// 「这单赚多少」含成本/毛利 → 老板和合伙人能看，店员看不到（店员连请求都不发）
+if(canViewFinance()){ loadProfit(); }
 else { const _pc = document.getElementById('profitCard'); if(_pc) _pc.style.display = 'none'; }
 
 // ===== 这单赚多少 =====

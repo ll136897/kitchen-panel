@@ -384,6 +384,17 @@ def init_db():
             )
         """)
 
+        # 一次性迁移（2026-10-02）：把合伙人账号从 staff 升为 partner。
+        # 用户明确要求：孙梦是**合伙人**，所有页面都能看、功能都能用，
+        # 只是不能改「原数据」和老板录的订单 —— 这跟"店员(staff)"不是一回事。
+        # 只按用户名精确匹配，一次生效；以后新增的用户不受影响（可在「账号」页选角色）。
+        try:
+            cur.execute("UPDATE users SET role='partner' WHERE username='sunmeng' AND role='staff'")
+            if cur.rowcount:
+                print("[迁移] 已把 sunmeng 升级为 partner（合伙人）")
+        except Exception as _e:
+            print("[迁移] 合伙人角色升级跳过：", _e)
+
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 

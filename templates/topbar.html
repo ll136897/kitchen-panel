@@ -1,6 +1,7 @@
-{# 公共顶栏（复用 .nav 样式）：按角色只显示该看的链接。登录后才能看到。 #}
+{# 公共顶栏（复用 .nav 样式）：按角色只显示该看的链接。登录后才能看到。
+   boss=老板 / partner=合伙人（两者都能看全部页面）/ staff=店员（只看订单·备餐） #}
 <nav class="nav">
-  {% if cur_user and cur_user.role == 'boss' %}
+  {% if cur_user and cur_user.role in ('boss', 'partner') %}
     <a href="/dashboard" class="nav-item">📊 录入</a>
     <a href="/orders" class="nav-item">📋 订单</a>
     <a href="/prep" class="nav-item">🍱 备餐</a>
