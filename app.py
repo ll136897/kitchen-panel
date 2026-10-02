@@ -1438,10 +1438,13 @@ def list_orders():
             FROM orders WHERE deleted_at IS NOT NULL ORDER BY id DESC LIMIT 100
         """)
     else:
+        # ⚠️ 以前这里是 LIMIT 100 —— 订单超过 100 单后**订单页会静默丢掉最早的单**
+        #    （117 单时 9 月只显示 58 单、实际 75 单）。订单页的筛选/排序/按月分组
+        #    全在前端做，必须拿全量，所以放宽到 5000（够用多年，仍留个上限防跑飞）。
         cur.execute("""
             SELECT id, booking_date, booking_time, address, contact_name,
                    contact_phone, amount, deposit, note, status, created_at
-            FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 100
+            FROM orders WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 5000
         """)
     orders = [dict(r) for r in cur.fetchall()]
     # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。

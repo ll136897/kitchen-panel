@@ -254,9 +254,11 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
 .order-preview{background:#fff;border-radius:14px;padding:18px;margin:12px 0;border:1px solid var(--border-l);box-shadow:var(--shadow-sm)}
 .order-preview h4{color:var(--primary);margin-bottom:12px;font-size:15px}
 .preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
-.preview-grid .cell{background:#faf5ed;padding:8px 10px;border-radius:8px;border:1px solid var(--border-l)}
+/* min-width:0 + 可断行：否则格子里出现"超长不可断内容"（比如一串没分隔的电话号码）时，
+   那一列会被撑宽、其它格子被挤成竖排单字（手机上亲眼见过） */
+.preview-grid .cell{background:#faf5ed;padding:8px 10px;border-radius:8px;border:1px solid var(--border-l);min-width:0}
 .preview-grid .cell .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-.preview-grid .cell .v{font-size:14px;font-weight:700;color:var(--txt);margin-top:2px}
+.preview-grid .cell .v{font-size:14px;font-weight:700;color:var(--txt);margin-top:2px;overflow-wrap:anywhere;word-break:break-word}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .chip{
   background:var(--blue-bg);color:var(--blue);padding:6px 12px;border-radius:20px;

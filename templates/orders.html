@@ -66,6 +66,8 @@
   .dm-head.cur{border-color:var(--primary);color:var(--primary);background:#fffaf9}
   .dm-caret{font-size:11px}
   .dm-meta{margin-left:2px;font-weight:600;opacity:.85}
+  .dm-months{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-bottom:4px;padding-bottom:8px;border-bottom:1px dashed var(--border)}
+  .dm-months .lbl{font-size:12px;color:#9a3412;align-self:center;margin-right:2px}
   .dm-days{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px 4px}
 </style>
 </head>
@@ -109,8 +111,8 @@
   <div class="date-chips" id="orderDateChips"></div>
   <div class="sort-chips" id="orderSortChips">
     <span class="sort-label">排序</span>
-    <button class="sort-chip active" data-mode="date" onclick="setSort('date')">📅 出餐日期</button>
-    <button class="sort-chip" data-mode="join" onclick="setSort('join')" title="最后加入的排在最前面">🆔 加入顺序</button>
+    <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="按出餐日期+时间从早到晚，上午的排在上面">📅 出餐日期·早→晚</button>
+    <button class="sort-chip" data-mode="join" onclick="setSort('join')" title="按录入先后，最后加入的在最上面">🆔 加入顺序·最新在上</button>
     <span class="sort-sep"></span>
     <button class="sort-chip active" id="monthChip" onclick="toggleMonthMode()">📆 按月分组</button>
     <button class="sort-chip" id="collapseAllChip" onclick="toggleCollapseAll()">⇕ 全部收起</button>
@@ -170,7 +172,8 @@ let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月�
 let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
-let sortMode = 'date';     // 排序方式：'date'=出餐日期（默认） | 'join'=加入顺序
+let filterMonth = '';      // 按月份筛选（''=全部月份）；选某天后会自动带上它所在的月
+let sortMode = 'date';     // 排序方式：'date'=出餐日期（早→晚） | 'join'=加入顺序（最新在上）
 let monthMode = true;             // 是否按月分组显示（默认开）
 let collapsedMonths = new Set();  // 手动收起的月份（'YYYY-MM'）
 let expandedMonths = new Set();   // 手动展开的往月（往月默认收起，点开才进这里）
@@ -189,8 +192,12 @@ function toggleTrash(){
 // 排序键： booking_date + 用餐/预订时间
 function orderDt(o){
   const t = (o.meal_time || o.booking_time || o.pickup_time || '');
-  return (o.booking_date || '0000-00-00') + ' ' + (t || '00:00');
+  // 没填时间的单排在当天最后（用 99:99 兜底）——
+  // 以前兜底成 00:00，会把"没写时间"的单顶到当天最前面，像凌晨第一单，容易看错
+  return (o.booking_date || '0000-00-00') + ' ' + (t || '99:99');
 }
+// 出餐时间（卡片上大字显示的那个）——排序也用同一口径，避免"看到的和排的不一致"
+function orderTime(o){ return (o.meal_time || o.booking_time || o.pickup_time || ''); }
 // date 是否落在以 anchorDate 为基准的 周/月 范围内
 function inScope(dateStr, anchorDate, scope){
   if(!dateStr || !anchorDate) return false;
@@ -252,11 +259,21 @@ function toggleDateMonth(k){
   else { dateExpandedMonths.delete(k); dateCollapsedMonths.add(k); }
   renderOrderDateChips();
 }
+function setOrderMonth(k){
+  filterMonth = k || '';
+  if(k && filterDate && filterDate.slice(0,7)!==k) filterDate = '';   // 换月后原来的日期已不在范围内
+  // 明确选了月份 → 列表里那个月直接展开（否则往月默认收起，点了却看不到单）
+  if(k){ collapsedMonths.delete(k); expandedMonths.add(k); initedMonths.add(k);
+         if(dateMonthCollapsed(k)){ dateExpandedMonths.add(k); dateCollapsedMonths.delete(k); } }
+  renderOrderDateChips();
+  renderOrders();
+}
 function setOrderDate(d){
   filterDate = d;
-  if(d){                                    // 选中的那天若在收起的月份里 → 自动展开那个月
-    const k = d.slice(0,7);
-    if(dateMonthCollapsed(k)){ dateExpandedMonths.add(k); dateCollapsedMonths.delete(k); }
+  if(d){
+    filterMonth = d.slice(0,7);              // 选了某天 → 月份也锁定到那个月
+    collapsedMonths.delete(filterMonth); expandedMonths.add(filterMonth); initedMonths.add(filterMonth);
+    if(dateMonthCollapsed(filterMonth)){ dateExpandedMonths.add(filterMonth); dateCollapsedMonths.delete(filterMonth); }
   }
   renderOrderDateChips();
   renderOrders();
@@ -275,8 +292,17 @@ function renderOrderDateChips(){
     dateInitedMonths.add(k);
     if(k < curM && k !== newest) dateCollapsedMonths.add(k);
   });
-  let html = `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')" style="flex:0 0 auto">全部日期</button>`;
-  html += order.map(k=>{
+
+  // 月份筛选行：点某个月 → 列表和上面的 KPI 都只看这个月（这是"选了月份没反应"的正解）
+  let html = `<div class="dm-months"><span class="lbl">月份</span>
+    <button class="date-chip ${filterMonth===''?'active':''}" onclick="setOrderMonth('')">全部</button>` +
+    order.map(k=>{
+      const cnt = groups[k].reduce((s,d)=> s + counts[d], 0);
+      return `<button class="date-chip ${filterMonth===k?'active':''}" onclick="setOrderMonth('${k}')">${orderMonthLabel(k)} <span class="cnt">${cnt}</span></button>`;
+    }).join('') + `</div>`;
+
+  html += `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')" style="flex:0 0 auto">全部日期</button>`;
+  html += order.filter(k=> !filterMonth || k===filterMonth).map(k=>{
     const arr = groups[k];
     const collapsed = dateMonthCollapsed(k);
     const cnt = arr.reduce((s,d)=> s + counts[d], 0);
@@ -393,8 +419,9 @@ function buildCard(o, isAnchor){
     <div class="order-head">
       <div style="display:flex;align-items:center">
         ${selMode ? `<input type="checkbox" class="batch-chk" data-oid="${o.id}" ${selectedIds.has(o.id)?'checked':''} onchange="toggleSel(${o.id}, this.checked)">` : ''}
-        <b style="font-size:16px">#${o.id}</b>
-        <span class="muted" style="margin-left:6px">${o.booking_date||''} ${o.booking_time||''}</span>${anchorFlag}
+        <b style="font-size:17px">${orderTime(o)||'—'}</b>
+        <span class="muted" style="margin-left:8px">${o.booking_date||''}</span>
+        <span class="muted" style="margin-left:6px;font-size:11px;opacity:.55">#${o.id}</span>${anchorFlag}
       </div>
       <span class="tag ${stCls} tag-lg">${stText}</span>
     </div>
@@ -431,38 +458,47 @@ function buildCard(o, isAnchor){
 function renderOrders(){
   const box = document.getElementById('orderList');
   const kpis = document.getElementById('orderKPIs');
-  // 顶部 KPI 始终按全部订单统计
+
+  // 先算"当前筛选范围"（月份 / 日期 / 搜索），KPI 跟着它走
+  // （以前 KPI 永远按全部订单统计 → 选了月份/日期数字不变，看着像没生效）
+  let scope = allOrders;
+  if(filterMonth) scope = scope.filter(o=> (o.booking_date||'').slice(0,7)===filterMonth);
+  if(filterDate)  scope = scope.filter(o=> o.booking_date===filterDate);
+  if(filterText){
+    const q = filterText.toLowerCase();
+    scope = scope.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
+      .some(f=>(f||'').toLowerCase().includes(q)));
+  }
   const count = {pending:0,preparing:0,done:0,cancelled:0};
   let totalAmt = 0;
-  allOrders.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
+  scope.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
+  const scName = filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单'));
+  const scNote = (filterDate||filterMonth||filterText) ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)}`;
   if(kpis) kpis.innerHTML = [
-    {cls:'kpi-dark',icon:'📋',num:allOrders.length,lbl:'全部订单'},
+    {cls:'kpi-dark',icon:'📋',num:scope.length,lbl:scName,sub:scNote},
     {cls:'kpi-red',icon:'⏳',num:count.pending,lbl:'待备'},
     {cls:'kpi-orange',icon:'🔥',num:count.preparing,lbl:'备餐中'},
     {cls:'kpi-green',icon:'✅',num:count.done,lbl:'已完成'},
-  ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('');
+  ].map(k=>`<div class="kpi ${k.cls}"><div class="kpi-icon">${k.icon}</div><div class="kpi-num">${k.num}</div><div class="kpi-lbl">${k.lbl}${k.sub?`<span style="opacity:.7"> · ${k.sub}</span>`:''}</div></div>`).join('');
 
-  // 应用搜索 + 日期筛选
-  let list = allOrders;
-  if(filterDate) list = list.filter(o=>o.booking_date===filterDate);
-  if(filterText){
-    const q = filterText.toLowerCase();
-    list = list.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
-      .some(f=>(f||'').toLowerCase().includes(q)));
-  }
-  // 排序：默认按出餐日期（新日期在前），可切到加入顺序（先录入的在前）
-  list = list.slice().sort((a,b)=>{
-    if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return cb<ca?-1:(cb>ca?1:0); }  // 最后加入的排最前
-    const da=orderDt(a), db=orderDt(b);
-    return db<da?-1:(db>da?1:0);
-  });
+  // 列表用同一份筛选结果
+  let list = scope;
   const hint = document.getElementById('orderCountHint');
   if(hint){
-    if(filterText || filterDate){
+    if(filterText || filterDate || filterMonth){
       hint.style.display='block';
-      hint.textContent = `🔎 筛选出 ${list.length} 条（共 ${allOrders.length} 条）${filterDate?(' · '+filterDate):''}${filterText?(' · 含“'+filterText+'”'):''}`;
+      const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:''].filter(Boolean).join(' · ');
+      hint.textContent = `🔎 ${list.length} 条（共 ${allOrders.length} 条）${scopeTxt?' · '+scopeTxt:''}${filterText?(' · 含“'+filterText+'”'):''} · 合计 ¥${money(totalAmt)}`;
     } else hint.style.display='none';
   }
+  // 排序
+  //  · 出餐日期：按 出餐日期+时间 从早到晚（同一天里，上午的在上、下午的在下）
+  //  · 加入顺序：按录入先后，**最后加入的在最上面**
+  list = list.slice().sort((a,b)=>{
+    if(sortMode==='join'){ const ca=joinKey(a), cb=joinKey(b); return cb<ca?-1:(cb>ca?1:0); }
+    const da=orderDt(a), db=orderDt(b);
+    return da<db?-1:(da>db?1:0);
+  });
 
   if(!groupField){
     document.getElementById('groupBar').style.display='none';
