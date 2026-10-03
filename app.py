@@ -2819,12 +2819,11 @@ def export_menu_xlsx():
         """, (p["id"],))
         p["tools"] = sort_tools([dict(r) for r in cur.fetchall()], "per_package", "tool")
 
-    # 与网页菜单完全一致的分类顺序与标签
-    # 食材分类顺序：beef→pork→chicken→vegetable→side→sauce→drink→staple→packaging→utensil→other
-    # 工具放最后
+    # 与网页菜单完全一致的分类顺序与标签（以菜单原数据页 CAT_ORDER 为准）
+    # beef→pork→chicken→vegetable→side→sauce→drink→packaging→utensil→staple→other→tool
     EXPORT_CAT_ORDER = [
         "beef", "pork", "chicken", "vegetable", "side", "sauce", "drink",
-        "staple", "packaging", "utensil", "other", "tool"
+        "packaging", "utensil", "staple", "other", "tool"
     ]
     cat_colors = {
         'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
@@ -2853,6 +2852,12 @@ def export_menu_xlsx():
         ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
         ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
         ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
+        # 客户餐具固定顺序（与菜单页一致）：一次性油壶属包装，小料中的油属餐具
+        ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
+        ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],['utensil','托盘'],
+        # 食材包装固定顺序（与菜单页一致）：含一次性油壶
+        ['packaging','金色打包盒'],['packaging','圆形透明打包盒'],['packaging','生菜水果打包盒'],['packaging','烤肉盒子'],['packaging','绑带'],
+        ['packaging','杂物保温袋'],['packaging','餐具打包袋'],['packaging','一次性油壶'],
     ]
     def ing_sort_idx(name, cat):
         for i, (c, kw) in enumerate(ing_fixed_order):
@@ -2914,11 +2919,15 @@ def export_menu_xlsx():
             ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
             # 食材行（列序：名称→份数→每份数量→单位→总量→空→空）
             for ing in items:
-                size = ing["per_package"] / max(1, ing["portion_count"])
-                ws.append([
-                    ing["ingredient"], ing["portion_count"], round(size, 2),
-                    ing["unit"], ing["per_package"], "", ""
-                ])
+                if cat in ("packaging", "utensil"):
+                    # 食材包装/客户餐具：每份数量无意义，直接划掉；份数=该套餐总数量
+                    ws.append([ing["ingredient"], ing["per_package"], "—", ing["unit"], ing["per_package"], "", ""])
+                else:
+                    size = ing["per_package"] / max(1, ing["portion_count"])
+                    ws.append([
+                        ing["ingredient"], ing["portion_count"], round(size, 2),
+                        ing["unit"], ing["per_package"], "", ""
+                    ])
                 for cell in ws[ws.max_row]:
                     cell.border = border
                     cell.alignment = center_align
@@ -2933,9 +2942,8 @@ def export_menu_xlsx():
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             ws.cell(ws.max_row, 1).alignment = Alignment(horizontal="left", vertical="center", indent=1)
             for t in p["tools"]:
-                ws.append([
-                    t["tool"], 1, t["per_package"], "个", t["per_package"], "", ""
-                ])
+                # 工具：每份数量无意义，直接划掉；份数=该套餐需要的总数量
+                ws.append([t["tool"], t["per_package"], "—", "个", t["per_package"], "", ""])
                 for cell in ws[ws.max_row]:
                     cell.border = border
                     cell.alignment = center_align
@@ -4246,16 +4254,17 @@ def _menu_print_build(show_cost):
         ("chicken", "鸡肉", "🍗", "#c9962b"),
         ("vegetable", "素菜", "🥬", "#3a8a3a"),
         ("side", "小菜", "🥗", "#5a8a3a"),
-        ("staple", "主食", "🍚", "#b8860b"),
         ("sauce", "蘸料", "🧂", "#7a5a3a"),
         ("drink", "赠饮", "🎁", "#666666"),
         ("packaging", "食材包装", "📦", "#d35400"),
         ("utensil", "客户餐具", "🍱", "#8e44ad"),
+        ("staple", "主食", "🍚", "#b8860b"),
         ("other", "其他", "📦", "#6b4f3a"),
     ]
-    # 固定显示顺序（与菜单原数据页一致）：避免各套餐因数量排序而乱跳，破坏观看惯性
-    UTENSIL_ORDER = ['三格底料盒', '筷子', '勺子', '纸杯', '纸巾', '围裙', '一次性油壶', '垃圾袋', '一次性桌布', '托盘']
-    PACKAGING_ORDER = ['金色打包盒', '圆形透明打包盒', '生菜水果打包盒', '烤肉盒子', '绑带', '杂物保温袋', '餐具打包袋']
+    # 固定显示顺序（与菜单原数据页完全一致）：避免各套餐因数量排序而乱跳，破坏观看惯性
+    # 注：一次性油壶属食材包装；小料中的油属客户餐具
+    UTENSIL_ORDER = ['三格底料盒', '筷子', '勺子', '纸杯', '纸巾', '围裙', '油', '垃圾袋', '一次性桌布', '托盘']
+    PACKAGING_ORDER = ['金色打包盒', '圆形透明打包盒', '生菜水果打包盒', '烤肉盒子', '绑带', '杂物保温袋', '餐具打包袋', '一次性油壶']
     def _fx_idx(name, order):
         for i, n in enumerate(order):
             if n in (name or ''):
@@ -4316,7 +4325,8 @@ def _menu_print_build(show_cost):
                 total_cost += c
                 pc = it.get("portion_count") or 0
                 unit = it.get("unit") or ""
-                spec = ("%s%s" % (fmt_num(pp / pc), unit)) if (pp and pc) else (unit or "")
+                # 食材包装/客户餐具无“每份数量”概念（仅有该套餐总数量），直接划掉单份规格列
+                spec = "—" if key in ("utensil", "packaging") else (("%s%s" % (fmt_num(pp / pc), unit)) if (pp and pc) else (unit or ""))
                 loss = ' <span class="loss">损耗</span>' if it.get("cost_only") else ""
                 rows.append('<tr><td>%s%s</td><td>%s</td><td class="num">%.2f</td></tr>'
                             % (_html.escape(it["name"] or ""), loss, spec or "—", c))

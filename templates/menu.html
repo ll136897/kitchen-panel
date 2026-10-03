@@ -73,6 +73,7 @@
     </div>
     <div class="toolbar">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-sm btn-save-all" style="background:#27ae60;color:#fff" onclick="saveAll()">💾 保存全部修改</button>
       <button class="btn btn-sm" style="background:#6b4f3a;color:#fff" onclick="openCatering()">🍱 餐标配餐器</button>
       <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
       <button class="btn btn-sm" onclick="collapseAll()">📦 全收起</button>
@@ -141,11 +142,12 @@ const FIXED_ORDER = [
   ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
   ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
   // 客户餐具固定顺序（用户 2026-10-04 指定）：不再按数量降序（会导致各套餐乱跳、破坏观看惯性）
+  // 注：一次性油壶属食材包装（作成本项）；小料中的油属客户餐具
   ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
-  ['utensil','纸巾'],['utensil','围裙'],['utensil','一次性油壶'],['utensil','垃圾袋'],['utensil','一次性桌布'],['utensil','托盘'],
-  // 食材包装固定顺序（防止数量反超时翻转，与餐具同理）
+  ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],['utensil','托盘'],
+  // 食材包装固定顺序（防止数量反超时翻转，与餐具同理；一次性油壶属包装）
   ['packaging','金色打包盒'],['packaging','圆形透明打包盒'],['packaging','生菜水果打包盒'],['packaging','烤肉盒子'],['packaging','绑带'],
-  ['packaging','杂物保温袋'],['packaging','餐具打包袋'],
+  ['packaging','杂物保温袋'],['packaging','餐具打包袋'],['packaging','一次性油壶'],
 ];
 function getFixedIdx(name, cat){
   for(let i=0;i<FIXED_ORDER.length;i++){
@@ -288,6 +290,7 @@ function renderPkg(p, idx){
         <div class="pkg-meta">${p.min_people}-${p.max_people}人 · 总价¥${p.price} · 荤菜${meatCount}/素菜${vegCount}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn btn-sm btn-save-pkg" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:12px;padding:4px 10px" onclick="event.stopPropagation();savePkg(${p.id})">💾 保存本套餐</button>
         <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);font-size:12px;padding:4px 10px" onclick="event.stopPropagation();exportPkgXlsx(${p.id})">📊 导出</button>
         <span class="pkg-toggle">▾</span>
       </div>
@@ -436,6 +439,48 @@ function delTool(pid, ptId){
   if(!confirm('确认删除该工具配量?')) return;
   fetch(`/api/packages/${pid}/tool/${ptId}`,{method:'DELETE'})
     .then(r=>r.json()).then(res=>{ if(res.ok) loadMenu(); });
+}
+
+// 批量保存某套餐：读取该卡片内所有 份数/每份数量/工具数量 输入框，一次性 PUT（免去逐条点保存）
+async function savePkg(pid){
+  const card = document.getElementById('pkg_'+pid);
+  if(!card) return;
+  const btn = card.querySelector('.btn-save-pkg');
+  const reqs = [];
+  // 食材行（ing_<pi_id>）：cnt_=份数，sz_=每份数量（包装/餐具无 sz_ → 隐含 1）
+  card.querySelectorAll('tr[id^="ing_"]').forEach(row=>{
+    const id = row.id.split('_')[1];
+    const cntEl = document.getElementById('cnt_'+id);
+    if(!cntEl) return;
+    const szEl = document.getElementById('sz_'+id);
+    const cnt = parseFloat(cntEl.value)||1;
+    const sz = szEl ? (parseFloat(szEl.value)||0) : 1;
+    reqs.push(fetch(`/api/packages/${pid}/ingredient/${id}`,{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({portion_size:sz, portion_count:cnt})
+    }));
+  });
+  // 工具行（tool_<pt_id>）：tqty_=数量
+  card.querySelectorAll('tr[id^="tool_"]').forEach(row=>{
+    const id = row.id.split('_')[1];
+    const v = parseFloat(document.getElementById('tqty_'+id).value)||1;
+    reqs.push(fetch(`/api/packages/${pid}/tool/${id}`,{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({per_package:v})
+    }));
+  });
+  if(!reqs.length) return;
+  if(btn){ btn.disabled = true; const _t = btn.textContent; btn.textContent = '⏳ 保存中…'; btn._t = _t; }
+  await Promise.all(reqs.map(r=>r.then(x=>x.json()).catch(()=>({}))));
+  if(btn){ btn.disabled = false; btn.textContent = btn._t || '💾 保存本套餐'; }
+  card.style.outline = '2px solid #27ae60';
+  setTimeout(()=>{ card.style.outline = ''; }, 1200);
+  showRefreshToast();
+}
+
+// 保存全部：遍历所有套餐逐一批量保存
+function saveAll(){
+  (packages||[]).forEach(p=>savePkg(p.id));
 }
 
 function addIng(pid){

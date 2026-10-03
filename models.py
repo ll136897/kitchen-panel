@@ -461,6 +461,27 @@ def init_db():
         except Exception as _e:
             print("[迁移] 客户餐具重分类跳过：", _e)
 
+        # 一次性迁移（2026-10-04 二次）：油壶/油 重分类。
+        # 一次性油壶（装油容器）属食材包装；小料中的油属客户餐具。
+        # 用独立标记，避免被上一条一次性迁移的“已执行”标记挡住（其标记已在库里、不会再跑）。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_oil_reclassify_20261004','1','一次性迁移：一次性油壶→食材包装；油(小料)→客户餐具')"
+            )
+            if cur.rowcount:  # 仅在首次执行（标记不存在时）
+                cur.execute(
+                    "UPDATE ingredients SET category='packaging' "
+                    "WHERE name='一次性油壶' AND category<>'packaging'"
+                )
+                cur.execute(
+                    "UPDATE ingredients SET category='utensil' "
+                    "WHERE name='油' AND category<>'utensil'"
+                )
+                print("[迁移] 油壶/油 重分类完成：一次性油壶→食材包装；油→客户餐具")
+        except Exception as _e:
+            print("[迁移] 油壶/油 重分类跳过：", _e)
+
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
 
