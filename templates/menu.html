@@ -140,6 +140,12 @@ const FIXED_ORDER = [
   ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
   ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
   ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+  // 客户餐具固定顺序（用户 2026-10-04 指定）：不再按数量降序（会导致各套餐乱跳、破坏观看惯性）
+  ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
+  ['utensil','纸巾'],['utensil','围裙'],['utensil','一次性油壶'],['utensil','垃圾袋'],['utensil','一次性桌布'],['utensil','托盘'],
+  // 食材包装固定顺序（防止数量反超时翻转，与餐具同理）
+  ['packaging','金色打包盒'],['packaging','圆形透明打包盒'],['packaging','生菜水果打包盒'],['packaging','烤肉盒子'],['packaging','绑带'],
+  ['packaging','杂物保温袋'],['packaging','餐具打包袋'],
 ];
 function getFixedIdx(name, cat){
   for(let i=0;i<FIXED_ORDER.length;i++){

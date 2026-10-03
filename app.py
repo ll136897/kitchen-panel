@@ -4253,6 +4253,14 @@ def _menu_print_build(show_cost):
         ("utensil", "客户餐具", "🍱", "#8e44ad"),
         ("other", "其他", "📦", "#6b4f3a"),
     ]
+    # 固定显示顺序（与菜单原数据页一致）：避免各套餐因数量排序而乱跳，破坏观看惯性
+    UTENSIL_ORDER = ['三格底料盒', '筷子', '勺子', '纸杯', '纸巾', '围裙', '一次性油壶', '垃圾袋', '一次性桌布', '托盘']
+    PACKAGING_ORDER = ['金色打包盒', '圆形透明打包盒', '生菜水果打包盒', '烤肉盒子', '绑带', '杂物保温袋', '餐具打包袋']
+    def _fx_idx(name, order):
+        for i, n in enumerate(order):
+            if n in (name or ''):
+                return i
+        return 999
     CUSTOMER_KEYS = {"beef", "pork", "chicken", "vegetable", "side", "sauce", "drink"}
 
     def eff_cat(name, raw):
@@ -4296,6 +4304,8 @@ def _menu_print_build(show_cost):
         total_cost = 0.0
         for key, label, icon, color in CATS:
             items = groups.get(key) or []
+            if key in ("utensil", "packaging"):
+                items = sorted(items, key=lambda it: _fx_idx(it.get("name"), UTENSIL_ORDER if key == "utensil" else PACKAGING_ORDER))
             if not items:
                 continue
             rows.append('<tr class="cat-row"><td colspan="3" style="background:%s">%s %s</td></tr>'

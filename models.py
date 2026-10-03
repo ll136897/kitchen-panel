@@ -441,6 +441,26 @@ def init_db():
         except Exception as _e:
             print("[迁移] 建索引跳过：", _e)
 
+        # 一次性迁移（2026-10-04）：菜单「客户餐具」顺序统一 + 重分类。
+        # 用 settings 里的迁移标记保证只跑一次——用户以后可能从"增加项"手动加回桌布透明罩，
+        # 若每次启动都删就会和用户操作打架。保温袋/打包袋归到食材包装（作成本项）同理只改一次。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_utensil_20261004','1','一次性迁移：保温袋/打包袋→食材包装；桌布透明罩移出套餐')"
+            )
+            if cur.rowcount:  # 仅在首次执行（标记不存在时）
+                cur.execute(
+                    "UPDATE ingredients SET category='packaging' "
+                    "WHERE name IN ('杂物保温袋','餐具打包袋') AND category<>'packaging'"
+                )
+                _bid = cur.execute("SELECT id FROM ingredients WHERE name='桌布透明罩'").fetchone()
+                if _bid:
+                    cur.execute("DELETE FROM package_ingredients WHERE ingredient_id=?", (_bid["id"],))
+                print("[迁移] 客户餐具重分类完成：保温袋/打包袋→食材包装；桌布透明罩已从套餐移除")
+        except Exception as _e:
+            print("[迁移] 客户餐具重分类跳过：", _e)
+
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
 
