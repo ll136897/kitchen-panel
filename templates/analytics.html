@@ -21,7 +21,9 @@
   .an-tabs{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:3px;gap:2px;margin-bottom:10px}
   .an-tab{padding:5px 12px;border:none;background:transparent;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;color:#6b4f3a}
   .an-tab.active{background:#3a2416;color:#fff}
-  .an-chart{display:flex;align-items:flex-end;gap:6px;height:150px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:20px 2px 0}
+  .an-chart{display:flex;align-items:flex-end;gap:6px;height:150px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:20px 2px 0;cursor:grab;user-select:none}
+  .an-chart:active{cursor:grabbing}
+  .an-chart.dragging .an-bar-wrap{pointer-events:none}
   .an-bar-wrap{flex:1 1 0;min-width:30px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;cursor:pointer}
   .an-bar-v{font-size:9px;font-weight:700;color:#8a7364;margin-bottom:3px;white-space:nowrap}
   .an-bar{width:72%;background:linear-gradient(180deg,#e8705f,#c0392b);border-radius:5px 5px 0 0;min-height:3px;transition:opacity .15s}
@@ -83,8 +85,10 @@
       <button class="an-tab active" data-m="revenue" onclick="setMetric('revenue')">收入</button>
       <button class="an-tab" data-m="orders" onclick="setMetric('orders')">单数</button>
       <button class="an-tab" data-m="avg_price" onclick="setMetric('avg_price')">客单价</button>
+      <button class="an-tab an-all-btn" id="anAllBtn" onclick="toggleAll()" style="margin-left:auto">全部历史</button>
     </div>
     <div class="an-chart" id="anChart"></div>
+    <div class="an-note" style="margin-top:4px">💡 柱子很多时可左右拖动图表查看（手机直接滑），点“全部历史”能看到从第一笔订单到今天的完整趋势</div>
   </div>
 
   <div class="an-card">
@@ -142,7 +146,7 @@
 <script>
 const AN_M = {revenue:'收入', orders:'单数', avg_price:'客单价'};
 const AN_WD = ['周日','周一','周二','周三','周四','周五','周六'];
-let anData = null, anGran = 'week', anMetric = 'revenue', anPeriods = 8, anBy = '';
+let anData = null, anGran = 'week', anMetric = 'revenue', anPeriods = 8, anBy = '', anMode = '';
 const AN_CUR = {{ (cur_user or {})|tojson }};
 
 function anFmtY(n){
@@ -194,8 +198,10 @@ function setMetric(m){
 }
 
 function loadAn(){
-  fetch('/api/analytics/overview?granularity=' + anGran + '&periods=' + anPeriods +
-        (anBy ? ('&by=' + encodeURIComponent(anBy)) : ''), {cache:'no-store'})
+  const q = 'granularity=' + anGran + '&periods=' + anPeriods +
+        (anBy ? ('&by=' + encodeURIComponent(anBy)) : '') +
+        (anMode === 'all' ? '&mode=all' : '');
+  fetch('/api/analytics/overview?' + q, {cache:'no-store'})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok){ throw new Error('bad'); }
@@ -266,7 +272,42 @@ function renderChart(){
       '<div class="an-bar" style="height:' + h + '%"></div>' +
       '<div class="an-bar-l">' + anEsc(short) + '</div></div>';
   }).join('');
+  // 柱子超出宽度时，默认滚到最右（最新一期），方便向左拖回最早
+  const _c = document.getElementById('anChart');
+  if(_c && _c.scrollWidth > _c.clientWidth + 4){ _c.scrollLeft = _c.scrollWidth; }
 }
+
+function toggleAll(){
+  anMode = (anMode === 'all') ? '' : 'all';
+  const btn = document.getElementById('anAllBtn');
+  if(btn) btn.classList.toggle('active', anMode === 'all');
+  loadAn();
+}
+
+// 鼠标拖拽平移趋势图（手机端本就能滑；这里补上桌面端按住拖动）
+(function enableChartDrag(){
+  const chart = document.getElementById('anChart');
+  if(!chart) return;
+  let down = false, sx = 0, sl = 0, moved = false;
+  chart.addEventListener('pointerdown', function(e){
+    if(e.target.closest('.an-bar-wrap') === null && e.target !== chart) return;
+    down = true; moved = false; sx = e.clientX; sl = chart.scrollLeft;
+    chart.classList.add('dragging');
+    try{ chart.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  chart.addEventListener('pointermove', function(e){
+    if(!down) return;
+    const dx = e.clientX - sx;
+    if(Math.abs(dx) > 4) moved = true;
+    chart.scrollLeft = sl - dx;
+  });
+  function end(e){ down = false; chart.classList.remove('dragging'); try{ chart.releasePointerCapture(e.pointerId); }catch(_){} }
+  chart.addEventListener('pointerup', end);
+  chart.addEventListener('pointercancel', end);
+  chart.addEventListener('pointerleave', end);
+  // 拖动结束后拦截误触发的“点柱子看明细”
+  chart.addEventListener('click', function(e){ if(moved){ e.stopPropagation(); e.preventDefault(); } }, true);
+})();
 
 function renderRow(name, right, pct, barPct, onclick){
   return '<div class="an-row" onclick="' + onclick + '">' +

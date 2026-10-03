@@ -329,33 +329,29 @@ const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素�
 const CUR_USER = {{ (cur_user or {})|tojson }};
 let SIGNERS = [];
 let finBy = '';
-function finSignerCounts(){
-  const m = {};
-  ((pfData && pfData.orders) || []).forEach(function(o){ const k=String(o.created_by); m[k]=(m[k]||0)+1; });
-  return m;
-}
-function renderFinSignBar(counts){
+let signerCounts = null, signerTotal = 0;   // 署名角标：按日期范围、不受 by 影响
+function renderFinSignBar(){
   const el = document.getElementById('finSignBar');
   if(!el) return;
   if(SIGNERS.length < 2){ el.style.display='none'; return; }
-  const c = counts || {};
-  const total = (pfData && pfData.orders) ? pfData.orders.length : 0;
+  const c = signerCounts || {};
+  const total = signerTotal || 0;
   let html = '<span class="sign-lbl">署名</span>' +
     '<button class="sign-chip '+(finBy===''?'active':'')+'" onclick="setFinBy(\'\')">全部 '+total+'</button>';
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
-    const cnt = c[String(u.id)] || 0;
+    const cnt = (c[String(u.id)] && c[String(u.id)].cnt) || 0;
     const label = u.name + (u.is_me ? '（我）' : '') + ' ' + cnt;
     html += '<button class="sign-chip '+(finBy===v?'active':'')+'" onclick="setFinBy(\''+v+'\')">👤 '+label+'</button>';
   });
   el.innerHTML = html;
   el.style.display = '';
 }
-function setFinBy(v){ finBy = v; renderFinSignBar(finSignerCounts()); loadAll(); }
+function setFinBy(v){ finBy = v; renderFinSignBar(); loadAll(); }
 function loadSigners(){
   return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(function(d){
     SIGNERS = (d && d.data) || [];
-    renderFinSignBar(finSignerCounts());
+    renderFinSignBar();
   }).catch(function(){ SIGNERS = []; });
 }
 
@@ -503,10 +499,16 @@ function loadAll(){
   if(r.to)   params.push('date_to='+encodeURIComponent(r.to));
   if(finBy)  params.push('by='+encodeURIComponent(finBy));
   const q = params.length ? ('?'+params.join('&')) : '';
+  // 署名角标：按“当前日期范围”统计，且不受 by 筛选影响（用独立接口）
+  const scParams = [];
+  if(r.from) scParams.push('date_from='+encodeURIComponent(r.from));
+  if(r.to)   scParams.push('date_to='+encodeURIComponent(r.to));
+  const scQ = scParams.length ? ('?'+scParams.join('&')) : '';
   Promise.all([
     fetchJSONRetry('/api/finance/profit-overview' + q),
-    fetchJSONRetry('/api/finance/summary' + q)
-  ]).then(([pfRes, sumRes])=>{
+    fetchJSONRetry('/api/finance/summary' + q),
+    fetchJSONRetry('/api/finance/signer-counts' + scQ)
+  ]).then(([pfRes, sumRes, scRes])=>{
     if(!pfRes){
       const box = document.getElementById('kpiBox');
       if(box) box.innerHTML = '<div class="muted" style="padding:24px;text-align:center">'+
@@ -518,7 +520,9 @@ function loadAll(){
     renderProfitKpi(pfData.totals||{});
     renderProfitOrders(pfData.orders||[]);
     if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
-    renderFinSignBar(finSignerCounts());   // 署名筛选条按当前区间更新计数
+    signerCounts = scRes ? (scRes.data || {}) : {};
+    signerTotal = scRes ? (scRes.total || 0) : 0;
+    renderFinSignBar();   // 署名筛选条按当前区间更新计数
     if(kpiOpenKey) renderKpiBody();      // 明细抽屉开着 → 跟着一起刷新
   });
   loadCfg();

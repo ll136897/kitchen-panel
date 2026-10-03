@@ -3615,6 +3615,35 @@ def finance_dates():
     ]})
 
 
+@app.route("/api/finance/signer-counts")
+def finance_signer_counts():
+    """署名筛选条角标：各 created_by 的订单数 + 金额（按当前日期范围、不受 by= 影响）。
+
+    与 profit-overview 的 by= 过滤解耦——无论当前选中刘/孙/全部，角标都显示
+    各自在“当前日期范围”内的真实单数，点谁就是谁，不会因为筛选而错位成 0。
+    """
+    db = g.db
+    date_from = request.args.get("date_from")
+    date_to = request.args.get("date_to")
+    clause = "o.status!='cancelled' AND o.deleted_at IS NULL"
+    params = []
+    if date_from:
+        clause += " AND o.booking_date >= ?"
+        params.append(date_from)
+    if date_to:
+        clause += " AND o.booking_date <= ?"
+        params.append(date_to)
+    rows = db.execute(f"""
+        SELECT COALESCE(o.created_by,0) AS cb, COUNT(*) AS cnt,
+               COALESCE(SUM(o.amount),0) AS amt
+        FROM orders o WHERE {clause}
+        GROUP BY o.created_by
+    """, params).fetchall()
+    total = sum(r["cnt"] for r in rows)
+    data = {str(r["cb"]): {"cnt": r["cnt"], "amount": round(float(r["amt"] or 0), 2)} for r in rows}
+    return jsonify({"ok": True, "data": data, "total": total})
+
+
 @app.route("/api/analytics/overview")
 def analytics_overview():
     """经营分析：趋势（含环比）+ 结构分布（套餐/场地/时段/星期/性别）+ 回头客
@@ -3679,6 +3708,33 @@ def analytics_overview():
         starts.append(s)
         s = prev_start(s)
     starts.reverse()
+
+    # 全部历史模式：取“从最早一笔订单”到“今天”的全量期（不受 24 期上限限制，
+    # 这样趋势图可以一路拖到最开始的日期）。极端数据用 400 期兜底防撑爆。
+    mode = (request.args.get("mode") or "").strip()
+    if mode == "all":
+        _emin = db.execute(
+            "SELECT MIN(booking_date) FROM orders WHERE status!='cancelled' AND deleted_at IS NULL "
+            "AND booking_date IS NOT NULL AND booking_date!=''").fetchone()[0]
+        _all = []
+        if _emin:
+            try:
+                _ey, _em, _ed = [int(x) for x in _emin.split("-")[:3]]
+                s = pstart(_dt.date(_ey, _em, _ed))
+                _end = pstart(today)
+                while s <= _end:
+                    _all.append(s)
+                    if gran == "day":
+                        s = s + _dt.timedelta(days=1)
+                    elif gran == "week":
+                        s = s + _dt.timedelta(days=7)
+                    else:  # month：跳到下个月 1 号
+                        s = s.replace(month=1, year=s.year + 1) if s.month == 12 else s.replace(month=s.month + 1)
+                _all = _all[-400:]
+            except Exception:
+                _all = []
+        if _all:
+            starts = _all
 
     # 录入人筛选（按 orders.created_by）：'' / 'me' / 用户 id / '0'=未标注
     # 「能独立统计」——两人的单都计入系统，但可以单独看各自的经营数据

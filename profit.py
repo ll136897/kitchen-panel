@@ -342,7 +342,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
     if extra_clause:
         clause += " " + extra_clause
         params.extend(extra_params)
-    rows = cur.execute("SELECT o.id FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
+    rows = cur.execute("SELECT o.id, o.created_by FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
@@ -382,7 +382,8 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
         elif p["alert"] == "warn":
             tot["warn"] += 1
         orders.append({
-            "id": p["order_id"], "booking_date": p["booking_date"], "contact_name": p["contact_name"],
+            "id": p["order_id"], "created_by": r["created_by"],
+            "booking_date": p["booking_date"], "contact_name": p["contact_name"],
             "address": p["address"], "revenue": p["revenue"], "food": food, "other": other,
             "cost_total": p["cost_total"], "profit": p["cash_profit"], "margin": p["margin"],
             "net_profit": p["net_profit"], "alert": p["alert"],
