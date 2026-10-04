@@ -482,6 +482,22 @@ def init_db():
         except Exception as _e:
             print("[迁移] 油壶/油 重分类跳过：", _e)
 
+        # 一次性迁移（2026-10-04 三次）：菜单「客户餐具」去掉托盘项。
+        # 托盘从所有套餐的 package_ingredients 移除，但 ingredients 记录保留——
+        # 用户以后可在“增加项”重新加回。用独立标记，避免被前两条一次性迁移的“已执行”标记挡住。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_tray_removed_20261004','1','一次性迁移：托盘从各套餐客户餐具移除（食材记录保留）')"
+            )
+            if cur.rowcount:  # 仅在首次执行（标记不存在时）
+                _tid = cur.execute("SELECT id FROM ingredients WHERE name='托盘'").fetchone()
+                if _tid:
+                    cur.execute("DELETE FROM package_ingredients WHERE ingredient_id=?", (_tid["id"],))
+                print("[迁移] 托盘已从各套餐客户餐具移除（食材记录保留，可从增加项加回）")
+        except Exception as _e:
+            print("[迁移] 托盘移除跳过：", _e)
+
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
 

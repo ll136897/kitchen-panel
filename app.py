@@ -2854,7 +2854,7 @@ def export_menu_xlsx():
         ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
         # 客户餐具固定顺序（与菜单页一致）：一次性油壶属包装，小料中的油属餐具
         ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
-        ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],['utensil','托盘'],
+        ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],
         # 食材包装固定顺序（与菜单页一致）：含一次性油壶
         ['packaging','金色打包盒'],['packaging','圆形透明打包盒'],['packaging','生菜水果打包盒'],['packaging','烤肉盒子'],['packaging','绑带'],
         ['packaging','杂物保温袋'],['packaging','餐具打包袋'],['packaging','一次性油壶'],
@@ -4263,7 +4263,7 @@ def _menu_print_build(show_cost):
     ]
     # 固定显示顺序（与菜单原数据页完全一致）：避免各套餐因数量排序而乱跳，破坏观看惯性
     # 注：一次性油壶属食材包装；小料中的油属客户餐具
-    UTENSIL_ORDER = ['三格底料盒', '筷子', '勺子', '纸杯', '纸巾', '围裙', '油', '垃圾袋', '一次性桌布', '托盘']
+    UTENSIL_ORDER = ['三格底料盒', '筷子', '勺子', '纸杯', '纸巾', '围裙', '油', '垃圾袋', '一次性桌布']
     PACKAGING_ORDER = ['金色打包盒', '圆形透明打包盒', '生菜水果打包盒', '烤肉盒子', '绑带', '杂物保温袋', '餐具打包袋', '一次性油壶']
     def _fx_idx(name, order):
         for i, n in enumerate(order):
