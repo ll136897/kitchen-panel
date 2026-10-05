@@ -329,7 +329,7 @@
   <!-- 有备餐订单的日期快捷切换条 -->
   <div class="date-chips" id="dateChips"></div>
 
-  <!-- 署名筛选：默认全部，可按"我署名的 / 某人署名的"分开看 -->
+  <!-- 归属筛选：默认全部，可按"我归属的 / 某人归属的"分开看 -->
   <div class="sign-bar" id="prepSignBar" style="display:none"></div>
 
   <!-- 用的是"上次缓存的数据"时在这里说明（系统唤醒期间也能先干活） -->
@@ -395,7 +395,7 @@ const CAT_LABEL = {
 };
 const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
 
-// ===== 署名筛选（这单算谁的）：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）=====
+// ===== 归属筛选（这单算谁的）：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
 let SIGNERS = [];
 let prepBy = '';
@@ -403,7 +403,7 @@ function renderPrepSignBar(){
   const el = document.getElementById('prepSignBar');
   if(!el) return;
   if(SIGNERS.length < 2){ el.style.display='none'; return; }
-  let html = '<span class="sign-lbl">署名</span>' +
+  let html = '<span class="sign-lbl">归属</span>' +
     '<button class="sign-chip '+(prepBy===''?'active':'')+'" onclick="setPrepBy(\'\')">全部</button>';
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
@@ -1428,7 +1428,7 @@ loadPrepDates(true).then(()=>{
     if(!isNaN(foid)) enterFocus(foid);
   }
 });   // 首次加载，自动切到有订单的日期
-loadSigners();   // 加载"署名"候选（刘+孙），用于筛选条
+loadSigners();   // 加载"归属"候选（刘+孙），用于筛选条
 setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）

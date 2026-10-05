@@ -66,16 +66,16 @@
       <button class="btn" onclick="clearText()">🗑️ 清空</button>
     </div>
     <div id="pasteCount" class="muted" style="font-size:12px;margin-top:6px"></div>
-    <!-- 这单算谁的（署名）：默认自己，可以改成对方——方便替对方录单 -->
+    <!-- 这单算谁的（归属）：默认自己，可以改成对方——方便替对方录单 -->
     <div class="sign-bar" id="signPick" style="display:none;margin-top:8px"></div>
-    <div class="sign-note" id="signPickNote" style="display:none">👆 这单会记在选中的那个人名下（他能改、你也还能改你的）；署名不算谁敲进系统的，代录也会留痕。</div>
+    <div class="sign-note" id="signPickNote" style="display:none">👆 这单会记在选中的那个人名下（他能改、你也还能改你的）；归属不算谁敲进系统的，代录也会留痕。</div>
     <div id="ocrStatus" style="display:none;margin:8px 0;padding:10px;background:#fff7e6;border-radius:8px;border:1px dashed var(--accent);font-size:13px">
       <span id="ocrProgress">🔄 正在识别图片文字...</span>
     </div>
     <div id="parsePreview" class="parse-preview"></div>
   </div>
 
-  <!-- ======== 今日数据：可按署名分开看 ======== -->
+  <!-- ======== 今日数据：可按归属分开看 ======== -->
   <div class="sign-bar" id="dashSignBar" style="display:none"></div>
   <div class="sign-note" id="dashSignNote" style="display:none">👆 只影响下面的「今日订单 / 今日营收 / 待备预约」；库存和告警是全店口径（库存是共用的）。</div>
 
@@ -117,12 +117,12 @@
 </div>
 
 <script>
-// ====== 署名（这单算谁的）======
-// 默认署自己的名；有多个署名候选人时（刘+孙）可以改成对方 → 替对方录单
+// ====== 归属（这单算谁的）======
+// 默认署自己的名；有多个归属候选人时（刘+孙）可以改成对方 → 替对方录单
 const CUR_USER = {{ (cur_user or {})|tojson }};
-let SIGNERS = [];          // 可署名的人（/api/signers）
-let pickSigner = 'me';     // 录入时选的署名（'me' 或 用户id 字符串）
-let dashSigner = '';       // 今日数据的署名筛选（''=全部 | 'me' | 用户id）
+let SIGNERS = [];          // 可归属的人（/api/signers）
+let pickSigner = 'me';     // 录入时选的归属（'me' 或 用户id 字符串）
+let dashSigner = '';       // 今日数据的归属筛选（''=全部 | 'me' | 用户id）
 
 function signerLabel(u, short){
   const n = u.name || ('用户' + u.id);
@@ -145,7 +145,7 @@ function renderSignBars(){
       if(note) note.style.display = 'none';
     }
   }
-  // 2) 今日数据按署名筛选
+  // 2) 今日数据按归属筛选
   const bar = document.getElementById('dashSignBar');
   const dnote = document.getElementById('dashSignNote');
   if(bar){
@@ -545,7 +545,7 @@ function postOrderChunks(chunks, force){
         clearText();
         document.getElementById('parsePreview').classList.remove('show');
         loadDash();
-        const who = d.signer_name ? ('（署名：' + d.signer_name + '）') : '';
+        const who = d.signer_name ? ('（归属：' + d.signer_name + '）') : '';
         if(d.batch){
           showStockToast(`✅ 批量入库 ${d.count} 单` + who);
         } else {

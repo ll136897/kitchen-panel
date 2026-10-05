@@ -317,8 +317,8 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
   .preview-grid{grid-template-columns:1fr 1fr}
 }
 
-/* ---- 署名（这单算谁的）：全站统一的小胶囊 + 标签 ----
-   用在：录入页选署名、订单页/财务页/备餐页/分析页 按署名筛选 */
+/* ---- 归属（这单算谁的）：全站统一的小胶囊 + 标签 ----
+   用在：录入页选归属、订单页/财务页/备餐页/分析页 按归属筛选 */
 .sign-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
 .sign-bar .sign-lbl{font-size:12px;color:var(--muted);font-weight:700;flex:0 0 auto}
 .sign-chip{

@@ -168,7 +168,7 @@
     <button class="qchip" data-q="lastmonth">上月</button>
   </div>
 
-  <!-- 署名筛选：默认全部，可按"我署名的 / 某人署名的"分开看（两人都计入，但能区分） -->
+  <!-- 归属筛选：默认全部，可按"我归属的 / 某人归属的"分开看（两人都计入，但能区分） -->
   <div class="sign-bar" id="finSignBar" style="display:none"></div>
 
   <!-- 有账日期条：点一天直接看那天的账（不用再开原生日期选择器、点"完成"） -->
@@ -325,18 +325,18 @@ const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
 const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
 
-// ===== 署名筛选（这单算谁的）：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）=====
+// ===== 归属筛选（这单算谁的）：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
 let SIGNERS = [];
 let finBy = '';
-let signerCounts = null, signerTotal = 0;   // 署名角标：按日期范围、不受 by 影响
+let signerCounts = null, signerTotal = 0;   // 归属角标：按日期范围、不受 by 影响
 function renderFinSignBar(){
   const el = document.getElementById('finSignBar');
   if(!el) return;
   if(SIGNERS.length < 2){ el.style.display='none'; return; }
   const c = signerCounts || {};
   const total = signerTotal || 0;
-  let html = '<span class="sign-lbl">署名</span>' +
+  let html = '<span class="sign-lbl">归属</span>' +
     '<button class="sign-chip '+(finBy===''?'active':'')+'" onclick="setFinBy(\'\')">全部 '+total+'</button>';
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
@@ -499,7 +499,7 @@ function loadAll(){
   if(r.to)   params.push('date_to='+encodeURIComponent(r.to));
   if(finBy)  params.push('by='+encodeURIComponent(finBy));
   const q = params.length ? ('?'+params.join('&')) : '';
-  // 署名角标：按“当前日期范围”统计，且不受 by 筛选影响（用独立接口）
+  // 归属角标：按“当前日期范围”统计，且不受 by 筛选影响（用独立接口）
   const scParams = [];
   if(r.from) scParams.push('date_from='+encodeURIComponent(r.from));
   if(r.to)   scParams.push('date_to='+encodeURIComponent(r.to));
@@ -522,7 +522,7 @@ function loadAll(){
     if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
     signerCounts = scRes ? (scRes.data || {}) : {};
     signerTotal = scRes ? (scRes.total || 0) : 0;
-    renderFinSignBar();   // 署名筛选条按当前区间更新计数
+    renderFinSignBar();   // 归属筛选条按当前区间更新计数
     if(kpiOpenKey) renderKpiBody();      // 明细抽屉开着 → 跟着一起刷新
   });
   loadCfg();

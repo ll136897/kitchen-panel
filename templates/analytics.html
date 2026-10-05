@@ -166,7 +166,7 @@ function setGran(g){
   document.querySelectorAll('#anGranTabs .an-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.g === g); });
   loadAn();
 }
-// 署名筛选：全部 / 我署名的 / 某人署名的（两人的单都算进系统，但可以分开看）
+// 归属筛选：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）
 function setBy(v){ anBy = v; loadAn(); }
 function anPrettyName(n){
   n = (n || '').trim();
@@ -182,7 +182,7 @@ function renderByRow(){
   const mine = (AN_CUR && AN_CUR.id) ? String(AN_CUR.id) : '';
   const total = cs.reduce(function(s, c){ return s + c.orders; }, 0);
   el.style.display = 'block';
-  el.innerHTML = '<span style="font-weight:700;color:#9a3412">署名</span> ' +
+  el.innerHTML = '<span style="font-weight:700;color:#9a3412">归属</span> ' +
     '<button class="an-tab' + (anBy === '' ? ' active' : '') + '" onclick="setBy(\'\')">全部 ' + total + '</button> ' +
     cs.map(function(c){
       const isMine = (c.id && c.id === mine); const label = anPrettyName(c.name) + (isMine ? '（我）' : '') + ' ' + c.orders;

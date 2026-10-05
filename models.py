@@ -253,16 +253,16 @@ def init_db():
         if "discount" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0")
         # 实际录入人（2026-10-02 晚）：谁在系统里敲进这一单，纯审计用。
-        # 和 created_by 的区别：created_by = **署名**（这单算谁的，可以在录入时选给另一个人，
+        # 和 created_by 的区别：created_by = **归属**（这单算谁的，可以在录入时选给另一个人，
         # 也可以事后改），entered_by = 真正操作的人（代对方录单时两者不同）。
-        # 权限只看署名（created_by）；entered_by 只在订单详情里提示"由谁代录"。
+        # 权限只看归属（created_by）；entered_by 只在订单详情里提示"由谁代录"。
         if "entered_by" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN entered_by INTEGER")
         if "entered_by_name" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN entered_by_name TEXT")
         # 老数据：created_by 当初既是"录入人"也是"归属"，两者补成一致
         # （放在下面 created_by 建好之后再补，见后文）
-        # 署名（2026-10-02）：订单归属到"谁的署名"，用于权限（只能改自己署名的单）+ 独立统计
+        # 归属（2026-10-02）：订单归属到"谁的归属"，用于权限（只能改自己归属的单）+ 独立统计
         _was_created_by = "created_by" in cols
         if not _was_created_by:
             cur.execute("ALTER TABLE orders ADD COLUMN created_by INTEGER")
@@ -282,7 +282,7 @@ def init_db():
                     print("[迁移] 历史订单已归到老板名下：%s" % (_boss["name"] or _boss["id"]))
             except Exception as _e:
                 print("[迁移] 历史订单归属跳过：", _e)
-        # 老数据的 entered_by 补成和署名一致（当初两者就是一个字段）
+        # 老数据的 entered_by 补成和归属一致（当初两者就是一个字段）
         try:
             cur.execute("UPDATE orders SET entered_by=created_by, entered_by_name=created_by_name "
                         "WHERE entered_by IS NULL AND created_by IS NOT NULL")
@@ -411,7 +411,7 @@ def init_db():
         except Exception as _e:
             print("[迁移] 合伙人角色升级跳过：", _e)
 
-        # 一次性迁移（2026-10-02）："署名"维度只用两个人名区分 —— 刘（老板）、孙（合伙人）。
+        # 一次性迁移（2026-10-02）："归属"维度只用两个人名区分 —— 刘（老板）、孙（合伙人）。
         # ⚠️ 刘和牛是**门店名**，不是人名，绝不能当账号显示名用（之前误用过，已纠正）。
         # 只改账号的 name（id 不变 → 历史订单的 created_by 不变 → 筛选/权限完全不受影响），
         # 绝不批量改写历史订单的 created_by_name 快照（那等于篡改历史数据，用户明确不要）。
@@ -431,7 +431,7 @@ def init_db():
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
 
-        # 性能索引：orders 表此前无任何索引，所有筛选（按预约日期/署名/状态）都是全表扫描。
+        # 性能索引：orders 表此前无任何索引，所有筛选（按预约日期/归属/状态）都是全表扫描。
         # 数据量小感知不到，但订单越多越慢；一次性建好即可（IF NOT EXISTS 幂等）。
         try:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_booking_date ON orders(booking_date)")

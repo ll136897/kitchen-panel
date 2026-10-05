@@ -488,11 +488,11 @@ def _inject_user():
     return {"cur_user": getattr(g, "cur_user", None)}
 
 
-# ===== 订单署名与权限（2026-10-02）=====
+# ===== 订单归属与权限（2026-10-02）=====
 # 订单有两个"人"的概念：
-#   created_by / created_by_name  = **署名**（这单算谁的）——决定权限，也是各页面筛选维度
+#   created_by / created_by_name  = **归属**（这单算谁的）——决定权限，也是各页面筛选维度
 #   entered_by / entered_by_name  = 实际录入人（谁敲进去的），纯审计，只在订单详情里提示"代录"
-# 规则：老板全权；其他人只能改/删**自己署名**的订单；录入时可以选择署谁的名（互相代录）。
+# 规则：老板全权；其他人只能改/删**自己归属**的订单；录入时可以选择署谁的名（互相代录）。
 def _cur_uid():
     u = getattr(g, "cur_user", None) or {}
     return u.get("id")
@@ -504,7 +504,7 @@ def _is_boss():
 
 
 def _can_touch_order(db, oid):
-    """当前用户能不能改/删这一单（看署名，不看谁录的）"""
+    """当前用户能不能改/删这一单（看归属，不看谁录的）"""
     if _is_boss():
         return True
     row = db.execute("SELECT created_by FROM orders WHERE id=?", (oid,)).fetchone()
@@ -514,7 +514,7 @@ def _can_touch_order(db, oid):
 
 
 def _signer_candidates(db=None):
-    """可以当"署名"的人：启用中的老板/合伙人 + 自己（每人只能署自己或对方的名）。
+    """可以当"归属"的人：启用中的老板/合伙人 + 自己（每人只能署自己或对方的名）。
 
     店员不在候选里——除非他自己就是登录人（那他默认署自己）。
     返回 [{id, name, role, is_me}]，自己排第一个。"""
@@ -540,7 +540,7 @@ def _signer_candidates(db=None):
 
 
 def _resolve_signer(db, raw):
-    """把前端传来的署名（用户 id / 'me' / 空）解析成 (uid, name)。
+    """把前端传来的归属（用户 id / 'me' / 空）解析成 (uid, name)。
 
     不在候选清单里的一律忽略 → 退回"署自己"，避免有人把单署给不该署的人。"""
     me = getattr(g, "cur_user", None) or {}
@@ -560,7 +560,7 @@ def _resolve_signer(db, raw):
 
 
 def _signer_clause(args, alias=""):
-    """按署名筛选的 SQL 片段 + 参数：?by=me | 0(=未标注) | <user_id> | 空(=全部)"""
+    """按归属筛选的 SQL 片段 + 参数：?by=me | 0(=未标注) | <user_id> | 空(=全部)"""
     by = (args.get("by") or "").strip()
     if not by:
         return "", []
@@ -577,12 +577,12 @@ def _signer_clause(args, alias=""):
 
 @app.route("/api/signers")
 def api_signers():
-    """可署名的人（录入订单时选"这单算谁的"）"""
+    """可归属的人（录入订单时选"这单算谁的"）"""
     return jsonify({"ok": True, "data": _signer_candidates()})
 
 
-# 别人署名时的统一回复
-NO_PERM_MSG = "无权限：这单不是你的署名，你只能修改/删除自己署名的订单"
+# 别人归属时的统一回复
+NO_PERM_MSG = "无权限：这单不是你的归属，你只能修改/删除自己归属的订单"
 
 
 def _deny_order():
@@ -1358,7 +1358,7 @@ def order_detail(oid):
     if not r:
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
     o = dict(r)
-    # 署名显示名取实时账号名（视图层覆盖，绝不改历史快照 created_by_name）
+    # 归属显示名取实时账号名（视图层覆盖，绝不改历史快照 created_by_name）
     if o.get("created_by") is not None:
         _cn = cur.execute("SELECT name FROM users WHERE id=?", (o["created_by"],)).fetchone()
         if _cn:
@@ -1547,7 +1547,7 @@ def create_order():
     order_ids = []
     results = []
     _u = getattr(g, "cur_user", None) or {}
-    # 署名：默认自己，可以署对方的名（互相代录）—— 见 _resolve_signer
+    # 归属：默认自己，可以署对方的名（互相代录）—— 见 _resolve_signer
     _sign_uid, _sign_name = _resolve_signer(db, data.get("signer"))
     _entered_name = _u.get("name") or _u.get("username") or ""
     for chunk, parsed in zip(chunks, parsed_chunks):
@@ -1593,7 +1593,7 @@ def list_orders():
     cur = db.cursor()
     purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
     show_deleted = request.args.get("deleted") == "1"
-    # 列表要带上"署名"（created_by）和"实际录入人"（entered_by）：
+    # 列表要带上"归属"（created_by）和"实际录入人"（entered_by）：
     # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
         cur.execute("""
@@ -1696,7 +1696,7 @@ def edit_order(oid):
         return (data.get(k) or "").strip()
 
     sets, params = [], []
-    # 改「署名」：能改这一单的人就能改署名（老板全权；其他人只能改自己署名的单）。
+    # 改「归属」：能改这一单的人就能改归属（老板全权；其他人只能改自己归属的单）。
     # 只能在候选清单里选（老板/合伙人/自己），避免把单署给不该署的人。
     _sign_raw = data.get("signer", data.get("created_by"))
     if _sign_raw is not None:
@@ -3211,7 +3211,8 @@ def export_prep_matrix():
 
 
 # 导出"搭建装备表"：按单逐行（搭建时间/用餐时间/位置/客户/装备数量/特殊需求），
-# 给搭建师傅按单拿装备、门店备工具用。列格式对齐用户的参考表格（2026-10-05）。
+# 给搭建师傅按单拿装备、门店备工具用。
+# 只含需要搭建的单（自动排除"不搭建"单），不显示与搭建无关的「是否搭建/付款情况」列。
 # 默认导出"明天"（每天导下一天的工作流），可用 ?date=YYYY-MM-DD 指定任意日期。
 @app.route("/api/prep/export/setup")
 def export_setup_sheet():
@@ -3231,44 +3232,20 @@ def export_setup_sheet():
     cur = g.db.cursor()
     cur.execute("""
         SELECT o.id, o.booking_date, o.booking_time, o.meal_time, o.address,
-               o.contact_name, o.contact_phone, o.payment_status, o.deposit,
-               o.note, o.raw_text, COALESCE(u.name, o.created_by_name) AS signer
+               o.contact_name, o.contact_phone, o.note,
+               COALESCE(u.name, o.created_by_name) AS signer
         FROM orders o LEFT JOIN users u ON o.created_by = u.id
         WHERE o.booking_date=? AND o.status IN ('pending','preparing') AND o.deleted_at IS NULL
+          AND (o.raw_text IS NULL OR o.raw_text NOT LIKE '%不搭建%')
         ORDER BY o.booking_time, o.id
     """, (date,))
     orders = [dict(r) for r in cur.fetchall()]
     if not orders:
-        return jsonify({"ok": False, "msg": f"{date} 无待办订单，无法导出"}), 400
+        return jsonify({"ok": False, "msg": f"{date} 没有需要搭建的订单（已自动排除不搭建单）"}), 400
 
     from calculator import calc_order_tool_needs
 
-    def service_type(raw):
-        raw = raw or ""
-        if "不搭建" in raw:
-            return "不搭建"
-        if "自提" in raw:
-            return "自提"
-        if "外送" in raw:
-            return "外送"
-        return "搭建"
-
-    def pay_txt(o):
-        parts = []
-        try:
-            if float(o["deposit"] or 0) > 0:
-                parts.append("已收定金%d元" % int(float(o["deposit"])))
-        except Exception:
-            pass
-        ps = o["payment_status"]
-        if ps == "paid":
-            parts.append("已付清")
-        elif ps == "unpaid":
-            parts.append("未收款")
-        elif ps:
-            parts.append(str(ps))
-        return "、".join(parts)
-
+    # 本表只列"需要搭建"的单，不搭建单已在 SQL 中排除；付款情况等与搭建无关的信息不展示。
     def time_txt(v):
         v = (v or "").strip()
         # 解析器把"13点"存成 13.00 这类点号格式，导出时还原成 13:00
@@ -3284,8 +3261,8 @@ def export_setup_sheet():
         except Exception:
             return v
 
-    headers = ["序号", "署名", "日期", "搭建时间", "用餐时间", "是否搭建", "用餐位置",
-               "客户姓名", "客户联系方式", "付款情况", "套餐", "人数",
+    headers = ["序号", "归属", "日期", "搭建时间", "用餐时间", "用餐位置",
+               "客户姓名", "客户联系方式", "套餐", "人数",
                "天幕", "桌子", "椅子", "卡式炉", "其他装备", "特殊需求"]
     ncol = len(headers)
     rows = []
@@ -3332,8 +3309,8 @@ def export_setup_sheet():
         note = (o["note"] or "").strip()
         rows.append([
             i, o["signer"] or "", d_txt, time_txt(o["booking_time"]), time_txt(o["meal_time"]),
-            service_type(o["raw_text"]), o["address"] or "", o["contact_name"] or "",
-            o["contact_phone"] or "", pay_txt(o), pkg_txt, people or "",
+            o["address"] or "", o["contact_name"] or "",
+            o["contact_phone"] or "", pkg_txt, people or "",
             tian, zhuo, yi, ka, other, note if note and note != "无" else "无",
         ])
 
@@ -3357,7 +3334,7 @@ def export_setup_sheet():
         cell.fill = PatternFill("solid", fgColor="3A2416")
         cell.alignment = center
         cell.border = border
-    left_cols = {7, 11, 17, 18}   # 用餐位置/套餐/其他装备/特殊需求 左对齐
+    left_cols = {6, 9, 15, 16}   # 用餐位置/套餐/其他装备/特殊需求 左对齐
     for r in rows:
         ws.append(r)
         rr = ws.max_row
@@ -3365,14 +3342,14 @@ def export_setup_sheet():
             cell = ws.cell(rr, ci)
             cell.border = border
             cell.alignment = leftw if ci in left_cols else center
-            if ci in (13, 14, 15, 16) and isinstance(cell.value, (int, float)) and cell.value > 0:
+            if ci in (11, 12, 13, 14) and isinstance(cell.value, (int, float)) and cell.value > 0:
                 cell.font = Font(bold=True)
         # 特殊需求有实际内容时标红（对齐用户参考表的习惯）
-        if r[17] != "无":
-            ws.cell(rr, 18).font = Font(bold=True, color="C0392B")
+        if r[15] != "无":
+            ws.cell(rr, 16).font = Font(bold=True, color="C0392B")
     # 合计行：搭建师傅拿装备的总量
-    ws.append(["合计", "", "", "", "", "", "", "", "", "", "",
-               "", _intish(totals["天幕"]), _intish(totals["桌子"]),
+    ws.append(["合计", "", "", "", "", "", "", "", "", "",
+               _intish(totals["天幕"]), _intish(totals["桌子"]),
                _intish(totals["椅子"]), _intish(totals["卡式炉"]), "", ""])
     rr = ws.max_row
     for ci in range(1, ncol + 1):
@@ -3381,10 +3358,10 @@ def export_setup_sheet():
         cell.alignment = center
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="C75D3E")
-    widths = [5, 6, 9, 9, 9, 8, 15, 11, 13, 12, 17, 6, 6, 6, 6, 7, 13, 22]
+    widths = [5, 6, 9, 9, 9, 15, 11, 13, 17, 6, 6, 6, 6, 7, 13, 22]
     for i2, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i2)].width = w
-    ws.freeze_panes = "A3"
+    ws.freeze_panes = "C3"   # 冻结「序号/归属」两列，横向滚动时仍能对上是谁的单
     buf = _io.BytesIO()
     wb.save(buf)
     resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -3532,7 +3509,7 @@ def api_history():
 def finance_summary():
     """财务总览：收入、成本、毛利、押金、应收
     可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤
-             by=me|0|<user_id>，按"署名"（orders.created_by）过滤"""
+             by=me|0|<user_id>，按"归属"（orders.created_by）过滤"""
     db = g.db
     cur = db.cursor()
     date_from = request.args.get("date_from")
@@ -3546,7 +3523,7 @@ def finance_summary():
     if date_to:
         date_clause += " AND o.booking_date <= ?"
         params.append(date_to)
-    # 署名筛选（同一份条件用于下面每条查询，保证 KPI 和明细口径一致）
+    # 归属筛选（同一份条件用于下面每条查询，保证 KPI 和明细口径一致）
     _sc, _sp = _signer_clause(request.args, "o")
     date_clause += _sc
     params.extend(_sp)
@@ -3609,7 +3586,7 @@ def finance_summary():
 def finance_orders():
     """订单财务明细列表
     可选参数：date_from, date_to（YYYY-MM-DD），按 booking_date 过滤
-             by=me|0|<user_id>，按"署名"过滤"""
+             by=me|0|<user_id>，按"归属"过滤"""
     db = g.db
     cur = db.cursor()
     date_from = request.args.get("date_from")
@@ -3778,7 +3755,7 @@ def clear_order_cost(oid):
 @app.route("/api/finance/profit-overview")
 def finance_profit_overview():
     """期间利润汇总：现金利润 + 含固定开销摊销的净利，含每单利润与标红
-    可选 by=me|0|<user_id> 按"署名"筛选（固定开销仍按每单摊销，不会全压到一个人头上）"""
+    可选 by=me|0|<user_id> 按"归属"筛选（固定开销仍按每单摊销，不会全压到一个人头上）"""
     from profit import period_overview
     _sc, _sp = _signer_clause(request.args, "o")
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
@@ -3791,7 +3768,7 @@ def finance_dates():
     """有账的日期（供财务页日期条一键切换）：每天的单数、收入合计。
 
     只统计未取消、未删除的订单；收入按实收货款（amount）汇总。
-    可选 by=me|0|<user_id> 按"署名"筛选。
+    可选 by=me|0|<user_id> 按"归属"筛选。
     """
     _sc, _sp = _signer_clause(request.args)
     rows = g.db.execute("""
@@ -3809,7 +3786,7 @@ def finance_dates():
 
 @app.route("/api/finance/signer-counts")
 def finance_signer_counts():
-    """署名筛选条角标：各 created_by 的订单数 + 金额（按当前日期范围、不受 by= 影响）。
+    """归属筛选条角标：各 created_by 的订单数 + 金额（按当前日期范围、不受 by= 影响）。
 
     与 profit-overview 的 by= 过滤解耦——无论当前选中刘/孙/全部，角标都显示
     各自在“当前日期范围”内的真实单数，点谁就是谁，不会因为筛选而错位成 0。
@@ -4658,7 +4635,7 @@ def prep_merged():
     else:
         from calculator import today_cst as _today_cst
         date = request.args.get("date") or _today_cst().isoformat()
-        # 署名筛选（?by=...）：只看某个人署名的单
+        # 归属筛选（?by=...）：只看某个人归属的单
         _sc, _sp = _signer_clause(request.args)
         cur.execute("""
             SELECT id FROM orders
@@ -4674,7 +4651,7 @@ def prep_merged():
 @app.route("/api/prep/dates")
 def prep_dates():
     """列出所有有 pending/preparing 订单的日期，供前端做日期快捷切换。
-    可选 by=me|0|<user_id> 按"署名"筛选（日期条上的单数跟着变）"""
+    可选 by=me|0|<user_id> 按"归属"筛选（日期条上的单数跟着变）"""
     from calculator import today_cst as _today_cst
     db = g.db
     cur = db.cursor()

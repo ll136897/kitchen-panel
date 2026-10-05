@@ -327,7 +327,7 @@ def order_profit(db, oid, cfg=None):
 # ---------- 期间汇总 ----------
 def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
     """期间利润汇总：现金口径 + 含固定开销摊销口径
-    extra_clause/extra_params：额外过滤（如按"署名" by= 筛选），直接拼进 WHERE。
+    extra_clause/extra_params：额外过滤（如按"归属" by= 筛选），直接拼进 WHERE。
     """
     cfg = cfg or get_config(db)
     cur = db.cursor()

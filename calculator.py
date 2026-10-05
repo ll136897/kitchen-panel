@@ -464,7 +464,7 @@ def calc_dashboard(signer_clause="", signer_params=()):
     全局库存面板数据。
     套餐可备份数：按该套餐每套餐所需食材，用剩余库存（减已汇总需求）反算。
 
-    signer_clause / signer_params：按"署名"筛选（orders.created_by），只作用于
+    signer_clause / signer_params：按"归属"筛选（orders.created_by），只作用于
     **今日订单/今日营收/待备预约列表**；库存面板与告警仍是全店口径（库存是共用的）。
     """
     _sp = tuple(signer_params or ())
