@@ -3210,6 +3210,190 @@ def export_prep_matrix():
     return resp
 
 
+# 导出"搭建装备表"：按单逐行（搭建时间/用餐时间/位置/客户/装备数量/特殊需求），
+# 给搭建师傅按单拿装备、门店备工具用。列格式对齐用户的参考表格（2026-10-05）。
+# 默认导出"明天"（每天导下一天的工作流），可用 ?date=YYYY-MM-DD 指定任意日期。
+@app.route("/api/prep/export/setup")
+def export_setup_sheet():
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        import io as _io
+    except ImportError:
+        return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    import re as _re
+    _tz8 = _tz(_td(hours=8))
+    date = request.args.get("date")
+    if not date:
+        date = (_dt.now(_tz8) + _td(days=1)).strftime("%Y-%m-%d")
+    cur = g.db.cursor()
+    cur.execute("""
+        SELECT o.id, o.booking_date, o.booking_time, o.meal_time, o.address,
+               o.contact_name, o.contact_phone, o.payment_status, o.deposit,
+               o.note, o.raw_text, COALESCE(u.name, o.created_by_name) AS signer
+        FROM orders o LEFT JOIN users u ON o.created_by = u.id
+        WHERE o.booking_date=? AND o.status IN ('pending','preparing') AND o.deleted_at IS NULL
+        ORDER BY o.booking_time, o.id
+    """, (date,))
+    orders = [dict(r) for r in cur.fetchall()]
+    if not orders:
+        return jsonify({"ok": False, "msg": f"{date} 无待办订单，无法导出"}), 400
+
+    from calculator import calc_order_tool_needs
+
+    def service_type(raw):
+        raw = raw or ""
+        if "不搭建" in raw:
+            return "不搭建"
+        if "自提" in raw:
+            return "自提"
+        if "外送" in raw:
+            return "外送"
+        return "搭建"
+
+    def pay_txt(o):
+        parts = []
+        try:
+            if float(o["deposit"] or 0) > 0:
+                parts.append("已收定金%d元" % int(float(o["deposit"])))
+        except Exception:
+            pass
+        ps = o["payment_status"]
+        if ps == "paid":
+            parts.append("已付清")
+        elif ps == "unpaid":
+            parts.append("未收款")
+        elif ps:
+            parts.append(str(ps))
+        return "、".join(parts)
+
+    def time_txt(v):
+        v = (v or "").strip()
+        # 解析器把"13点"存成 13.00 这类点号格式，导出时还原成 13:00
+        if _re.match(r"^\d{1,2}\.\d{2}$", v):
+            v = v.replace(".", ":", 1)
+        return v
+
+    def _intish(v):
+        """装备数量是浮点(2.0)时显示成整数(2)"""
+        try:
+            f = float(v)
+            return int(f) if abs(f - round(f)) < 1e-9 else f
+        except Exception:
+            return v
+
+    headers = ["序号", "署名", "日期", "搭建时间", "用餐时间", "是否搭建", "用餐位置",
+               "客户姓名", "客户联系方式", "付款情况", "套餐", "人数",
+               "天幕", "桌子", "椅子", "卡式炉", "其他装备", "特殊需求"]
+    ncol = len(headers)
+    rows = []
+    totals = {"天幕": 0, "桌子": 0, "椅子": 0, "卡式炉": 0}
+    for i, o in enumerate(orders, 1):
+        cur.execute("""
+            SELECT p.name, p.max_people, op.quantity
+            FROM order_packages op JOIN packages p ON op.package_id = p.id
+            WHERE op.order_id=?
+        """, (o["id"],))
+        pkgs = cur.fetchall()
+        pkg_txt = "、".join(f"{r['name']}×{r['quantity']}" for r in pkgs)
+        people = sum((r["max_people"] or 0) * (r["quantity"] or 1) for r in pkgs)
+
+        needs = calc_order_tool_needs(o["id"]) or {}
+        names = {}
+        for tid, info in needs.items():
+            if not info.get("total"):
+                continue
+            tr = cur.execute("SELECT name FROM tools WHERE id=?", (tid,)).fetchone()
+            if tr:
+                names[tr["name"]] = info["total"]
+
+        def tmatch(*kws):
+            for nm, tot in names.items():
+                if any(k in nm for k in kws):
+                    return tot
+            return ""
+        tian, zhuo, yi, ka = (_intish(tmatch("天幕")), _intish(tmatch("桌子", "蛋卷桌")),
+                              _intish(tmatch("椅子")), _intish(tmatch("卡式炉")))
+        fixed_keys = ("天幕", "桌子", "蛋卷桌", "椅子", "卡式炉")
+        other = "、".join(f"{nm}×{_intish(tot)}" for nm, tot in names.items()
+                          if not any(k in nm for k in fixed_keys))
+        for k, v in (("天幕", tian), ("桌子", zhuo), ("椅子", yi), ("卡式炉", ka)):
+            if isinstance(v, (int, float)):
+                totals[k] += v
+
+        d_txt = o["booking_date"] or ""
+        try:
+            _d = _dt.strptime(d_txt, "%Y-%m-%d")
+            d_txt = f"{_d.month}月{_d.day}日"
+        except Exception:
+            pass
+        note = (o["note"] or "").strip()
+        rows.append([
+            i, o["signer"] or "", d_txt, time_txt(o["booking_time"]), time_txt(o["meal_time"]),
+            service_type(o["raw_text"]), o["address"] or "", o["contact_name"] or "",
+            o["contact_phone"] or "", pay_txt(o), pkg_txt, people or "",
+            tian, zhuo, yi, ka, other, note if note and note != "无" else "无",
+        ])
+
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    leftw = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "搭建装备表"
+    ws.append([f"刘和牛户外烤肉 · {date} 搭建装备表（共 {len(orders)} 单）"])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF", size=13)
+        cell.fill = PatternFill("solid", fgColor="3A2416")
+        cell.alignment = center
+    ws.append(headers)
+    for cell in ws[2]:
+        cell.font = Font(bold=True, color="FFFFFF", size=10)
+        cell.fill = PatternFill("solid", fgColor="3A2416")
+        cell.alignment = center
+        cell.border = border
+    left_cols = {7, 11, 17, 18}   # 用餐位置/套餐/其他装备/特殊需求 左对齐
+    for r in rows:
+        ws.append(r)
+        rr = ws.max_row
+        for ci in range(1, ncol + 1):
+            cell = ws.cell(rr, ci)
+            cell.border = border
+            cell.alignment = leftw if ci in left_cols else center
+            if ci in (13, 14, 15, 16) and isinstance(cell.value, (int, float)) and cell.value > 0:
+                cell.font = Font(bold=True)
+        # 特殊需求有实际内容时标红（对齐用户参考表的习惯）
+        if r[17] != "无":
+            ws.cell(rr, 18).font = Font(bold=True, color="C0392B")
+    # 合计行：搭建师傅拿装备的总量
+    ws.append(["合计", "", "", "", "", "", "", "", "", "", "",
+               "", _intish(totals["天幕"]), _intish(totals["桌子"]),
+               _intish(totals["椅子"]), _intish(totals["卡式炉"]), "", ""])
+    rr = ws.max_row
+    for ci in range(1, ncol + 1):
+        cell = ws.cell(rr, ci)
+        cell.border = border
+        cell.alignment = center
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="C75D3E")
+    widths = [5, 6, 9, 9, 9, 8, 15, 11, 13, 12, 17, 6, 6, 6, 6, 7, 13, 22]
+    for i2, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i2)].width = w
+    ws.freeze_panes = "A3"
+    buf = _io.BytesIO()
+    wb.save(buf)
+    resp = app.response_class(buf.getvalue(), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    from urllib.parse import quote as _quote4
+    _pname = f"搭建装备表{date}.xlsx"
+    resp.headers["Content-Disposition"] = "attachment; filename=\"setup.xlsx\"; filename*=UTF-8''" + _quote4(_pname)
+    return resp
+
+
 @app.route("/api/dishes", methods=["GET", "POST"])
 def manage_dishes():
     db = g.db
