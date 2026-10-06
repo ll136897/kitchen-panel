@@ -220,24 +220,29 @@
   .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .muted{color:var(--muted)}
 
-  /* 简略备餐表（白板）：分组 chips + 行（手机紧凑优先） */
+  /* 简略备餐表（白板）：分组 chips + 行（手机紧凑优先，主次分明） */
   .board-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
   .board-tabs button{padding:7px 12px;border-radius:10px;border:1px solid var(--border-l);
     background:#fff;color:#6b5d52;font-weight:700;font-size:13px;cursor:pointer}
   .board-tabs button.active{background:var(--primary);border-color:var(--primary);color:#fff}
-  .bgrp{margin:12px 0 4px;font-size:14px;font-weight:800;color:#4a3b30;display:flex;align-items:baseline;gap:8px}
+  .bgrp{margin:12px 0 4px;font-size:14px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:8px;
+    background:#faf5ee;padding:7px 10px;border-radius:9px}
   .bgrp .bmeta{font-size:12px;color:var(--muted);font-weight:600}
-  .brow{display:flex;align-items:flex-start;gap:8px;padding:9px 4px;border-bottom:1px dashed #e8e0d5;cursor:pointer}
+  .brow{display:flex;align-items:stretch;gap:8px;padding:10px 4px;border-bottom:1px dashed #e8e0d5;cursor:pointer}
   .brow:last-child{border-bottom:none}
-  .bflag{display:inline-flex;align-items:center;justify-content:center;width:34px;height:27px;
-    border-radius:8px;border:1.5px solid #d8cfc3;background:#fff;font-size:12px;font-weight:800;
-    color:#a2937f;flex:0 0 auto;cursor:pointer;user-select:none;margin-top:1px}
+  /* 行首两个勾选块：竖排，未勾=橙红警示（待办），已勾=绿（做完） */
+  .bchecks{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;justify-content:center}
+  .bflag{display:inline-flex;align-items:center;justify-content:center;width:30px;height:25px;
+    border-radius:7px;border:1.5px solid #e7b7a4;background:#fff6f1;color:#c0562f;
+    font-size:12px;font-weight:800;cursor:pointer;user-select:none}
   .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
   .bmain{flex:1;min-width:0}
-  .bline1{font-weight:700;color:#2b1e14;font-size:15px}
-  .bline2{font-size:13px;color:#6b5d52;margin-top:2px;overflow-wrap:anywhere}
-  .bnote{color:#c0392b}
+  .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .bname{font-weight:800;color:#2b1e14;font-size:16px}
   .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:15px}
+  .bline2{font-size:14px;color:#3a2c20;margin-top:3px;font-weight:700}
+  .bline3{font-size:13px;color:#6b5d52;margin-top:2px;overflow-wrap:anywhere}
+  .bnote{color:#c0392b;font-weight:700}
 
   /* 顶部摘要条 */
   .summary-bar{
@@ -968,7 +973,10 @@ function renderBoard(orders){
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
   const undel=orders.filter(o=>!o.delivered).length;
   const unser=orders.filter(o=>!o.served).length;
-  sumEl.textContent=`${orders.length}单 · ${totalPeople}人 · 未送达${undel} · 未出餐${unser}`;
+  let sumHtml=`${orders.length}单 · ${totalPeople}人`;
+  sumHtml += undel>0 ? ` · <span style="color:#c0562f">未送达${undel}</span>` : ` · 已全送达`;
+  sumHtml += unser>0 ? ` · <span style="color:#c0562f">未出餐${unser}</span>` : ` · 已全出餐`;
+  sumEl.innerHTML=sumHtml;
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
@@ -1002,13 +1010,15 @@ function renderBoard(orders){
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
     return `<div class="brow" onclick="enterFocus(${o.id})">
-      <span class="bflag ${o.delivered?'on':''}" title="送达" onclick="boardToggle(${o.id},'delivered',${o.delivered?0:1},event)">送</span>
-      <span class="bflag ${o.served?'on':''}" title="出餐" onclick="boardToggle(${o.id},'served',${o.served?0:1},event)">出</span>
-      <div class="bmain">
-        <div class="bline1">👤 ${o.contact_name||'—'} · 🍱 ${boardPkgTxt(o)}</div>
-        <div class="bline2">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>
+      <div class="bchecks">
+        <span class="bflag ${o.delivered?'on':''}" title="送达" onclick="boardToggle(${o.id},'delivered',${o.delivered?0:1},event)">送</span>
+        <span class="bflag ${o.served?'on':''}" title="出餐" onclick="boardToggle(${o.id},'served',${o.served?0:1},event)">出</span>
       </div>
-      <span class="btime">${t||'—'}</span>
+      <div class="bmain">
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span><span class="btime">${t||'—'}</span></div>
+        <div class="bline2">🍱 ${boardPkgTxt(o)}</div>
+        <div class="bline3">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>
+      </div>
     </div>`;
   };
   list.innerHTML = garr.map(([k,arr])=>{
