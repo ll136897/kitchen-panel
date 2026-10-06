@@ -469,7 +469,7 @@ function renderOrderList(list, isGroup){
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
 function buildCard(o, isAnchor){
-  const pkgs = (o.packages||[]).map(p=>`<span class="chip pkg">${p.name}·${p.people}人 × ${p.quantity}</span>`).join('') || '';
+  const pkgsText = (o.packages||[]).map(p=>`${p.name}·${p.people}人 ×${p.quantity}`).join(' · ') || '';
   const [stText, stCls] = statusLabel(o.status);
   const anchorFlag = isAnchor ? `<span class="anchor-flag">← 你点的这单</span>` : '';
   return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}${selectedIds.has(o.id)?' selected':''}" id="ocard-${o.id}">
@@ -484,13 +484,14 @@ function buildCard(o, isAnchor){
     </div>
 
     <div class="preview-grid" style="margin:8px 0">
+      <div class="cell pkg-cell"><div class="k">🍱 套餐</div><div class="v">${pkgsText||'未记录'}</div></div>
       <div class="cell clickable" onclick="groupBy('address', ${o.id})"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
       <div class="cell clickable" onclick="groupBy('contact_name', ${o.id})"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
       <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone?`<a href="tel:${o.contact_phone}">${o.contact_phone}</a>`:'-'}</div></div>
       <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
     </div>
 
-    <div class="chips">${pkgs}${ownerChip(o)}</div>
+    <div class="chips">${ownerChip(o)}</div>
     ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
 
     <div class="btn-row">

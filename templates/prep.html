@@ -149,7 +149,7 @@
 
   /* ===== 订单卡 · 自适应换行版 =====
      目标：任何手机宽度都完整显示，绝不横向溢出、无需左右滑动。
-     信息顺序：地点 → 日期 → 时间 → 套餐 → 联系人 → 备注（装不下就自动折到下一行） */
+     信息顺序：套餐 → 地点 → 日期 → 时间 → 联系人 → 备注（装不下就自动折到下一行） */
   .orow{
     display:flex;
     flex-wrap:wrap;              /* 关键：装不下自动换行，而不是撑宽 */
@@ -174,7 +174,7 @@
   .c-addr{font-weight:700;color:#2b1e14}
   .c-date{color:#6b5b4a;white-space:nowrap}
   .c-time{font-weight:800;font-size:15px;color:#c0392b;white-space:nowrap}
-  .c-pkg{color:#2b1e14}
+  .c-pkg{font-weight:700;color:#2b1e14}
   .c-name{color:#2b1e14}
   .c-note{
     flex:1 1 100%;               /* 备注独占一行，完整显示不截断 */
@@ -798,8 +798,8 @@ function renderFocusHeader(o){
   }
   const t = orderTimeOf(o) || '';
   const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
-  el.innerHTML = `📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
-  sub.innerHTML = `👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''} · 🍱 ${pkgs||'套餐未记录'}` +
+  el.innerHTML = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
+  sub.innerHTML = `👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}` +
     (o.note && o.note!=='无' ? ` · 📝 ${o.note}` : '') +
     ` <a href="/orders?focus=${o.id}" style="color:var(--primary);font-weight:700">📋 看该订单 →</a>`;
 }
@@ -948,10 +948,10 @@ function render(){
     const nm = o.contact_name || '—';
     const nt = o.note || '';
     return `<div class="orow" onclick="enterFocus(${o.id})" title="点一下 → 打开这单的备餐核对清单（整页）">
+      <span class="c-pkg">🍱 ${pkgs||'套餐未记录'}</span>
       <span class="c-addr">📍 ${addr}</span>
       <span class="c-date">${dateText2}</span>
       <span class="c-time">${t}</span>
-      <span class="c-pkg">🍱 ${pkgs||'—'}</span>
       <span class="c-name">👤 ${nm}</span>
       ${nt ? `<span class="c-note">📝 ${nt}</span>` : ''}
     </div>`;
@@ -1108,7 +1108,7 @@ function renderByOrder(){
     }
     const pkgsTxt = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
-      <h3 style="margin:0">📍 ${o.address||'—'} · 📅 ${dateLabel} · 🍱 ${pkgsTxt||'—'} · 👤 ${o.contact_name||'—'}</h3>
+      <h3 style="margin:0">🍱 ${pkgsTxt||'套餐未记录'} · 📍 ${o.address||'—'} · 📅 ${dateLabel} · 👤 ${o.contact_name||'—'}</h3>
       <span>
         <button class="check-all-btn" onclick="window.open('/orders/${o.id}/ticket','_blank')" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#27ae60;color:#fff;cursor:pointer;font-weight:700">🖨 出餐单</button>
         <button class="check-all-btn" onclick="doConsume(${o.id})" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#8e44ad;color:#fff;cursor:pointer;font-weight:700">📦 出库</button>
@@ -1180,8 +1180,8 @@ function openOrderSheet(oid){
     else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
   }
   const t = orderTimeOf(o);
-  document.getElementById('osTitle').textContent = `📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
+  document.getElementById('osTitle').textContent = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   document.getElementById('osBody').innerHTML =
     `<div class="os-sum">👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}</div>` +
     `<div class="os-pack">🍱 ${pkgs||'套餐未记录'}</div>` +
