@@ -4675,6 +4675,26 @@ def prep_dates():
 
 
 # ===== 备餐勾选 =====
+@app.route("/api/prep/board-flag", methods=["POST"])
+def prep_board_flag():
+    """简略备餐表（白板）的「送达/出餐」勾选。
+    body: {order_id, flag: 'delivered'|'served', value: 0/1}
+    flag 走白名单再拼 SQL，防注入。"""
+    data = request.get_json(force=True)
+    oid = data.get("order_id")
+    flag = data.get("flag")
+    if flag not in ("delivered", "served") or not oid:
+        return jsonify({"ok": False, "msg": "参数错误"}), 400
+    value = 1 if data.get("value") else 0
+    db = g.db
+    cur = db.execute("SELECT id FROM orders WHERE id=? AND deleted_at IS NULL", (oid,))
+    if not cur.fetchone():
+        return jsonify({"ok": False, "msg": "订单不存在"}), 404
+    db.execute("UPDATE orders SET %s=? WHERE id=?" % flag, (value, int(oid)))
+    db.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/prep/check", methods=["POST"])
 def prep_check():
     """勾选/取消备餐项。

@@ -220,6 +220,25 @@
   .sec-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
   .muted{color:var(--muted)}
 
+  /* 简略备餐表（白板）：分组 chips + 行（手机紧凑优先） */
+  .board-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .board-tabs button{padding:7px 12px;border-radius:10px;border:1px solid var(--border-l);
+    background:#fff;color:#6b5d52;font-weight:700;font-size:13px;cursor:pointer}
+  .board-tabs button.active{background:var(--primary);border-color:var(--primary);color:#fff}
+  .bgrp{margin:12px 0 4px;font-size:14px;font-weight:800;color:#4a3b30;display:flex;align-items:baseline;gap:8px}
+  .bgrp .bmeta{font-size:12px;color:var(--muted);font-weight:600}
+  .brow{display:flex;align-items:flex-start;gap:8px;padding:9px 4px;border-bottom:1px dashed #e8e0d5;cursor:pointer}
+  .brow:last-child{border-bottom:none}
+  .bflag{display:inline-flex;align-items:center;justify-content:center;width:34px;height:27px;
+    border-radius:8px;border:1.5px solid #d8cfc3;background:#fff;font-size:12px;font-weight:800;
+    color:#a2937f;flex:0 0 auto;cursor:pointer;user-select:none;margin-top:1px}
+  .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
+  .bmain{flex:1;min-width:0}
+  .bline1{font-weight:700;color:#2b1e14;font-size:15px}
+  .bline2{font-size:13px;color:#6b5d52;margin-top:2px;overflow-wrap:anywhere}
+  .bnote{color:#c0392b}
+  .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:15px}
+
   /* 顶部摘要条 */
   .summary-bar{
     display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;
@@ -339,6 +358,7 @@
   <div class="mode-tab" style="margin-bottom:14px">
     <button id="tabMerged" class="active" onclick="switchMode('merged')">🔀 合并视图</button>
     <button id="tabOrder" onclick="switchMode('order')">📋 按订单</button>
+    <button id="tabBoard" onclick="switchMode('board')">🧾 简略表</button>
   </div>
 
   <!-- 今日订单概览 -->
@@ -346,6 +366,21 @@
     <h3 id="ordersTitle"><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
     <div class="ord-hint">点任意一行 → 看这一单具体要备什么菜</div>
     <div id="ordersList"></div>
+  </div>
+
+  <!-- 简略备餐表（白板式）：送达/出餐勾选 + 按 时间/套餐/地点/出餐/送达 分组 -->
+  <div class="card" id="boardCard" style="display:none">
+    <h3><span class="dot" style="background:#1b7a43"></span>🧾 简略备餐表
+      <span id="boardSum" class="muted" style="font-size:13px;font-weight:600;margin-left:6px"></span></h3>
+    <div class="board-tabs" id="boardTabs">
+      <button data-k="time" class="active" onclick="setBoardKey('time')">⏰ 时间</button>
+      <button data-k="pkg" onclick="setBoardKey('pkg')">🍱 套餐</button>
+      <button data-k="addr" onclick="setBoardKey('addr')">📍 地点</button>
+      <button data-k="served" onclick="setBoardKey('served')">🍽 出餐</button>
+      <button data-k="delivered" onclick="setBoardKey('delivered')">🚚 送达</button>
+    </div>
+    <div id="boardList"></div>
+    <div class="ord-hint">点「送/出」小方块 = 打勾；点行 = 看这单要备什么</div>
   </div>
 
   <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具） -->
@@ -438,6 +473,9 @@ function getFixedIdx(name, cat){
 }
 let prepData = null;
 let currentMode = 'merged';
+// 简略表分组维度（记忆上次选择）
+let boardKey = 'time';
+try{ boardKey = localStorage.getItem('board_key') || 'time'; }catch(e){}
 let prepDates = [];
 let todayOverride = null;  // 后端返回的"今天"（北京时间），覆盖浏览器时区
 let todayDateStr = '';      // 后端返回的今天日期，供各函数共用
@@ -482,6 +520,11 @@ function switchMode(mode){
   currentMode = mode;
   document.getElementById('tabMerged').classList.toggle('active', mode==='merged');
   document.getElementById('tabOrder').classList.toggle('active', mode==='order');
+  document.getElementById('tabBoard').classList.toggle('active', mode==='board');
+  // 简略表 tab 的激活态每次都要对齐（进简略表时 boardKey chips 也要同步）
+  if(mode==='board'){
+    document.querySelectorAll('#boardTabs button').forEach(b=>b.classList.toggle('active', b.dataset.k===boardKey));
+  }
   render();
 }
 
@@ -831,6 +874,7 @@ function loadPrep(){
       if(o) renderFocusHeader(o);
       document.getElementById('ordersCard').style.display='none';
       document.getElementById('orderView').style.display='none';
+      document.getElementById('boardCard').style.display='none';
       document.getElementById('focusBar').style.display='block';
       document.getElementById('prepCard').style.display='';
       renderMerged();
@@ -882,6 +926,98 @@ function urgBadge(u){
   return `<span class="${cls}">${u.label}</span>`;
 }
 
+// ===== 简略备餐表（白板式）：按 时间/套餐/地点/出餐/送达 分组，送/出 直接打勾 =====
+function boardTime(o){ return ((o.meal_time||o.booking_time||'')+'').trim(); }
+function boardPkgTxt(o){
+  return (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ') || '套餐未记';
+}
+function boardPeople(o){
+  let n=0;
+  (o.packages||[]).forEach(p=>{ n += (p.people||0)*(p.quantity||1); });
+  return n;
+}
+function setBoardKey(k){
+  boardKey=k;
+  try{ localStorage.setItem('board_key',k); }catch(e){}
+  document.querySelectorAll('#boardTabs button').forEach(b=>b.classList.toggle('active', b.dataset.k===k));
+  if(prepData && prepData.orders) render();
+}
+function boardToggle(oid, flag, val, ev){
+  if(ev) ev.stopPropagation();
+  fetch('/api/prep/board-flag', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({order_id:oid, flag:flag, value:val})})
+  .then(r=>r.json()).then(d=>{
+    if(!d || !d.ok){ if(typeof showToast==='function') showToast((d&&d.msg)||'操作失败'); return; }
+    if(prepData && prepData.orders){
+      const o = prepData.orders.find(x=>x.id===oid);
+      if(o) o[flag]=val;
+      try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+      renderBoard(prepData.orders);
+    }
+  }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
+}
+function renderBoard(orders){
+  const list=document.getElementById('boardList');
+  const sumEl=document.getElementById('boardSum');
+  if(!list||!sumEl) return;
+  orders = orders.slice().sort((a,b)=>{
+    const ta=boardTime(a)||'99:99', tb=boardTime(b)||'99:99';
+    if(ta!==tb) return ta<tb?-1:1;
+    return (a.id||0)-(b.id||0);
+  });
+  const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
+  const undel=orders.filter(o=>!o.delivered).length;
+  const unser=orders.filter(o=>!o.served).length;
+  sumEl.textContent=`${orders.length}单 · ${totalPeople}人 · 未送达${undel} · 未出餐${unser}`;
+  if(!orders.length){
+    list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
+    return;
+  }
+  const gKey=o=>{
+    if(boardKey==='time') return boardTime(o)||'时间未定';
+    if(boardKey==='pkg') return boardPkgTxt(o);
+    if(boardKey==='addr') return o.address||'未填地点';
+    if(boardKey==='served') return o.served?'✅ 已出餐':'⬜ 未出餐';
+    return o.delivered?'✅ 已送达':'⬜ 未送达';
+  };
+  const groups=new Map();
+  orders.forEach(o=>{
+    const k=gKey(o);
+    if(!groups.has(k)) groups.set(k,[]);
+    groups.get(k).push(o);
+  });
+  let garr=[...groups.entries()];
+  if(boardKey==='time'){
+    // 时间未定排最后
+    garr.sort((a,b)=>{
+      const ka=a[0]==='时间未定'?'99:99':a[0];
+      const kb=b[0]==='时间未定'?'99:99':b[0];
+      return ka<kb?-1:ka>kb?1:0;
+    });
+  } else if(boardKey==='served'||boardKey==='delivered'){
+    // 未办妥的排前面
+    garr.sort((a,b)=>(b[0].startsWith('⬜')?1:0)-(a[0].startsWith('⬜')?1:0));
+  }
+  const rowHtml=o=>{
+    const t=boardTime(o);
+    const note=(o.note&&o.note!=='无')?o.note:'';
+    return `<div class="brow" onclick="enterFocus(${o.id})">
+      <span class="bflag ${o.delivered?'on':''}" title="送达" onclick="boardToggle(${o.id},'delivered',${o.delivered?0:1},event)">送</span>
+      <span class="bflag ${o.served?'on':''}" title="出餐" onclick="boardToggle(${o.id},'served',${o.served?0:1},event)">出</span>
+      <div class="bmain">
+        <div class="bline1">👤 ${o.contact_name||'—'} · 🍱 ${boardPkgTxt(o)}</div>
+        <div class="bline2">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>
+      </div>
+      <span class="btime">${t||'—'}</span>
+    </div>`;
+  };
+  list.innerHTML = garr.map(([k,arr])=>{
+    const ppl=arr.reduce((s,o)=>s+boardPeople(o),0);
+    return `<div class="bgrp">${k} <span class="bmeta">${arr.length}单 · ${ppl}人</span></div>` +
+      arr.map(rowHtml).join('');
+  }).join('');
+}
+
 function render(){
   if(!prepData) return;
   const d = prepData;
@@ -907,6 +1043,14 @@ function render(){
     document.getElementById('ordersList').innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:16px">${emptyHint}</div>`;
     document.getElementById('prepCard').style.display='none';
     document.getElementById('orderView').style.display='none';
+    if(currentMode==='board'){
+      document.getElementById('ordersCard').style.display='none';
+      document.getElementById('boardCard').style.display='';
+      document.getElementById('boardSum').textContent='0单';
+      document.getElementById('boardList').innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:16px">${emptyHint}</div>`;
+    } else {
+      document.getElementById('boardCard').style.display='none';
+    }
     return;
   }
   // 排序：严格按出餐时间（日期 + 时间）升序；时间相同再按地点
@@ -959,6 +1103,15 @@ function render(){
   // 说明：不再插入列对齐用的大表头——图标(📍📅⏰🍱👤📝)本身即标签，
   // 去掉表头可避免"表头固定宽度"把整页撑宽、导致手机上要左右滑动。
 
+  document.getElementById('boardCard').style.display='none';
+  if(currentMode==='board'){
+    document.getElementById('orderView').style.display='none';
+    document.getElementById('prepCard').style.display='none';
+    document.getElementById('ordersCard').style.display='none';
+    document.getElementById('boardCard').style.display='';
+    renderBoard(orders);
+    return;
+  }
   if(currentMode==='merged'){
     document.getElementById('orderView').style.display='none';
     renderMerged();
@@ -1429,7 +1582,7 @@ loadPrepDates(true).then(()=>{
   }
 });   // 首次加载，自动切到有订单的日期
 loadSigners();   // 加载"归属"候选（刘+孙），用于筛选条
-setInterval(()=>{ loadPrepDates(false); if(currentMode==='merged' && !focusOid) loadPrep(); }, 60000);
+setInterval(()=>{ loadPrepDates(false); if((currentMode==='merged'||currentMode==='board') && !focusOid) loadPrep(); }, 60000);
 
 // 上次开着"备餐保活"就自动恢复（后厨那台手机会一直开着这个页面）
 try{ if(localStorage.getItem(KA_KEY) === '1') startKeepAlive(true); }catch(e){}

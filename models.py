@@ -237,7 +237,9 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now','localtime')),
                 deleted_at TEXT,                   -- 回收站：软删除时间，NULL=正常
                 discount REAL NOT NULL DEFAULT 0,  -- 优惠/折扣：正数=优惠，负数=加收
-                stock_deducted_at TEXT             -- 已按本单出库(扣库存)的时间，NULL=未出库
+                stock_deducted_at TEXT,            -- 已按本单出库(扣库存)的时间，NULL=未出库
+                delivered INTEGER DEFAULT 0,       -- 简略备餐表"送达"勾（0/1）：装备/场地已弄好
+                served INTEGER DEFAULT 0           -- 简略备餐表"出餐"勾（0/1）：菜已出给客户
             )
         """)
         # 迁移：老库补 payment_status / deposit_status / deleted_at（回收站）/ discount（优惠）/ stock_deducted_at（出库）
@@ -260,6 +262,11 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN entered_by INTEGER")
         if "entered_by_name" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN entered_by_name TEXT")
+        # 简略备餐表（2026-10-06）：白板上的"送达/出餐"两个勾，按订单存 0/1
+        if "delivered" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN delivered INTEGER DEFAULT 0")
+        if "served" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN served INTEGER DEFAULT 0")
         # 老数据：created_by 当初既是"录入人"也是"归属"，两者补成一致
         # （放在下面 created_by 建好之后再补，见后文）
         # 归属（2026-10-02）：订单归属到"谁的归属"，用于权限（只能改自己归属的单）+ 独立统计

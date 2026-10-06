@@ -941,7 +941,7 @@ def sort_ingredients(items, name_field="name", cat_field="category"):
 def calc_merged_prep(order_ids):
     """合并多订单的备餐需求。
     返回：
-      orders: [{id, booking_time, meal_time, address, contact_name, packages, urgency}]
+      orders: [{id, booking_time, meal_time, address, contact_name, packages, urgency, delivered, served}]
       ingredients: {category: [{id, name, unit, total, shortage, stock, ...}]}  按分类
       tools: [{id, name, total, shortage, stock, ...}]
       tableware: [{id, name, unit, total, ...}]  餐具单独拎出给打包核对
@@ -957,7 +957,7 @@ def calc_merged_prep(order_ids):
         for oid in order_ids:
             cur.execute("""
                 SELECT id, booking_date, booking_time, meal_time, address, contact_name,
-                       contact_phone, amount, status, note
+                       contact_phone, amount, status, note, delivered, served
                 FROM orders WHERE id = ?
             """, (oid,))
             r = cur.fetchone()
@@ -965,7 +965,7 @@ def calc_merged_prep(order_ids):
                 continue
             o = dict(r)
             cur.execute("""
-                SELECT op.quantity, p.name
+                SELECT op.quantity, op.people, p.name
                 FROM order_packages op
                 LEFT JOIN packages p ON op.package_id = p.id
                 WHERE op.order_id = ?
