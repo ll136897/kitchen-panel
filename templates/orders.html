@@ -48,6 +48,17 @@
   .date-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .date-chip .cnt{opacity:.7;font-size:12px;margin-left:4px}
   .ochip-sep{width:1px;height:18px;background:var(--border);margin:0 2px;flex:0 0 auto}
+  /* 点击月份弹出的"具体日期"下拉框（挂 body、fixed 定位，避免被日期条 overflow 裁掉） */
+  .month-menu{position:fixed;z-index:200;background:#fff;border:1px solid var(--border);border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;max-height:62vh;overflow:auto}
+  .month-menu .mm-head{font-size:12px;color:var(--muted);padding:4px 8px 6px;font-weight:700}
+  .month-menu .mm-item{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;
+    padding:8px 10px;border:none;background:#fff;border-radius:8px;font-size:14px;color:#3a2c20;cursor:pointer;text-align:left}
+  .month-menu .mm-item:hover{background:#f7f1ea}
+  .month-menu .mm-item.cur{background:var(--primary);color:#fff}
+  .month-menu .mm-item .cnt{opacity:.7;font-size:12px;flex:0 0 auto}
+  .month-menu .mm-sep{height:1px;background:var(--border);margin:5px 2px}
+  .date-chip .caret{font-size:9px;opacity:.6;margin-left:1px}
   .order-count-hint{font-size:12px;color:#9a3412;margin:-2px 0 8px}
   /* 排序切换（出餐日期 / 加入顺序）：收敛到一行，hint 不单独占行 */
   .sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
@@ -315,6 +326,7 @@ function setOrderDate(d){
   renderOrders();
 }
 function renderOrderDateChips(){
+  closeMonthMenu();   // 重建 chip 前先关掉可能打开的下拉框，避免指向已移除的节点
   const box = document.getElementById('orderDateChips');
   if(!box) return;
   const counts = {};
@@ -323,21 +335,56 @@ function renderOrderDateChips(){
   const groups = {}, order = [];
   dates.forEach(d=>{ const k = d.slice(0,7); if(!groups[k]){ groups[k] = []; order.push(k); } groups[k].push(d); });
 
-  // 单行横滑：全部日期 + 各月份chip；选中某月时再追加该月日chip
+  // 单行横滑：全部日期 + 各月份chip。点月份→弹出"具体日期"下拉框（不再把日期塞进横滑条末尾）
   const mLabel = k => parseInt(k.slice(5,7),10) + '月';
   let html = `<button class="date-chip ${!filterMonth&&!filterDate?'active':''}" onclick="setOrderDate('')">全部日期</button>`;
   html += order.map(k=>{
     const cnt = groups[k].reduce((s,d)=> s + counts[d], 0);
-    return `<button class="date-chip ${filterMonth===k?'active':''}" onclick="setOrderMonth('${k}')">${mLabel(k)} <span class="cnt">${cnt}</span></button>`;
+    return `<button class="date-chip ${filterMonth===k?'active':''}" data-mk="${k}" onclick="toggleMonthMenu('${k}')">${mLabel(k)} <span class="cnt">${cnt}</span><span class="caret">▾</span></button>`;
   }).join('');
-  if(filterMonth && groups[filterMonth]){
-    html += `<span class="ochip-sep"></span>`;
-    html += groups[filterMonth].map(d=>
-      `<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`
-    ).join('');
-  }
   box.innerHTML = html;
 }
+
+// ===== 月份 → 具体日期 下拉框 =====
+let _monthMenuEl = null;
+function closeMonthMenu(){ if(_monthMenuEl){ _monthMenuEl.remove(); _monthMenuEl=null; } }
+function monthDatesDesc(k){
+  const counts={}; allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date]=(counts[o.booking_date]||0)+1; });
+  return { counts, ds: Object.keys(counts).filter(d=>d.slice(0,7)===k).sort().reverse() }; // 该月日期降序（最新天在最前）
+}
+function openMonthMenu(k){
+  closeMonthMenu();
+  const chip = document.querySelector('#orderDateChips .date-chip[data-mk="'+k+'"]');
+  if(!chip) return;
+  const {counts, ds} = monthDatesDesc(k);
+  const el = document.createElement('div');
+  el.className = 'month-menu';
+  el.dataset.k = k;
+  let h = '<div class="mm-head">'+orderMonthLabel(k)+' · 选具体日期</div>';
+  h += '<button class="mm-item '+(filterMonth===k&&!filterDate?'cur':'')+'" onclick="setOrderMonth(\''+k+'\');closeMonthMenu()">📅 看整月 <span class="cnt">'+(ds.reduce((s,d)=>s+counts[d],0))+'单</span></button>';
+  h += '<div class="mm-sep"></div>';
+  h += ds.map(d=> '<button class="mm-item '+(filterDate===d?'cur':'')+'" onclick="setOrderDate(\''+d+'\');closeMonthMenu()">'+d.slice(5)+' <span class="cnt">'+counts[d]+'单</span></button>').join('');
+  el.innerHTML = h;
+  document.body.appendChild(el);
+  // 按 chip 位置 fixed 定位，并夹在视口内
+  const r = chip.getBoundingClientRect();
+  const mw = Math.max(170, Math.min(240, r.width+70));
+  el.style.minWidth = mw+'px';
+  let left = r.left, top = r.bottom + 4;
+  const ew = el.offsetWidth, eh = el.offsetHeight;
+  if(left + ew > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ew - 8);
+  if(top + eh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - eh - 8);
+  el.style.left = left+'px';
+  el.style.top = top+'px';
+  _monthMenuEl = el;
+}
+function toggleMonthMenu(k){ if(_monthMenuEl && _monthMenuEl.dataset.k===k) closeMonthMenu(); else openMonthMenu(k); }
+// 点其它地方 / 滚动 / 缩放 → 关掉下拉框
+document.addEventListener('click', function(e){
+  if(_monthMenuEl && !_monthMenuEl.contains(e.target) && !(e.target.closest && e.target.closest('#orderDateChips .date-chip[data-mk]'))) closeMonthMenu();
+}, true);
+window.addEventListener('scroll', ()=>closeMonthMenu(), true);
+window.addEventListener('resize', ()=>closeMonthMenu(), true);
 
 // 归属筛选：全部 / 刘 / 孙（两人都能看，用来分开看各自录的单）
 function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
