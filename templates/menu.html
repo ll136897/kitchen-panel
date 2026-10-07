@@ -47,7 +47,9 @@
     .ing-tbl{font-size:13px}
     .ing-tbl th,.ing-tbl td{padding:6px 4px}
     .ing-tbl input{width:50px;font-size:13px}
-    .toolbar .btn{font-size:11px;padding:5px 8px}
+    /* 工具栏在手机端改为单行横滑：8个按钮不再折成多行占垂直空间，腾出位置看菜单数据 */
+    .toolbar{overflow-x:auto;flex-wrap:nowrap;margin:10px 0;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+    .toolbar .btn{flex:0 0 auto;font-size:11px;padding:5px 8px}
   }
   .cat-beef{background:#8e1e1a}
   .cat-pork{background:#c75d3e}
@@ -69,7 +71,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="title">📜 菜单原数据</div>
-      <div class="sub">查看/修改套餐食材配量 · 份数 × 每份数量(单位) = 总量</div>
+      <div class="sub page-sub">查看/修改套餐食材配量 · 份数 × 每份数量(单位) = 总量</div>
     </div>
     <div class="toolbar">
       <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>

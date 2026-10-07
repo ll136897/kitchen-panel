@@ -136,6 +136,8 @@
     .tbl-profit{display:none}
     .pf-cards{display:block}
     .pf-row input{width:66px}
+    /* 手机端隐藏原生日期选择器：它会盖住大半屏；常用日期由上方快捷chip(今天/昨天/本周/本月/上月)+区间tab覆盖 */
+    #rangeDate{display:none}
   }
 </style>
 </head>
@@ -145,7 +147,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="title">📈 成本利润</div>
-      <div class="sub">一单收多少、花在哪、到底赚多少</div>
+      <div class="sub page-sub">一单收多少、花在哪、到底赚多少</div>
     </div>
     <div class="toolbar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <div class="range-tabs">

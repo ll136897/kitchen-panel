@@ -315,6 +315,9 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
   .cap-chip{min-width:90px;padding:10px 12px}
   .cap-chip .cap-num{font-size:22px}
   .preview-grid{grid-template-columns:1fr 1fr}
+  /* 手机端隐藏各数据页“页头描述性副标题”（与订单页一致：省垂直空间看更多数据）；
+     只隐藏带 page-sub 的页头副标题，卡片内的 .sub 上下文信息仍保留 */
+  .page-sub{display:none}
 }
 
 /* ---- 归属（这单算谁的）：全站统一的小胶囊 + 标签 ----
