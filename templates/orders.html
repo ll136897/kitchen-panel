@@ -319,7 +319,7 @@ function renderOrderDateChips(){
   if(!box) return;
   const counts = {};
   allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date] = (counts[o.booking_date]||0)+1; });
-  const dates = Object.keys(counts).sort();          // 升序
+  const dates = Object.keys(counts).sort().reverse(); // 降序：最新月份/日期排在最前，不用滑到末尾找最新单
   const groups = {}, order = [];
   dates.forEach(d=>{ const k = d.slice(0,7); if(!groups[k]){ groups[k] = []; order.push(k); } groups[k].push(d); });
 
