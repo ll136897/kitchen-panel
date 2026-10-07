@@ -772,7 +772,16 @@ function renderDateChips(){
     else label = mdOf(d.booking_date);
     return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">${label}<span class="chip-cnt">${d.cnt}单</span></button>`;
   };
-  dates.sort((a,b)=> (a.booking_date===todayStr?-1:0)-(b.booking_date===todayStr?-1:0) || (a.booking_date<b.booking_date?-1:(a.booking_date>b.booking_date?1:0)));
+  // 今天置顶；其余：未来日期升序在前、过去日期升序在后（避免"今天→最旧日期"的错乱）
+  dates.sort((a,b)=>{
+    const at=a.booking_date===todayStr, bt=b.booking_date===todayStr;
+    if(at&&!bt) return -1;
+    if(!at&&bt) return 1;
+    const aFut=a.booking_date>=todayStr, bFut=b.booking_date>=todayStr;
+    if(aFut&&!bFut) return -1;
+    if(!aFut&&bFut) return 1;
+    return a.booking_date<b.booking_date?-1:(a.booking_date>b.booking_date?1:0);
+  });
   box.innerHTML = dates.map(chipHtml).join('');
 }
 

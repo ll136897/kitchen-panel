@@ -29,28 +29,33 @@
   #batchActions{margin-left:auto;display:inline-flex;gap:8px;flex-wrap:wrap}
   @media(max-width:600px){
     .cell.clickable .k::after{content:''}
+    .sub{display:none}
+    .top-title-row{margin:8px 0 6px !important}
     #groupBar{gap:6px}
     .scope-chip{padding:5px 10px;font-size:13px}
     #batchBar{gap:8px;padding:10px 12px}
     #batchBar .btn{padding:8px 10px;font-size:13px}
   }
   /* 搜索框 + 日期快捷切换（与备餐页同款风格） */
-  .search-row{display:flex;gap:8px;margin:12px 0 12px;flex-wrap:wrap;align-items:center}
-  #searchBox{flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font-size:15px}
-  .date-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-  .date-chip{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap}
+  .search-row{display:flex;gap:8px;margin:8px 0 8px;flex-wrap:wrap;align-items:center}
+  #searchBox{flex:1;min-width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:15px}
+  /* 日期条：单行横滑，不换行、不堆月份头，省竖向空间 */
+  .date-chips{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+  .date-chips::-webkit-scrollbar{display:none}
+  .date-chip{padding:6px 11px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap;flex:0 0 auto}
   .date-chip:hover{filter:brightness(.97)}
   .date-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .date-chip .cnt{opacity:.7;font-size:12px;margin-left:4px}
-  .order-count-hint{font-size:12px;color:#9a3412;margin:-4px 0 10px}
-  /* 排序切换（出餐日期 / 加入顺序） */
-  .sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .ochip-sep{width:1px;height:18px;background:var(--border);margin:0 2px;flex:0 0 auto}
+  .order-count-hint{font-size:12px;color:#9a3412;margin:-2px 0 8px}
+  /* 排序切换（出餐日期 / 加入顺序）：收敛到一行，hint 不单独占行 */
+  .sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
   .sort-label{font-size:12px;color:#9a3412;font-weight:600;margin-right:2px}
-  .sort-chip{padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  .sort-chip{padding:6px 11px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#5a4a3a;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
   .sort-chip:hover{filter:brightness(.97)}
   .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
-  .sort-sep{width:1px;height:16px;background:var(--border);margin:0 2px}
-  .sort-hint{flex-basis:100%;font-size:11px;color:#9a3412;opacity:.85;margin-top:-2px}
+  .sort-hint{display:none}
   /* 订单归属：谁归属的（我=蓝、别人=灰、未标注=淡） */
   .chip.who{font-weight:700}
   .chip.who-me{background:#e8f1fb;color:#1b5e9e;border:1px solid #bcd8f2}
@@ -82,7 +87,7 @@
 {% include 'topbar.html' %}
 
 <div class="container">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
+  <div class="top-title-row" style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 12px">
     <div>
       <div class="title"><span class="fire">🔥</span>订单列表</div>
       <div class="sub">查看、跟踪和管理所有订单</div>
@@ -121,7 +126,6 @@
     <span class="sort-label">排序</span>
     <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="最近的日期在最上面；同一天里按出餐时间 上午→下午">📅 出餐日期·最近在上</button>
     <button class="sort-chip" data-mode="join" onclick="setSort('join')" title="按录入先后，最后加入的在最上面">🆔 加入顺序·最新在上</button>
-    <span class="sort-sep"></span>
     <span class="sort-hint" id="sortHint"></span>
     <button class="sort-chip active" id="monthChip" onclick="toggleMonthMode()">📆 按月分组</button>
     <button class="sort-chip" id="collapseAllChip" onclick="toggleCollapseAll()">⇕ 全部收起</button>
@@ -300,8 +304,9 @@ function setOrderMonth(k){
   renderOrders();
 }
 function setOrderDate(d){
-  filterDate = d;
-  if(d){
+  if(!d){ filterDate=''; filterMonth=''; }       // 全部日期 → 同时清空月+日筛选
+  else {
+    filterDate = d;
     filterMonth = d.slice(0,7);              // 选了某天 → 月份也锁定到那个月
     collapsedMonths.delete(filterMonth); expandedMonths.add(filterMonth); initedMonths.add(filterMonth);
     if(dateMonthCollapsed(filterMonth)){ dateExpandedMonths.add(filterMonth); dateCollapsedMonths.delete(filterMonth); }
@@ -314,39 +319,23 @@ function renderOrderDateChips(){
   if(!box) return;
   const counts = {};
   allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date] = (counts[o.booking_date]||0)+1; });
-  const dates = Object.keys(counts).sort().reverse();
+  const dates = Object.keys(counts).sort();          // 升序
   const groups = {}, order = [];
   dates.forEach(d=>{ const k = d.slice(0,7); if(!groups[k]){ groups[k] = []; order.push(k); } groups[k].push(d); });
-  const curM = thisMonthKey(), newest = order.length ? order[0] : '';
-  order.forEach(k=>{                        // 往月首次出现 → 默认收起；最新月保持展开
-    if(dateInitedMonths.has(k)) return;
-    dateInitedMonths.add(k);
-    if(k < curM && k !== newest) dateCollapsedMonths.add(k);
-  });
 
-  // 月份筛选行：点某个月 → 列表和上面的 KPI 都只看这个月（这是"选了月份没反应"的正解）
-  let html = `<div class="dm-months"><span class="lbl">月份</span>
-    <button class="date-chip ${filterMonth===''?'active':''}" onclick="setOrderMonth('')">全部</button>` +
-    order.map(k=>{
-      const cnt = groups[k].reduce((s,d)=> s + counts[d], 0);
-      return `<button class="date-chip ${filterMonth===k?'active':''}" onclick="setOrderMonth('${k}')">${orderMonthLabel(k)} <span class="cnt">${cnt}</span></button>`;
-    }).join('') + `</div>`;
-
-  html += `<button class="date-chip ${filterDate===''?'active':''}" onclick="setOrderDate('')" style="flex:0 0 auto">全部日期</button>`;
-  html += order.filter(k=> !filterMonth || k===filterMonth).map(k=>{
-    const arr = groups[k];
-    const collapsed = dateMonthCollapsed(k);
-    const cnt = arr.reduce((s,d)=> s + counts[d], 0);
-    return `<div style="flex:1 1 100%">
-      <button class="dm-head${k===curM?' cur':''}" onclick="toggleDateMonth('${k}')">
-        <span class="dm-caret">${collapsed?'▸':'▾'}</span>
-        ${orderMonthLabel(k)}
-        <span class="dm-meta">${arr.length}天 · ${cnt}单</span>
-      </button>
-      ${collapsed ? '' : `<div class="dm-days">${arr.map(d=>
-        `<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`).join('')}</div>`}
-    </div>`;
+  // 单行横滑：全部日期 + 各月份chip；选中某月时再追加该月日chip
+  const mLabel = k => parseInt(k.slice(5,7),10) + '月';
+  let html = `<button class="date-chip ${!filterMonth&&!filterDate?'active':''}" onclick="setOrderDate('')">全部日期</button>`;
+  html += order.map(k=>{
+    const cnt = groups[k].reduce((s,d)=> s + counts[d], 0);
+    return `<button class="date-chip ${filterMonth===k?'active':''}" onclick="setOrderMonth('${k}')">${mLabel(k)} <span class="cnt">${cnt}</span></button>`;
   }).join('');
+  if(filterMonth && groups[filterMonth]){
+    html += `<span class="ochip-sep"></span>`;
+    html += groups[filterMonth].map(d=>
+      `<button class="date-chip ${filterDate===d?'active':''}" onclick="setOrderDate('${d}')">${d.slice(5)} <span class="cnt">${counts[d]}</span></button>`
+    ).join('');
+  }
   box.innerHTML = html;
 }
 
