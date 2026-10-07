@@ -187,9 +187,9 @@
   .order-mini{display:inline-flex;align-items:center;gap:6px;background:#faf5ed;padding:8px 12px;border-radius:10px;margin:4px;border:1px solid var(--border-l);font-size:14px}
   .date-picker{padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:16px}
   /* 日期快捷按钮条：列出所有有备餐订单的日期 */
-  .date-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .date-chips{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;-webkit-overflow-scrolling:touch}
   .date-chip{
-    padding:8px 14px;border-radius:10px;font-size:14px;font-weight:700;
+    padding:6px 11px;border-radius:10px;font-size:13px;font-weight:700;flex:0 0 auto;white-space:nowrap;
     border:1px solid var(--border-l);background:#fff;color:#5a4a3a;cursor:pointer;
     transition:all .12s;display:inline-flex;align-items:center;gap:5px;
   }
@@ -225,34 +225,34 @@
   .board-tabs button{padding:7px 12px;border-radius:10px;border:1px solid var(--border-l);
     background:#fff;color:#6b5d52;font-weight:700;font-size:13px;cursor:pointer}
   .board-tabs button.active{background:var(--primary);border-color:var(--primary);color:#fff}
-  .bgrp{margin:12px 0 4px;font-size:14px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:8px;
-    background:#faf5ee;padding:7px 10px;border-radius:9px}
-  .bgrp .bmeta{font-size:12px;color:var(--muted);font-weight:600}
-  .brow{display:flex;align-items:stretch;gap:8px;padding:10px 4px;border-bottom:1px dashed #e8e0d5;cursor:pointer}
+  .bgrp{margin:6px 0 2px;font-size:13px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:6px;
+    background:#faf5ee;padding:3px 8px;border-radius:6px}
+  .bgrp .bmeta{font-size:11px;color:var(--muted);font-weight:600}
+  .brow{display:flex;align-items:stretch;gap:7px;padding:5px 2px;border-bottom:1px solid #eee;cursor:pointer}
   .brow:last-child{border-bottom:none}
   /* 行首两个勾选块：竖排，未勾=橙红警示（待办），已勾=绿（做完） */
-  .bchecks{display:flex;flex-direction:column;gap:4px;flex:0 0 auto;justify-content:center}
-  .bflag{display:inline-flex;align-items:center;justify-content:center;width:30px;height:25px;
-    border-radius:7px;border:1.5px solid #e7b7a4;background:#fff6f1;color:#c0562f;
-    font-size:12px;font-weight:800;cursor:pointer;user-select:none}
+  .bchecks{display:flex;flex-direction:column;gap:3px;flex:0 0 auto;justify-content:center}
+  .bflag{display:inline-flex;align-items:center;justify-content:center;width:28px;height:22px;
+    border-radius:6px;border:1.5px solid #e7b7a4;background:#fff6f1;color:#c0562f;
+    font-size:11px;font-weight:800;cursor:pointer;user-select:none}
   .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
   .bmain{flex:1;min-width:0}
-  .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-  .bname{font-weight:800;color:#2b1e14;font-size:16px}
-  .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:15px}
-  .bline2{font-size:14px;color:#3a2c20;margin-top:3px;font-weight:700}
-  .bline3{font-size:13px;color:#6b5d52;margin-top:2px;overflow-wrap:anywhere}
+  .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+  .bname{font-weight:800;color:#2b1e14;font-size:14px}
+  .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:13px}
+  .bline2{font-size:13px;color:#3a2c20;margin-top:2px;font-weight:700}
+  .bline3{font-size:12px;color:#6b5d52;margin-top:1px;overflow-wrap:anywhere}
   .bnote{color:#c0392b;font-weight:700}
 
   /* 顶部摘要条 */
   .summary-bar{
-    display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+    display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:10px;-webkit-overflow-scrolling:touch;
   }
   .summary-chip{
     background:#fff;border:1px solid var(--border-l);border-radius:10px;
-    padding:8px 12px;font-size:14px;
+    padding:6px 10px;font-size:13px;white-space:nowrap;flex:0 0 auto;
   }
-  .summary-chip b{color:var(--primary);font-size:16px}
+  .summary-chip b{color:var(--primary);font-size:15px}
 
   /* 备餐保活：手机上只占一个小胶囊（圆点+分钟数），详细说明只在电脑端显示 */
   .ka-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:14px;
@@ -378,10 +378,10 @@
     <h3><span class="dot" style="background:#1b7a43"></span>🧾 简略备餐表
       <span id="boardSum" class="muted" style="font-size:13px;font-weight:600;margin-left:6px"></span></h3>
     <div class="board-tabs" id="boardTabs">
-      <button data-k="time" class="active" onclick="setBoardKey('time')">⏰ 时间</button>
+      <button data-k="time" onclick="setBoardKey('time')">⏰ 时间</button>
       <button data-k="pkg" onclick="setBoardKey('pkg')">🍱 套餐</button>
       <button data-k="addr" onclick="setBoardKey('addr')">📍 地点</button>
-      <button data-k="served" onclick="setBoardKey('served')">🍽 出餐</button>
+      <button data-k="served" class="active" onclick="setBoardKey('served')">🍽 出餐</button>
       <button data-k="delivered" onclick="setBoardKey('delivered')">🚚 送达</button>
     </div>
     <div id="boardList"></div>
@@ -479,8 +479,8 @@ function getFixedIdx(name, cat){
 let prepData = null;
 let currentMode = 'merged';
 // 简略表分组维度（记忆上次选择）
-let boardKey = 'time';
-try{ boardKey = localStorage.getItem('board_key') || 'time'; }catch(e){}
+let boardKey = 'served';
+try{ boardKey = localStorage.getItem('board_key_v2') || 'served'; }catch(e){}
 let prepDates = [];
 let todayOverride = null;  // 后端返回的"今天"（北京时间），覆盖浏览器时区
 let todayDateStr = '';      // 后端返回的今天日期，供各函数共用
@@ -742,21 +742,18 @@ function ensurePrepMonthOpen(dateStr){
 }
 
 function renderDateChips(){
-  // ⚠️ "今天"必须用后端给的 todayDateStr（=真正的今天），不能把"当前选中的日期"当成今天。
-  // 以前 loadPrep() 把选中日期传进来 → 点任何一天，那条日期就会被标成"📍 今天"。
+  // 横向单行滚动条：今天在前，其余按日期升序；不换行、不堆月份头，省竖向空间
   const todayStr = todayDateStr || localToday();
   const box = document.getElementById('dateChips');
   if(!prepDates.length){
-    box.innerHTML = '<div class="muted" style="padding:6px;font-size:14px">📅 当前无待备订单</div>';
+    box.innerHTML = '<span class="muted" style="padding:4px;font-size:13px">📅 当前无待备订单</span>';
     return;
   }
-  // 确保"今天"在列表里（即使今天没订单也要显示）
   const dates = [...prepDates];
   if(!dates.find(d=>d.booking_date===todayStr)){
     dates.unshift({booking_date: todayStr, cnt: 0, is_today: true, is_past: false});
   }
   const currentDate = document.getElementById('datePick').value;
-
   const chipHtml = (d)=>{
     const cls = [
       'date-chip',
@@ -764,42 +761,16 @@ function renderDateChips(){
       d.is_past ? 'past' : '',
       d.booking_date === currentDate ? 'active' : ''
     ].filter(Boolean).join(' ');
-    // 显示友好格式：今天/明天/昨天 用相对词，其他显示 MM.DD + 星期
     const diffDays = dayDiff(d.booking_date, todayStr);
-    let prefix = '';
-    if(d.is_today || diffDays === 0) prefix = '📍 今天';
-    else if(diffDays === 1) prefix = '⏰ 明天';
-    else if(diffDays === -1) prefix = '↩️ 昨天';
-    else if(diffDays > 1) prefix = `📅 ${mdOf(d.booking_date)}`;
-    else prefix = `📤 ${mdOf(d.booking_date)}`;
-    return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">
-      ${prefix} <span class="muted" style="font-weight:400">${weekdayOf(d.booking_date)}</span> <span class="chip-cnt">${d.cnt}单</span>
-    </button>`;
+    let label = '';
+    if(d.is_today || diffDays === 0) label = '今天';
+    else if(diffDays === 1) label = '明天';
+    else if(diffDays === -1) label = '昨天';
+    else label = mdOf(d.booking_date);
+    return `<button class="${cls}" onclick="pickDate('${d.booking_date}')">${label}<span class="chip-cnt">${d.cnt}单</span></button>`;
   };
-
-  // 按月分组（月份新的在前，月内日期升序）
-  const groups = {}, order = [];
-  dates.forEach(d=>{
-    const k = prepMonthOf(d.booking_date);
-    if(!groups[k]){ groups[k] = []; order.push(k); }
-    groups[k].push(d);
-  });
-  order.sort().reverse();
-  prepSyncMonthDefaults(order);   // 往月首次出现 → 默认收起
-  const curM = (todayStr||'').slice(0,7);
-  box.innerHTML = order.map(k=>{
-    const arr = groups[k].slice().sort((a,b)=> a.booking_date < b.booking_date ? -1 : (a.booking_date > b.booking_date ? 1 : 0));
-    const collapsed = prepMonthCollapsed(k);
-    const total = arr.reduce((s,d)=> s + (d.cnt || 0), 0);
-    return `<div style="flex:1 1 100%">
-      <button class="dm-head${k===curM?' cur':''}" onclick="togglePrepMonth('${k}')">
-        <span class="dm-caret">${collapsed?'▸':'▾'}</span>
-        <span>${prepMonthLabel(k)}</span>
-        <span class="dm-meta">${arr.length}天 · ${total}单</span>
-      </button>
-      ${collapsed ? '' : `<div class="dm-days">${arr.map(chipHtml).join('')}</div>`}
-    </div>`;
-  }).join('');
+  dates.sort((a,b)=> (a.booking_date===todayStr?-1:0)-(b.booking_date===todayStr?-1:0) || (a.booking_date<b.booking_date?-1:(a.booking_date>b.booking_date?1:0)));
+  box.innerHTML = dates.map(chipHtml).join('');
 }
 
 function pickDate(dateStr){
@@ -943,7 +914,7 @@ function boardPeople(o){
 }
 function setBoardKey(k){
   boardKey=k;
-  try{ localStorage.setItem('board_key',k); }catch(e){}
+  try{ localStorage.setItem('board_key_v2',k); }catch(e){}
   document.querySelectorAll('#boardTabs button').forEach(b=>b.classList.toggle('active', b.dataset.k===k));
   if(prepData && prepData.orders) render();
 }
@@ -1009,15 +980,20 @@ function renderBoard(orders){
   const rowHtml=o=>{
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
+    const hideTime = boardKey==='time';
+    const hidePkg  = boardKey==='pkg';
+    const hideAddr = boardKey==='addr';
     return `<div class="brow" onclick="enterFocus(${o.id})">
       <div class="bchecks">
         <span class="bflag ${o.delivered?'on':''}" title="送达" onclick="boardToggle(${o.id},'delivered',${o.delivered?0:1},event)">送</span>
         <span class="bflag ${o.served?'on':''}" title="出餐" onclick="boardToggle(${o.id},'served',${o.served?0:1},event)">出</span>
       </div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span><span class="btime">${t||'—'}</span></div>
-        <div class="bline2">🍱 ${boardPkgTxt(o)}</div>
-        <div class="bline3">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
+        ${hidePkg?'':`<div class="bline2">🍱 ${boardPkgTxt(o)}</div>`}
+        ${hideAddr
+          ? (note?`<div class="bline3"><span class="bnote">📝 ${note}</span></div>`:'')
+          : `<div class="bline3">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>`}
       </div>
     </div>`;
   };
