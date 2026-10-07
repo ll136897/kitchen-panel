@@ -228,20 +228,23 @@
   .bgrp{margin:6px 0 2px;font-size:13px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:6px;
     background:#faf5ee;padding:3px 8px;border-radius:6px}
   .bgrp .bmeta{font-size:11px;color:var(--muted);font-weight:600}
-  .brow{display:flex;align-items:stretch;gap:7px;padding:5px 2px;border-bottom:1px solid #eee;cursor:pointer}
-  .brow:last-child{border-bottom:none}
+  /* 双列小卡网格：手机一屏塞约 2 倍订单、基本不翻页 */
+  #boardList .bgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0 10px}
+  @media(max-width:360px){ #boardList .bgrid{grid-template-columns:1fr} }
+  .brow{display:flex;align-items:stretch;gap:6px;padding:5px 6px;border:1px solid #ece3d6;border-radius:9px;background:#fff;cursor:pointer}
+  .brow:active{background:#faf7f2}
   /* 行首两个勾选块：竖排，未勾=橙红警示（待办），已勾=绿（做完） */
   .bchecks{display:flex;flex-direction:column;gap:3px;flex:0 0 auto;justify-content:center}
-  .bflag{display:inline-flex;align-items:center;justify-content:center;width:28px;height:22px;
+  .bflag{display:inline-flex;align-items:center;justify-content:center;width:26px;height:21px;
     border-radius:6px;border:1.5px solid #e7b7a4;background:#fff6f1;color:#c0562f;
     font-size:11px;font-weight:800;cursor:pointer;user-select:none}
   .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
-  .bmain{flex:1;min-width:0}
+  .bmain{flex:1;min-width:0;line-height:1.22}
   .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
-  .bname{font-weight:800;color:#2b1e14;font-size:14px}
-  .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:13px}
-  .bline2{font-size:13px;color:#3a2c20;margin-top:2px;font-weight:700}
-  .bline3{font-size:12px;color:#6b5d52;margin-top:1px;overflow-wrap:anywhere}
+  .bname{font-weight:800;color:#2b1e14;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:12px}
+  .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bline3{font-size:11px;color:#6b5d52;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bnote{color:#c0392b;font-weight:700}
 
   /* 顶部摘要条 */
@@ -361,20 +364,20 @@
 
   <!-- 模式切换 -->
   <div class="mode-tab" style="margin-bottom:14px">
-    <button id="tabMerged" class="active" onclick="switchMode('merged')">🔀 合并视图</button>
+    <button id="tabMerged" onclick="switchMode('merged')">🔀 合并视图</button>
     <button id="tabOrder" onclick="switchMode('order')">📋 按订单</button>
-    <button id="tabBoard" onclick="switchMode('board')">🧾 简略表</button>
+    <button id="tabBoard" class="active" onclick="switchMode('board')">🧾 简略表</button>
   </div>
 
   <!-- 今日订单概览 -->
-  <div class="card" id="ordersCard">
+  <div class="card" id="ordersCard" style="display:none">
     <h3 id="ordersTitle"><span class="dot" style="background:var(--accent)"></span>📅 今日待备订单</h3>
     <div class="ord-hint">点任意一行 → 看这一单具体要备什么菜</div>
     <div id="ordersList"></div>
   </div>
 
   <!-- 简略备餐表（白板式）：送达/出餐勾选 + 按 时间/套餐/地点/出餐/送达 分组 -->
-  <div class="card" id="boardCard" style="display:none">
+  <div class="card" id="boardCard">
     <h3><span class="dot" style="background:#1b7a43"></span>🧾 简略备餐表
       <span id="boardSum" class="muted" style="font-size:13px;font-weight:600;margin-left:6px"></span></h3>
     <div class="board-tabs" id="boardTabs">
@@ -477,7 +480,7 @@ function getFixedIdx(name, cat){
   return 999;
 }
 let prepData = null;
-let currentMode = 'merged';
+let currentMode = 'board';
 // 简略表分组维度（记忆上次选择）
 let boardKey = 'served';
 try{ boardKey = localStorage.getItem('board_key_v2') || 'served'; }catch(e){}
@@ -1000,7 +1003,7 @@ function renderBoard(orders){
   list.innerHTML = garr.map(([k,arr])=>{
     const ppl=arr.reduce((s,o)=>s+boardPeople(o),0);
     return `<div class="bgrp">${k} <span class="bmeta">${arr.length}单 · ${ppl}人</span></div>` +
-      arr.map(rowHtml).join('');
+      `<div class="bgrid">` + arr.map(rowHtml).join('') + `</div>`;
   }).join('');
 }
 
