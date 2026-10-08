@@ -503,16 +503,38 @@ function addIng(pid){
 
 function exportAllXlsx(){ downloadFile('/api/menu/export/xlsx'); }
 function exportPkgXlsx(pid){ downloadFile(`/api/menu/export/xlsx?pid=${pid}`); }
-// 用隐藏iframe下载，避免window.open新标签页空白
+// 用 fetch+blob 下载：完全不触发页面导航（不写历史记录），手机点完原地下载、随时能后退。
+// 老浏览器不支持 a.download 时回退到新标签打开（可关闭返回，不卡死）；出错时转 toast 提示。
 function downloadFile(url){
-  let f = document.getElementById('dl_frame');
-  if (!f){
-    f = document.createElement('iframe');
-    f.id = 'dl_frame';
-    f.style.display = 'none';
-    document.body.appendChild(f);
-  }
-  f.src = url;
+  if (typeof showToast === 'function') showToast('⏳ 正在生成导出文件…');
+  fetch(url, {credentials: 'include'})
+    .then(async function(resp){
+      const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+      const isFile = resp.ok && (
+        ct.indexOf('spreadsheetml') >= 0 || ct.indexOf('csv') >= 0 ||
+        ct.indexOf('octet-stream') >= 0 || ct.indexOf('excel') >= 0 || ct.indexOf('zip') >= 0
+      );
+      if (!isFile){
+        let msg = '导出失败';
+        try { const j = await resp.json(); if (j && j.msg) msg = j.msg; } catch(e){}
+        if (typeof showToast === 'function') showToast('⚠️ ' + msg); else alert(msg);
+        return;
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+      let fname = m ? m[1] : 'export.xlsx';
+      try { fname = decodeURIComponent(fname); } catch(e){}
+      const a = document.createElement('a');
+      if (typeof a.download === 'undefined'){ window.open(url, '_blank'); return; }
+      const u = URL.createObjectURL(blob);
+      a.href = u; a.download = fname;
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(u); a.remove(); }, 1500);
+    })
+    .catch(function(err){
+      if (typeof showToast === 'function') showToast('⚠️ 导出失败：' + err); else alert('导出失败：' + err);
+    });
 }
 
 // ===== 刷新特效 =====
