@@ -1,15 +1,1 @@
-[2026-10-08T09:32:38.445997 UTC] wsgi /api/finance/expense/export
-Traceback (most recent call last):
-  File "/opt/render/project/src/app.py", line 134, in _wsgi_with_report
-    return _wsgi_orig(environ, start_response)
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 1480, in wsgi_app
-    return response(environ, start_response)
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/werkzeug/wrappers/response.py", line 577, in __call__
-    start_response(status, headers)
-    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/gunicorn/http/wsgi.py", line 250, in start_response
-    self.process_headers(headers)
-    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/gunicorn/http/wsgi.py", line 266, in process_headers
-    raise InvalidHeader('%r' % value)
-gunicorn.http.errors.InvalidHeader: Invalid HTTP Header: "'attachment; filename=附件3资金用途明细表_2026-10.csv'"
+worker(pid=61) 启动成功，app import OK
