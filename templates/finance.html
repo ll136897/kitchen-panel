@@ -268,7 +268,8 @@
         <select id="e_channel" class="lf">
           <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
         </select>
-        <input id="e_merchant" class="lf" placeholder="商户/购物人">
+        <input id="e_merchant" class="lf" placeholder="供应商/商户">
+        <input id="e_buyer" class="lf" placeholder="购物人(谁买的)">
         <input id="e_item" class="lf" placeholder="物料名称">
         <select id="e_cat1" class="lf">
           <option value="">分类一</option><option>食材采购</option><option>厨房设备</option><option>场地相关</option><option>包装耗材</option><option>交通配送</option><option>营销</option><option>其他</option>
@@ -283,6 +284,7 @@
           <option value="food">成本归类:食材</option><option value="outsource">搭建/场地</option><option value="fuel">配送</option><option value="labor">人工</option><option value="consume">耗材</option><option value="other">其他</option>
         </select>
         <input id="e_batch" class="lf" placeholder="批次(如 第3批)">
+        <input id="e_purpose" class="lf" placeholder="用途">
         <input id="e_note" class="lf" placeholder="备注">
         <label class="lf chk"><input type="checkbox" id="e_iscost" checked> 计入成本</label>
         <button class="btn btn-primary btn-sm" onclick="saveExpense()">💾 保存这笔</button>
@@ -313,8 +315,8 @@
     <div id="ledgerList" style="margin-top:12px;overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table class="fin-tbl" id="ledgerTable">
         <thead><tr>
-          <th>日期</th><th>渠道</th><th>商户</th><th>物料</th><th>分类</th>
-          <th>金额</th><th>计入成本</th><th>批次</th><th></th>
+          <th>日期</th><th>渠道</th><th>供应商</th><th>购物人</th><th>物料</th><th>分类</th>
+          <th>金额</th><th>计入成本</th><th>批次</th><th>用途</th><th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -1542,7 +1544,7 @@ function renderLedgerKpi(d, cash, net){
 
 function renderLedgerList(rows){
   const tb = document.querySelector('#ledgerTable tbody');
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
   tb.innerHTML = rows.map(r=>{
     const cost = r.is_cost ? '<span class="badge badge-cost">计入</span>' : '<span class="badge badge-nocost">不计入</span>';
     const cat = [r.cat1, r.cat2].filter(Boolean).join('/');
@@ -1551,11 +1553,13 @@ function renderLedgerList(rows){
       +'<td>'+((r.use_date||'').slice(5)||'')+'</td>'
       +'<td>'+escHtml(r.channel||'')+'</td>'
       +'<td style="text-align:left">'+escHtml(r.merchant||'')+mi+'</td>'
+      +'<td>'+escHtml(r.buyer||'')+'</td>'
       +'<td style="text-align:left">'+escHtml(r.item_name||'')+'</td>'
       +'<td>'+escHtml(cat)+'</td>'
       +'<td style="font-weight:700">'+fmtY(r.amount)+'</td>'
       +'<td>'+cost+'</td>'
       +'<td>'+escHtml(r.batch||'')+'</td>'
+      +'<td style="text-align:left;font-size:11px;color:#7a6a5c">'+escHtml(r.purpose||'')+'</td>'
       +'<td><button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="deleteExpense('+r.id+')">删</button></td>'
       +'</tr>';
   }).join('');
@@ -1566,16 +1570,16 @@ function saveExpense(){
   const amount = parseFloat(g('e_amount')||0)||0;
   if(!amount){ alert('请填实付金额'); return; }
   const payload = {
-    use_date:g('e_date'), channel:g('e_channel'), merchant:g('e_merchant'), item_name:g('e_item'),
+    use_date:g('e_date'), channel:g('e_channel'), merchant:g('e_merchant'), buyer:g('e_buyer'), item_name:g('e_item'),
     cat1:g('e_cat1'), cat2:g('e_cat2'), menu_item:g('e_menu'), spec:g('e_spec'),
     qty:g('e_qty')||null, unit_price:g('e_price')||null, amount:amount,
-    cost_kind:g('e_costkind'), batch:g('e_batch'), note:g('e_note'),
+    cost_kind:g('e_costkind'), batch:g('e_batch'), purpose:g('e_purpose'), note:g('e_note'),
     is_cost:document.getElementById('e_iscost').checked?1:0
   };
   fetch('/api/finance/expense',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(r=>r.json()).then(d=>{
       if(d.ok){ showRefreshToast(); loadLedger();
-        ['e_merchant','e_item','e_cat2','e_menu','e_spec','e_qty','e_price','e_amount','e_batch','e_note'].forEach(id=>document.getElementById(id).value='');
+        ['e_merchant','e_buyer','e_item','e_cat2','e_menu','e_spec','e_qty','e_price','e_amount','e_batch','e_purpose','e_note'].forEach(id=>document.getElementById(id).value='');
       } else alert(d.msg||'保存失败');
     });
 }

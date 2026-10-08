@@ -542,6 +542,13 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(use_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_expenses_stmt ON expenses(statement_id)")
 
+        # 对齐原版「附件3 资金用途明细表」：补 供应商/购物人/用途 等列（幂等，已存在则忽略）
+        for _col, _typ in [("buyer", "TEXT"), ("purpose", "TEXT")]:
+            try:
+                cur.execute("ALTER TABLE expenses ADD COLUMN %s %s" % (_col, _typ))
+            except Exception:
+                pass
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS expense_statements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

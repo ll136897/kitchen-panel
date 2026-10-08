@@ -3870,6 +3870,8 @@ def _exp_cols(data, user):
         'is_cost': 1 if data.get('is_cost', True) else 0,
         'cost_kind': _exp_str(data.get('cost_kind')) or 'other',
         'batch': _exp_str(data.get('batch')),
+        'purpose': _exp_str(data.get('purpose')),
+        'buyer': _exp_str(data.get('buyer')),
         'note': _exp_str(data.get('note')),
         'statement_id': _exp_int(data.get('statement_id')),
         'statement_line_no': _exp_int(data.get('statement_line_no')),
@@ -4053,21 +4055,65 @@ def export_expenses():
     if month:
         where.append("use_date LIKE ?"); params.append(month + "%")
     rows = db.execute(
-        "SELECT use_date, channel, merchant, item_name, cat1, cat2, menu_item, spec, "
-        "qty, unit_price, amount, is_cost, cost_kind, batch, note "
-        "FROM expenses WHERE " + " AND ".join(where) + " ORDER BY use_date DESC, id DESC",
+        "SELECT id, use_date, channel, merchant, item_name, cat1, cat2, menu_item, spec, "
+        "qty, unit_price, amount, is_cost, cost_kind, batch, purpose, buyer, note, created_by_name "
+        "FROM expenses WHERE " + " AND ".join(where) + " ORDER BY use_date ASC, id ASC",
         params).fetchall()
+
+    def _month_of(d):
+        if not d:
+            return ""
+        try:
+            return "%d月" % int(str(d)[:7].split("-")[1])
+        except Exception:
+            return ""
+
+    def _num(v):
+        # 原版整数显示为整：2.0→"2"、170.0→"170"；空/0→""
+        if v is None:
+            return ""
+        try:
+            f = float(v)
+        except Exception:
+            return v
+        if f == 0:
+            return ""
+        if f == int(f):
+            return str(int(f))
+        return ("%.2f" % f).rstrip("0").rstrip(".")
+
+    # 原版「附件3 资金用途明细表」24 列（含右侧分类汇总块 C22-C24）
+    headers = ["序号", "批次", "分类一", "分类二", "使用日期", "月份", "物料名称", "菜单对应品名",
+               "规格", "数量", "单价", "总金额", "付款总额", "供应商", "用途", "购物人",
+               "付费截图", "发票(普票)", "发票(专票)", "备注", "", "分类一(汇总)", "分类二(汇总)", "费用(汇总)"]
     buf = io.StringIO()
     w = _csv.writer(buf)
-    w.writerow(["使用日期", "渠道", "商户/购物人", "物料名称", "分类一", "分类二",
-                "菜单对应品名", "规格", "数量", "单价", "实付金额", "计入成本", "成本归类", "批次", "备注"])
-    for r in rows:
-        w.writerow([r["use_date"], r["channel"], r["merchant"], r["item_name"], r["cat1"], r["cat2"],
-                    r["menu_item"], r["spec"], r["qty"], r["unit_price"], r["amount"],
-                    "是" if r["is_cost"] else "否", r["cost_kind"], r["batch"], r["note"]])
+    w.writerow(headers)
+    total_sum = 0.0
+    cat_sum = {}  # (cat1, cat2) -> sum of 付款总额
+    for i, r in enumerate(rows, 1):
+        qty = r["qty"] or 0
+        up = r["unit_price"] or 0
+        amount = r["amount"] or 0
+        total = round(qty * up, 2) if (qty and up) else amount  # C12 总金额 = 数量×单价
+        buyer = r["buyer"] or r["created_by_name"] or ""
+        w.writerow([
+            i, r["batch"] or "", r["cat1"] or "", r["cat2"] or "", r["use_date"] or "",
+            _month_of(r["use_date"]), r["item_name"] or "", r["menu_item"] or "", r["spec"] or "",
+            _num(qty), _num(up), _num(total), _num(amount), r["merchant"] or "", r["purpose"] or "", buyer,
+            "", "", "", r["note"] or "", "", "", "", ""  # C17-C19 图片位留空；C21 空白；C22-C24 汇总块
+        ])
+        total_sum += amount
+        key = (r["cat1"] or "", r["cat2"] or "")
+        cat_sum[key] = cat_sum.get(key, 0) + amount
+    # 右侧分类汇总块（C22-C24）
+    if rows:
+        w.writerow(["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "合计", "", _num(total_sum)])
+        for (c1, c2), s in cat_sum.items():
+            w.writerow(["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", c1, c2, _num(s)])
     b = buf.getvalue().encode("utf-8-sig")
     return Response(b, mimetype="text/csv; charset=utf-8",
-                   headers={"Content-Disposition": "attachment; filename=门店支出_%s.csv" % (month or "全部")})
+                   headers={"Content-Disposition": "attachment; filename=附件3资金用途明细表_%s.csv" % (month or "全部")})
 
 
 @app.route("/api/finance/dates")
