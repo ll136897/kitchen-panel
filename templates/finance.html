@@ -139,6 +139,29 @@
     /* 手机端隐藏原生日期选择器：它会盖住大半屏；常用日期由上方快捷chip(今天/昨天/本周/本月/上月)+区间tab覆盖 */
     #rangeDate{display:none}
   }
+  /* ===== 门店支出台账（2026-10-08）===== */
+  .ledger-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px;align-items:flex-end;margin-top:6px}
+  .ledger-form .lf{padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;min-width:0;width:100%}
+  .ledger-form .chk{display:flex;align-items:center;gap:5px;font-size:12px;color:#6b4f3a;padding-bottom:6px}
+  .ledger-form .btn{justify-self:start;width:auto}
+  .led-tip{font-size:11px;color:#8a7364;margin:6px 0 2px;line-height:1.5}
+  .parse-wrap{margin-top:8px;border:1px solid #f0ebe3;border-radius:8px;overflow:hidden}
+  .parse-row{display:grid;grid-template-columns:22px 96px 1fr 92px 84px 96px 22px;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px dashed #f0e9df;font-size:12px}
+  .parse-row.head{background:#f3ebe0;font-weight:700;color:#6b4f3a;font-size:11px;border-bottom:2px solid #3a2416}
+  .parse-row input,.parse-row select{padding:4px 6px;border:1px solid #ddd;border-radius:5px;font-size:12px;min-width:0;box-sizing:border-box;width:100%}
+  .parse-row .pchk{width:16px;height:16px}
+  .resume-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px;border:1px solid #f0ebe3;border-radius:8px;margin-bottom:6px;background:#fdfbf8}
+  .resume-item .meta{font-size:12px;color:#6b4f3a;min-width:0}
+  .resume-item .meta b{color:#3a2416}
+  .resume-empty{padding:18px;text-align:center;color:var(--muted);font-size:13px}
+  .lrow .badge-cost{background:#d4edda;color:#155724}
+  .lrow .badge-nocost{background:#e2e3e5;color:#383d41}
+  @media(max-width:600px){
+    .ledger-form{grid-template-columns:repeat(2,1fr)}
+    .parse-row{grid-template-columns:20px 1fr;row-gap:4px}
+    .parse-row.head{display:none}
+    .parse-row .p-date,.parse-row .p-amt,.parse-row .p-ch,.parse-row .p-cat{grid-column:span 1}
+  }
 </style>
 </head>
 <body>
@@ -205,6 +228,97 @@
     </div>
     <!-- 手机版：卡片（表格列多会要左右滑，改成卡片一眼看完） -->
     <div id="profitCards" class="pf-cards"></div>
+  </div>
+
+  <!-- ===== 门店支出台账（2026-10-08）===== -->
+  <div class="fin-card" id="ledgerCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#9b59b6"></span>🧾 门店支出台账</div>
+      <div style="font-size:11px;color:#888">各渠道支出统一记这里 · 自动对账不丢项</div>
+    </div>
+
+    <!-- 概览 KPI -->
+    <div class="fin-kpi" id="ledgerKpi" style="margin-top:10px"></div>
+
+    <!-- 月份 + 筛选 -->
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px">
+      <input type="month" id="ledgerMonth" class="range-date" onchange="loadLedger()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+      <select id="ledgerChannel" class="select-mini" onchange="loadLedger()">
+        <option value="">全部渠道</option>
+        <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+      </select>
+      <select id="ledgerCost" class="select-mini" onchange="loadLedger()">
+        <option value="">全部</option><option value="1">仅计入成本</option><option value="0">不计入成本</option>
+      </select>
+      <input type="text" id="ledgerQ" placeholder="🔍 搜索物料/商户" oninput="debounceLedger()" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;flex:1 1 120px;min-width:90px">
+      <button class="btn btn-sm" onclick="exportLedger()">⬇ 导出本月 CSV</button>
+    </div>
+
+    <!-- 录入方式切换 -->
+    <div class="range-tabs" style="margin:6px 0 8px">
+      <button class="range-tab active" data-lm="manual" onclick="setLedgerMode('manual')">＋ 记一笔</button>
+      <button class="range-tab" data-lm="text" onclick="setLedgerMode('text')">📋 粘贴账单文字识别</button>
+      <button class="range-tab" data-lm="resume" onclick="setLedgerMode('resume')">🔄 继续上次对账</button>
+    </div>
+
+    <!-- 手动录入 -->
+    <div id="ledgerManual">
+      <div class="ledger-form">
+        <input type="date" id="e_date" class="lf" title="使用日期">
+        <select id="e_channel" class="lf">
+          <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+        </select>
+        <input id="e_merchant" class="lf" placeholder="商户/购物人">
+        <input id="e_item" class="lf" placeholder="物料名称">
+        <select id="e_cat1" class="lf">
+          <option value="">分类一</option><option>食材采购</option><option>厨房设备</option><option>场地相关</option><option>包装耗材</option><option>交通配送</option><option>营销</option><option>其他</option>
+        </select>
+        <input id="e_cat2" class="lf" placeholder="分类二">
+        <input id="e_menu" class="lf" placeholder="菜单对应品名(可空)">
+        <input id="e_spec" class="lf" placeholder="规格">
+        <input id="e_qty" class="lf" type="number" step="0.01" placeholder="数量">
+        <input id="e_price" class="lf" type="number" step="0.01" placeholder="单价">
+        <input id="e_amount" class="lf" type="number" step="0.01" placeholder="实付金额*">
+        <select id="e_costkind" class="lf">
+          <option value="food">成本归类:食材</option><option value="outsource">搭建/场地</option><option value="fuel">配送</option><option value="labor">人工</option><option value="consume">耗材</option><option value="other">其他</option>
+        </select>
+        <input id="e_batch" class="lf" placeholder="批次(如 第3批)">
+        <input id="e_note" class="lf" placeholder="备注">
+        <label class="lf chk"><input type="checkbox" id="e_iscost" checked> 计入成本</label>
+        <button class="btn btn-primary btn-sm" onclick="saveExpense()">💾 保存这笔</button>
+      </div>
+      <div class="led-tip">带 * 的必填。先记下来、下次再补细节也行——重点是别让支出散在各渠道里最后理不清。</div>
+    </div>
+
+    <!-- 文字识别 -->
+    <div id="ledgerText" style="display:none">
+      <textarea id="e_text" placeholder="把微信/支付宝/淘宝/1688 的账单文字粘进来，一行一笔。系统自动拆出 日期 / 商户 / 金额，你勾选要记的即可。例：&#10;2026-09-12 12:34 美团 支出 ¥128.00 牛肉&#10;2026-09-13 京东 支出 ¥59.90 炭火" style="width:100%;height:120px;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;font-family:inherit"></textarea>
+      <div style="margin:8px 0 2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="e_text_channel" class="select-mini">
+          <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="parseText()">🔍 识别</button>
+        <button class="btn btn-sm" onclick="saveStatement()">📥 识别并存入「待对账」</button>
+        <span class="led-tip" style="margin:0">先「识别」看效果；确认没问题再「存入待对账」，下次可「继续上次对账」接着记、绝不丢项。</span>
+      </div>
+      <div id="parseResult"></div>
+    </div>
+
+    <!-- 继续对账 -->
+    <div id="ledgerResume" style="display:none">
+      <div id="resumeList"></div>
+    </div>
+
+    <!-- 列表 -->
+    <div id="ledgerList" style="margin-top:12px;overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table class="fin-tbl" id="ledgerTable">
+        <thead><tr>
+          <th>日期</th><th>渠道</th><th>商户</th><th>物料</th><th>分类</th>
+          <th>金额</th><th>计入成本</th><th>批次</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- 成本与利润设置 -->
@@ -1379,8 +1493,207 @@ function saveCost(iid, val, unit, inModal){
 }
 function editIngCost(iid, val, inModal){ saveCost(iid, val, '', inModal); }
 
+// ===== 门店支出台账（2026-10-08）=====
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escAttr(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); }
+let _ledgerTimer=null;
+function debounceLedger(){ clearTimeout(_ledgerTimer); _ledgerTimer=setTimeout(loadLedger, 350); }
+
+function setLedgerMode(mode){
+  document.querySelectorAll('.range-tab[data-lm]').forEach(b=>b.classList.toggle('active', b.dataset.lm===mode));
+  document.getElementById('ledgerManual').style.display = mode==='manual'?'':'none';
+  document.getElementById('ledgerText').style.display   = mode==='text'?'':'none';
+  document.getElementById('ledgerResume').style.display = mode==='resume'?'':'none';
+  if(mode==='resume') loadResume();
+}
+
+function loadLedger(){
+  const mEl = document.getElementById('ledgerMonth');
+  const month = mEl.value || fmtDate(new Date()).slice(0,7);
+  mEl.value = month;
+  fetchJSONRetry('/api/finance/expense-summary?month='+encodeURIComponent(month)).then(s=>{
+    const d = s&&s.data || {};
+    const pm = month.split('-');
+    const last = new Date(+pm[0], +pm[1], 0).getDate();
+    const from = month+'-01', to = month+'-'+String(last).padStart(2,'0');
+    fetchJSONRetry('/api/finance/profit-overview?date_from='+from+'&date_to='+to).then(pf=>{
+      const cash = (pf&&pf.data&&pf.data.totals) ? (pf.data.totals.profit||0) : 0;
+      renderLedgerKpi(d, cash, cash - (d.cost_total||0));
+    });
+  });
+  const ch = document.getElementById('ledgerChannel').value;
+  const ic = document.getElementById('ledgerCost').value;
+  const q  = document.getElementById('ledgerQ').value.trim();
+  const p = ['month='+encodeURIComponent(month)];
+  if(ch) p.push('channel='+encodeURIComponent(ch));
+  if(ic) p.push('is_cost='+encodeURIComponent(ic));
+  if(q)  p.push('q='+encodeURIComponent(q));
+  fetchJSONRetry('/api/finance/expense?'+p.join('&')).then(r=> renderLedgerList(r&&r.data||[]));
+}
+
+function renderLedgerKpi(d, cash, net){
+  d = d||{};
+  document.getElementById('ledgerKpi').innerHTML =
+    '<div class="fin-kpi-item neutral"><div class="lbl">🧾 本月门店支出</div><div class="val">'+fmtY(d.total||0)+'</div><div class="sub">'+(d.count||0)+' 笔</div></div>'
+    +'<div class="fin-kpi-item negative"><div class="lbl">💸 计入成本</div><div class="val">'+fmtY(d.cost_total||0)+'</div><div class="sub">已记入利润成本</div></div>'
+    +'<div class="fin-kpi-item neutral"><div class="lbl">⏳ 待对账</div><div class="val">'+fmtY(d.unmatched_amount||0)+'</div><div class="sub">'+(d.unmatched_count||0)+' 行未记</div></div>'
+    +'<div class="fin-kpi-item '+(net>=0?'positive':'negative')+'"><div class="lbl">📉 含门店支出净利</div><div class="val">'+fmtY(net)+'</div><div class="sub">现金利润 '+fmtY(cash)+' − 成本支出</div></div>';
+}
+
+function renderLedgerList(rows){
+  const tb = document.querySelector('#ledgerTable tbody');
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
+  tb.innerHTML = rows.map(r=>{
+    const cost = r.is_cost ? '<span class="badge badge-cost">计入</span>' : '<span class="badge badge-nocost">不计入</span>';
+    const cat = [r.cat1, r.cat2].filter(Boolean).join('/');
+    const mi = r.menu_item ? '<div style="font-size:10px;color:#999">↔ '+escHtml(r.menu_item)+'</div>' : '';
+    return '<tr class="lrow">'
+      +'<td>'+((r.use_date||'').slice(5)||'')+'</td>'
+      +'<td>'+escHtml(r.channel||'')+'</td>'
+      +'<td style="text-align:left">'+escHtml(r.merchant||'')+mi+'</td>'
+      +'<td style="text-align:left">'+escHtml(r.item_name||'')+'</td>'
+      +'<td>'+escHtml(cat)+'</td>'
+      +'<td style="font-weight:700">'+fmtY(r.amount)+'</td>'
+      +'<td>'+cost+'</td>'
+      +'<td>'+escHtml(r.batch||'')+'</td>'
+      +'<td><button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="deleteExpense('+r.id+')">删</button></td>'
+      +'</tr>';
+  }).join('');
+}
+
+function saveExpense(){
+  const g = id => document.getElementById(id).value;
+  const amount = parseFloat(g('e_amount')||0)||0;
+  if(!amount){ alert('请填实付金额'); return; }
+  const payload = {
+    use_date:g('e_date'), channel:g('e_channel'), merchant:g('e_merchant'), item_name:g('e_item'),
+    cat1:g('e_cat1'), cat2:g('e_cat2'), menu_item:g('e_menu'), spec:g('e_spec'),
+    qty:g('e_qty')||null, unit_price:g('e_price')||null, amount:amount,
+    cost_kind:g('e_costkind'), batch:g('e_batch'), note:g('e_note'),
+    is_cost:document.getElementById('e_iscost').checked?1:0
+  };
+  fetch('/api/finance/expense',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ showRefreshToast(); loadLedger();
+        ['e_merchant','e_item','e_cat2','e_menu','e_spec','e_qty','e_price','e_amount','e_batch','e_note'].forEach(id=>document.getElementById(id).value='');
+      } else alert(d.msg||'保存失败');
+    });
+}
+
+function parseText(){
+  const t = document.getElementById('e_text').value;
+  if(!t.trim()){ alert('先把账单文字粘进文本框'); return; }
+  fetch('/api/finance/expense/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) renderParseRows(document.getElementById('parseResult'), d.lines||[], {link:false, saveLabel:'保存勾选为支出'});
+    });
+}
+
+function saveStatement(){
+  const t = document.getElementById('e_text').value;
+  const ch = document.getElementById('e_text_channel').value;
+  if(!t.trim()){ alert('先把账单文字粘进文本框'); return; }
+  fetch('/api/finance/expense-statement',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t, channel:ch})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ showRefreshToast();
+        renderParseRows(document.getElementById('parseResult'), d.lines||[], {link:true, saveLabel:'保存勾选并标记已对账'});
+        loadLedger();
+      } else alert(d.msg||'存入失败');
+    });
+}
+
+function _chOpts(sel){ return ['微信','支付宝','淘宝','1688','银行','现金','其他'].map(c=>'<option'+(c===sel?' selected':'')+'>'+c+'</option>').join(''); }
+function _ckOpts(sel){ const m={food:'食材',outsource:'搭建/场地',fuel:'配送',labor:'人工',consume:'耗材',other:'其他'};
+  return Object.keys(m).map(k=>'<option value="'+k+'"'+(k===sel?' selected':'')+'>'+m[k]+'</option>').join(''); }
+
+function renderParseRows(container, lines, opts){
+  opts = opts||{};
+  if(!lines.length){ container.innerHTML='<div class="resume-empty">没有能识别出来的行，换一段文字试试。</div>'; return; }
+  const head = '<div class="parse-row head"><span></span><span>日期</span><span>商户/购物人</span><span>金额</span><span>渠道</span><span>成本归类</span><span></span></div>';
+  const rows = lines.map(ln=>{
+    const sid = ln.statement_id||''; const line = ln.line_no||'';
+    return '<div class="parse-row" data-sid="'+sid+'" data-line="'+line+'">'
+      +'<input type="checkbox" class="pchk" checked>'
+      +'<input class="p-date" value="'+escAttr(ln.date||'')+'">'
+      +'<input class="p-merch" value="'+escAttr(ln.merchant||'')+'">'
+      +'<input class="p-amt" type="number" step="0.01" value="'+(ln.amount!=null?ln.amount:'')+'">'
+      +'<select class="p-ch">'+_chOpts('其他')+'</select>'
+      +'<select class="p-cat">'+_ckOpts('other')+'</select>'
+      +'<input type="checkbox" class="p-cost" checked title="计入成本">'
+      +'</div>';
+  }).join('');
+  const foot = '<div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<button class="btn btn-sm btn-primary" onclick="saveParseRows(\''+container.id+'\','+(opts.link?1:0)+')">'+ (opts.saveLabel||'保存勾选为支出') +'</button>'
+    +'<span class="led-tip" style="margin:0">只保存勾选的行；没勾的留在「待对账」，下次继续。</span></div>';
+  container.innerHTML = head+rows+foot;
+}
+
+function saveParseRows(cid, link){
+  const c = document.getElementById(cid); if(!c) return;
+  const items = [];
+  c.querySelectorAll('.parse-row').forEach(r=>{
+    const chk = r.querySelector('.pchk'); if(!chk || !chk.checked) return;
+    const date = (r.querySelector('.p-date').value||'').trim();
+    const merchant = (r.querySelector('.p-merch').value||'').trim();
+    const amt = parseFloat(r.querySelector('.p-amt').value||0)||0;
+    const channel = r.querySelector('.p-ch').value;
+    const cost_kind = r.querySelector('.p-cat').value;
+    const is_cost = r.querySelector('.p-cost').checked?1:0;
+    const sid = r.getAttribute('data-sid')||'';
+    const line = r.getAttribute('data-line')||'';
+    if(!merchant && !amt) return;
+    items.push({use_date:date, channel:channel, merchant:merchant, item_name:'', amount:amt,
+                 cost_kind:cost_kind, is_cost:is_cost,
+                 statement_id: sid?parseInt(sid):null, statement_line_no: line?parseInt(line):null});
+  });
+  if(!items.length){ alert('没有勾选任何行'); return; }
+  fetch('/api/finance/expense/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items, link_statement:!!link})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ showRefreshToast(); loadLedger();
+        if(cid==='parseResult') document.getElementById('parseResult').innerHTML='<div class="resume-empty">已保存 '+d.saved+' 笔。还有要记的，再粘一段或去「继续上次对账」。</div>';
+      } else alert(d.msg||'保存失败');
+    });
+}
+
+function loadResume(){
+  const box = document.getElementById('resumeList');
+  fetchJSONRetry('/api/finance/expense-statement').then(d=>{
+    const arr = (d&&d.data)||[];
+    if(!arr.length){ box.innerHTML='<div class="resume-empty">还没有存过对账批次。去「粘贴账单文字识别」粘一段，点「存入待对账」就有了。</div>'; return; }
+    box.innerHTML = arr.map(s=>{
+      const dt = (s.created_at||'').slice(0,16).replace('T',' ');
+      return '<div class="resume-item">'
+        +'<div class="meta"><b>'+escHtml(s.channel)+'</b> · '+dt+' · 共 '+s.line_count+' 行 · 待对账 <b>'+s.unmatched+'</b> 行</div>'
+        +'<button class="btn btn-sm" onclick="resumeStatement('+s.id+')">继续('+s.unmatched+')</button>'
+        +'</div>';
+    }).join('');
+  });
+}
+
+function resumeStatement(sid){
+  fetchJSONRetry('/api/finance/expense-statement/'+sid).then(d=>{
+    const arr = (d&&d.data)||[];
+    if(!arr.length){ document.getElementById('resumeList').insertAdjacentHTML('afterbegin','<div class="resume-empty">这一批都记完啦 ✅</div>'); return; }
+    const lines = arr.map(r=>({line_no:r.line_no, raw:r.raw_line, date:r.parsed_date, merchant:r.parsed_merchant, amount:r.parsed_amount, statement_id:sid}));
+    renderParseRows(document.getElementById('parseResult'), lines, {link:true, saveLabel:'保存勾选并标记已对账'});
+    setLedgerMode('text');
+    document.getElementById('ledgerText').scrollIntoView({behavior:'smooth', block:'center'});
+  });
+}
+
+function deleteExpense(id){
+  if(!confirm('删除这笔支出？')) return;
+  fetch('/api/finance/expense/'+id,{method:'DELETE'}).then(r=>r.json()).then(d=>{ if(d.ok){ showRefreshToast(); loadLedger(); }});
+}
+
+function exportLedger(){
+  const month = document.getElementById('ledgerMonth').value;
+  window.location = '/api/finance/expense/export?month='+encodeURIComponent(month||'');
+}
+
 loadAll();
 loadSigners();
+loadLedger();
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){

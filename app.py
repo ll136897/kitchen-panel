@@ -412,6 +412,8 @@ _PARTNER_WRITE = _STAFF_WRITE + (
     "/api/backup", "/api/catering/suggest",
     # 单笔成本/收款/押金：能不能动由"这单是不是你录的"决定（见 _can_touch_order）
     "/api/finance/order", "/api/finance/payment", "/api/finance/deposit",
+    # 门店支出台账：合伙人也能记/改/删门店支出（运营数据，非原数据）；老板当然可以
+    "/api/finance/expense",
 )
 # 只有老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置/账号等
 _PARTNER_READ = (
@@ -3762,6 +3764,303 @@ def finance_profit_overview():
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
                          extra_clause=_sc, extra_params=_sp)
     return jsonify({"ok": True, "data": ov})
+
+
+# ===== 门店支出台账（2026-10-08）=====
+# 散落各渠道的支出统一登记，支持手动录入 / 粘贴账单文字识别 / 渠道对账（不丢项、知道上次做到哪），
+# 「是否计入成本」标记后联动财务页利润。
+def _exp_str(v):
+    return (v or "").strip() if v is not None else ""
+def _exp_int(v):
+    try: return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError): return None
+def _exp_float(v):
+    try: return round(float(v), 2) if v not in (None, "") else None
+    except (TypeError, ValueError): return None
+
+import re as _re
+_KW_RE = _re.compile(r'(支出|收入|扣款|支付|实付|花费|转账|退款|到账|交易|消费|¥|元|块|￥)')
+def _exp_parse(text):
+    """把渠道账单原文拆成候选支出行（文字识别，非 OCR）。返回 [{line_no,raw,date,merchant,amount}]。
+
+    解析策略（针对微信/支付宝/淘宝/1688 账单常见格式）：
+      · 日期优先用 YYYY-MM-DD / X月X日，缺年份补当前年；
+      · 金额优先取带 ¥/￥ 前缀的（避开年份、时间这类数字），没有货币符号时取"非时间数字"里最大那个；
+      · 商户名 = 去掉日期/时间/金额/交易类型词（支出/支付/元…）后剩下的文本。
+    """
+    if not text:
+        return []
+    date_re = _re.compile(r'(\d{4})[-/年月.\s](\d{1,2})[-/月日.\s](\d{1,2})日?|(\d{1,2})[-/月日.\s](\d{1,2})日?')
+    cur_re = _re.compile(r'[¥￥]\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)')
+    num_re = _re.compile(r'\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?')
+    time_re = _re.compile(r'\d{1,2}\s*:\s*\d{2}')
+    out = []
+    for i, raw in enumerate(text.replace('\r', '\n').split('\n'), 1):
+        s = raw.strip()
+        if not s:
+            continue
+        m = date_re.search(s)
+        pdate = None
+        if m:
+            if m.group(1):
+                y, mo, d = m.group(1), m.group(2), m.group(3)
+            else:
+                y, mo, d = _dt_year(), m.group(4), m.group(5)
+            try:
+                yi, moi, di = int(y), int(mo), int(d)
+                pdate = '%04d-%02d-%02d' % (yi, moi, di) if (1 <= moi <= 12 and 1 <= di <= 31) else None
+            except Exception:
+                pdate = None
+        merchant = s
+        if pdate:
+            merchant = merchant.replace(m.group(0), ' ')
+        # 金额：优先带 ¥/￥ 的；没有则取非时间数字里最大那个
+        cur = []
+        for mm in cur_re.finditer(merchant):
+            try: cur.append(float(mm.group(1).replace(',', '')))
+            except Exception: pass
+        if cur:
+            amount = round(max(cur), 2)
+        else:
+            nums = []
+            for mm in num_re.finditer(merchant):
+                around = merchant[max(0, mm.start() - 1):mm.end() + 1]
+                if ':' in around:
+                    continue
+                try: nums.append(float(mm.group(0).replace(',', '')))
+                except Exception: pass
+            amount = round(max(nums), 2) if nums else None
+        # 商户名清洗：去时间、去交易类型词、去残留数字
+        merchant = time_re.sub(' ', merchant)
+        merchant = _re.sub(r'[-–—]', ' ', merchant)
+        merchant = _KW_RE.sub(' ', merchant)
+        for mm in num_re.finditer(merchant):
+            merchant = merchant.replace(mm.group(0), ' ')
+        merchant = _re.sub(r'\s+', ' ', merchant).strip(' -·•*，。、')
+        if not merchant:
+            merchant = s[:40]
+        out.append({'line_no': i, 'raw': raw, 'date': pdate,
+                    'merchant': merchant, 'amount': amount})
+    return out
+
+def _dt_year():
+    import datetime as _dt
+    return _dt.date.today().year
+
+def _exp_cols(data, user):
+    return {
+        'use_date': _exp_str(data.get('use_date')),
+        'channel': _exp_str(data.get('channel')) or '其他',
+        'merchant': _exp_str(data.get('merchant')),
+        'item_name': _exp_str(data.get('item_name')),
+        'cat1': _exp_str(data.get('cat1')),
+        'cat2': _exp_str(data.get('cat2')),
+        'menu_item': _exp_str(data.get('menu_item')),
+        'ingredient_id': _exp_int(data.get('ingredient_id')),
+        'spec': _exp_str(data.get('spec')),
+        'qty': _exp_float(data.get('qty')),
+        'unit_price': _exp_float(data.get('unit_price')),
+        'amount': _exp_float(data.get('amount')) or 0,
+        'is_cost': 1 if data.get('is_cost', True) else 0,
+        'cost_kind': _exp_str(data.get('cost_kind')) or 'other',
+        'batch': _exp_str(data.get('batch')),
+        'note': _exp_str(data.get('note')),
+        'statement_id': _exp_int(data.get('statement_id')),
+        'statement_line_no': _exp_int(data.get('statement_line_no')),
+        'raw_text': _exp_str(data.get('raw_text')),
+        'created_by': (user or {}).get('id'),
+        'created_by_name': (user or {}).get('name') or (user or {}).get('username'),
+    }
+
+@app.route("/api/finance/expense")
+def list_expenses():
+    db = g.db
+    month = request.args.get("month")
+    channel = request.args.get("channel")
+    is_cost = request.args.get("is_cost")
+    q = request.args.get("q")
+    where = ["deleted_at IS NULL"]
+    params = []
+    if month:
+        where.append("use_date LIKE ?"); params.append(month + "%")
+    if channel:
+        where.append("channel=?"); params.append(channel)
+    if is_cost in ("1", "0"):
+        where.append("is_cost=?"); params.append(int(is_cost))
+    if q:
+        where.append("(item_name LIKE ? OR merchant LIKE ? OR menu_item LIKE ? OR note LIKE ?)")
+        params += ["%" + q + "%"] * 4
+    rows = db.execute(
+        "SELECT * FROM expenses WHERE " + " AND ".join(where) +
+        " ORDER BY use_date DESC, id DESC", params).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+@app.route("/api/finance/expense", methods=["POST"])
+def add_expense():
+    data = request.get_json(force=True) or {}
+    db = g.db
+    cols = _exp_cols(data, getattr(g, "cur_user", None))
+    keys = list(cols.keys())
+    db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" +
+               ",".join("?" * len(keys)) + ")", [cols[k] for k in keys])
+    eid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    db.commit()
+    return jsonify({"ok": True, "id": eid})
+
+@app.route("/api/finance/expense/<int:eid>", methods=["PUT"])
+def update_expense(eid):
+    data = request.get_json(force=True) or {}
+    db = g.db
+    if not db.execute("SELECT id FROM expenses WHERE id=? AND deleted_at IS NULL", (eid,)).fetchone():
+        return jsonify({"ok": False, "msg": "支出不存在"}), 404
+    cols = _exp_cols(data, getattr(g, "cur_user", None))
+    sets = [k + "=?" for k in cols if k not in ("created_by", "created_by_name")]
+    db.execute("UPDATE expenses SET " + ",".join(sets) + " WHERE id=?",
+               [cols[k] for k in cols if k not in ("created_by", "created_by_name")] + [eid])
+    db.commit()
+    return jsonify({"ok": True})
+
+@app.route("/api/finance/expense/<int:eid>", methods=["DELETE"])
+def delete_expense(eid):
+    db = g.db
+    db.execute("UPDATE expenses SET deleted_at=datetime('now','localtime') WHERE id=?", (eid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+@app.route("/api/finance/expense/parse", methods=["POST"])
+def parse_expense_text():
+    data = request.get_json(force=True) or {}
+    return jsonify({"ok": True, "lines": _exp_parse(data.get("text", ""))})
+
+@app.route("/api/finance/expense-statement", methods=["POST"])
+def create_statement():
+    data = request.get_json(force=True) or {}
+    text = data.get("text", "")
+    channel = _exp_str(data.get("channel")) or "其他"
+    u = getattr(g, "cur_user", None) or {}
+    db = g.db
+    lines = _exp_parse(text)
+    db.execute("INSERT INTO expense_statements (channel, raw_text, line_count, created_by, created_by_name) "
+               "VALUES (?,?,?,?,?)",
+               (channel, text, len(lines), u.get("id"), u.get("name") or u.get("username")))
+    sid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    out = []
+    for ln in lines:
+        db.execute("INSERT INTO expense_statement_lines "
+                   "(statement_id, line_no, raw_line, parsed_date, parsed_merchant, parsed_amount) "
+                   "VALUES (?,?,?,?,?,?)",
+                   (sid, ln["line_no"], ln["raw"], ln["date"], ln["merchant"], ln["amount"]))
+        out.append({"id": db.execute("SELECT last_insert_rowid()").fetchone()[0],
+                    "statement_id": sid, **ln, "matched_expense_id": None})
+    db.commit()
+    return jsonify({"ok": True, "statement_id": sid, "lines": out})
+
+@app.route("/api/finance/expense-statement")
+def list_statements():
+    rows = g.db.execute("""
+        SELECT s.id, s.channel, s.created_at, s.line_count,
+               (SELECT COUNT(*) FROM expense_statement_lines l
+                WHERE l.statement_id=s.id AND l.matched_expense_id IS NULL) AS unmatched
+        FROM expense_statements s ORDER BY s.id DESC LIMIT 50
+    """).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+@app.route("/api/finance/expense-statement/<int:sid>")
+def statement_unmatched(sid):
+    rows = g.db.execute(
+        "SELECT * FROM expense_statement_lines WHERE statement_id=? AND matched_expense_id IS NULL "
+        "ORDER BY line_no", (sid,)).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+@app.route("/api/finance/expense/batch", methods=["POST"])
+def batch_save_expenses():
+    data = request.get_json(force=True) or {}
+    items = data.get("items") or []
+    link = data.get("link_statement", True)
+    u = getattr(g, "cur_user", None) or {}
+    db = g.db
+    saved = 0
+    for it in items:
+        cols = _exp_cols(it, u)
+        keys = list(cols.keys())
+        db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" +
+                   ",".join("?" * len(keys)) + ")", [cols[k] for k in keys])
+        eid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        saved += 1
+        if link and cols["statement_id"] and cols["statement_line_no"]:
+            db.execute("UPDATE expense_statement_lines SET matched_expense_id=? "
+                       "WHERE statement_id=? AND line_no=? AND matched_expense_id IS NULL",
+                       (eid, cols["statement_id"], cols["statement_line_no"]))
+    db.commit()
+    return jsonify({"ok": True, "saved": saved})
+
+@app.route("/api/finance/expense/<int:eid>/map-ingredient", methods=["POST"])
+def map_expense_ingredient(eid):
+    """把支出关联到某个食材（仅记录关联关系，方便「菜单对应品名」核对；不改全局单价）。
+    要改某食材采购价请用食材单价管理或订单利润弹窗。"""
+    data = request.get_json(force=True) or {}
+    db = g.db
+    iid = _exp_int(data.get("ingredient_id"))
+    db.execute("UPDATE expenses SET ingredient_id=?, menu_item=? WHERE id=?",
+               (iid, _exp_str(data.get("menu_item")), eid))
+    db.commit()
+    return jsonify({"ok": True})
+
+@app.route("/api/finance/expense-summary")
+def expense_summary():
+    month = request.args.get("month")
+    db = g.db
+    where = ["deleted_at IS NULL"]
+    params = []
+    if month:
+        where.append("use_date LIKE ?"); params.append(month + "%")
+    row = db.execute(
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS total, "
+        "COALESCE(SUM(CASE WHEN is_cost=1 THEN amount ELSE 0 END),0) AS cost_total "
+        "FROM expenses WHERE " + " AND ".join(where), params).fetchone()
+    by_kind = {}
+    for r in db.execute(
+        "SELECT cost_kind, COALESCE(SUM(amount),0) AS s FROM expenses WHERE " +
+        " AND ".join(where) + " AND is_cost=1 GROUP BY cost_kind", params).fetchall():
+        by_kind[r["cost_kind"]] = round(float(r["s"] or 0), 2)
+    un = db.execute(
+        "SELECT COUNT(*) AS c, COALESCE(SUM(parsed_amount),0) AS a "
+        "FROM expense_statement_lines WHERE matched_expense_id IS NULL").fetchone()
+    return jsonify({"ok": True, "data": {
+        "count": row["cnt"] or 0,
+        "total": round(float(row["total"] or 0), 2),
+        "cost_total": round(float(row["cost_total"] or 0), 2),
+        "by_kind": by_kind,
+        "unmatched_count": un["c"] or 0,
+        "unmatched_amount": round(float(un["a"] or 0), 2),
+    }})
+
+@app.route("/api/finance/expense/export")
+def export_expenses():
+    from flask import Response
+    import csv as _csv, io
+    month = request.args.get("month")
+    db = g.db
+    where = ["deleted_at IS NULL"]
+    params = []
+    if month:
+        where.append("use_date LIKE ?"); params.append(month + "%")
+    rows = db.execute(
+        "SELECT use_date, channel, merchant, item_name, cat1, cat2, menu_item, spec, "
+        "qty, unit_price, amount, is_cost, cost_kind, batch, note "
+        "FROM expenses WHERE " + " AND ".join(where) + " ORDER BY use_date DESC, id DESC",
+        params).fetchall()
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["使用日期", "渠道", "商户/购物人", "物料名称", "分类一", "分类二",
+                "菜单对应品名", "规格", "数量", "单价", "实付金额", "计入成本", "成本归类", "批次", "备注"])
+    for r in rows:
+        w.writerow([r["use_date"], r["channel"], r["merchant"], r["item_name"], r["cat1"], r["cat2"],
+                    r["menu_item"], r["spec"], r["qty"], r["unit_price"], r["amount"],
+                    "是" if r["is_cost"] else "否", r["cost_kind"], r["batch"], r["note"]])
+    b = buf.getvalue().encode("utf-8-sig")
+    return Response(b, mimetype="text/csv; charset=utf-8",
+                   headers={"Content-Disposition": "attachment; filename=门店支出_%s.csv" % (month or "全部")})
 
 
 @app.route("/api/finance/dates")

@@ -505,6 +505,69 @@ def init_db():
         except Exception as _e:
             print("[迁移] 托盘移除跳过：", _e)
 
+        # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
+        # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
+        #   expenses            —— 每笔支出一条
+        #   expense_statements  —— 一次粘贴的渠道账单原文（微信/支付宝/淘宝…）
+        #   expense_statement_lines —— 账单拆出的每一行，记录是否已记成支出（对账进度）
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                use_date TEXT,                 -- 使用日期 YYYY-MM-DD
+                channel TEXT,                  -- 渠道：微信/支付宝/淘宝/1688/银行/现金/其他
+                merchant TEXT,                 -- 供应商/商户/购物人
+                item_name TEXT,                -- 物料名称
+                cat1 TEXT,                     -- 分类一（食材采购/厨房设备/场地相关/其他）
+                cat2 TEXT,                     -- 分类二（牛肉/猪肉/…）
+                menu_item TEXT,                -- 菜单对应品名（C8：摊回具体菜/食材）
+                ingredient_id INTEGER,         -- 关联食材 id（可空）
+                spec TEXT,                     -- 规格
+                qty REAL,                      -- 数量
+                unit_price REAL,               -- 单价
+                amount REAL NOT NULL DEFAULT 0,-- 付款总额（实付）
+                is_cost INTEGER NOT NULL DEFAULT 1,  -- 是否计入成本 1/0
+                cost_kind TEXT,                -- 成本归类 food/outsource/fuel/labor/consume/other
+                batch TEXT,                    -- 批次（第几批报销）
+                note TEXT,
+                statement_id INTEGER,          -- 来自哪个渠道对账
+                statement_line_no INTEGER,     -- 对应账单哪一行
+                raw_text TEXT,                 -- 原始文本（回溯用）
+                created_by INTEGER,
+                created_by_name TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime')),
+                deleted_at TEXT,               -- 软删除
+                FOREIGN KEY (ingredient_id) REFERENCES ingredients(id)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(use_date)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_expenses_stmt ON expenses(statement_id)")
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS expense_statements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT,
+                raw_text TEXT,
+                line_count INTEGER NOT NULL DEFAULT 0,
+                created_by INTEGER,
+                created_by_name TEXT,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS expense_statement_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                statement_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                raw_line TEXT,
+                parsed_date TEXT,
+                parsed_merchant TEXT,
+                parsed_amount REAL,
+                matched_expense_id INTEGER,    -- 已记成哪条支出；NULL=还没记（对账进度）
+                FOREIGN KEY (statement_id) REFERENCES expense_statements(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_stmt_lines_sid ON expense_statement_lines(statement_id)")
+
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
 
