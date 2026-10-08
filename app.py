@@ -4097,10 +4097,12 @@ def export_expenses():
         amount = r["amount"] or 0
         total = round(qty * up, 2) if (qty and up) else amount  # C12 总金额 = 数量×单价
         buyer = r["buyer"] or r["created_by_name"] or ""
+        # 只填3样（用途/金额，无单独用途备注）时，用途列回退到物料名，保证整行不空
+        purpose = r["purpose"] or r["item_name"] or ""
         w.writerow([
             i, r["batch"] or "", r["cat1"] or "", r["cat2"] or "", r["use_date"] or "",
             _month_of(r["use_date"]), r["item_name"] or "", r["menu_item"] or "", r["spec"] or "",
-            _num(qty), _num(up), _num(total), _num(amount), r["merchant"] or "", r["purpose"] or "", buyer,
+            _num(qty), _num(up), _num(total), _num(amount), r["merchant"] or "", purpose, buyer,
             "", "", "", r["note"] or "", "", "", "", ""  # C17-C19 图片位留空；C21 空白；C22-C24 汇总块
         ])
         total_sum += amount

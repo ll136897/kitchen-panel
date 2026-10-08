@@ -139,11 +139,21 @@
     /* 手机端隐藏原生日期选择器：它会盖住大半屏；常用日期由上方快捷chip(今天/昨天/本周/本月/上月)+区间tab覆盖 */
     #rangeDate{display:none}
   }
-  /* ===== 门店支出台账（2026-10-08）===== */
-  .ledger-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:6px;align-items:flex-end;margin-top:6px}
-  .ledger-form .lf{padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box;min-width:0;width:100%}
-  .ledger-form .chk{display:flex;align-items:center;gap:5px;font-size:12px;color:#6b4f3a;padding-bottom:6px}
-  .ledger-form .btn{justify-self:start;width:auto}
+  /* ===== 门店支出台账（2026-10-08 重构：标签化竖排，杜绝输入框重叠）===== */
+  .led-tip{font-size:12px;color:#8a7364;background:#fdf6ec;border:1px solid #f3e6d2;border-radius:8px;padding:8px 10px;margin:4px 0 12px;line-height:1.6}
+  .led-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
+  .led-field>label{font-size:12px;color:#6b4f3a;font-weight:600}
+  .led-field input,.led-field select{padding:10px 11px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;width:100%;background:#fff}
+  .led-field input:focus,.led-field select:focus{border-color:#9b59b6;outline:none}
+  .led-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .led-2col .led-field{margin-bottom:0}
+  .led-more{margin:2px 0 4px;border:1px dashed #e3d7c6;border-radius:8px;padding:4px 12px 10px;background:#fcfaf6}
+  .led-more>summary{cursor:pointer;font-size:13px;color:#8a6d4f;font-weight:600;padding:6px 0;list-style:none;user-select:none}
+  .led-more>summary::-webkit-details-marker{display:none}
+  .led-more>summary:before{content:"▸ ";}
+  .led-more[open]>summary:before{content:"▾ ";}
+  .led-check{display:flex;align-items:center;gap:7px;font-size:13px;color:#6b4f3a;margin:6px 0 2px}
+  .led-check input{width:16px;height:16px;flex:0 0 auto}
   .led-tip{font-size:11px;color:#8a7364;margin:6px 0 2px;line-height:1.5}
   .parse-wrap{margin-top:8px;border:1px solid #f0ebe3;border-radius:8px;overflow:hidden}
   .parse-row{display:grid;grid-template-columns:22px 96px 1fr 92px 84px 96px 22px;gap:6px;align-items:center;padding:6px 8px;border-bottom:1px dashed #f0e9df;font-size:12px}
@@ -157,7 +167,7 @@
   .lrow .badge-cost{background:#d4edda;color:#155724}
   .lrow .badge-nocost{background:#e2e3e5;color:#383d41}
   @media(max-width:600px){
-    .ledger-form{grid-template-columns:repeat(2,1fr)}
+    .led-2col{grid-template-columns:1fr}
     .parse-row{grid-template-columns:20px 1fr;row-gap:4px}
     .parse-row.head{display:none}
     .parse-row .p-date,.parse-row .p-amt,.parse-row .p-ch,.parse-row .p-cat{grid-column:span 1}
@@ -263,33 +273,97 @@
 
     <!-- 手动录入 -->
     <div id="ledgerManual">
-      <div class="ledger-form">
-        <input type="date" id="e_date" class="lf" title="使用日期">
-        <select id="e_channel" class="lf">
-          <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
-        </select>
-        <input id="e_merchant" class="lf" placeholder="供应商/商户">
-        <input id="e_buyer" class="lf" placeholder="购物人(谁买的)">
-        <input id="e_item" class="lf" placeholder="物料名称">
-        <select id="e_cat1" class="lf">
-          <option value="">分类一</option><option>食材采购</option><option>厨房设备</option><option>场地相关</option><option>包装耗材</option><option>交通配送</option><option>营销</option><option>其他</option>
-        </select>
-        <input id="e_cat2" class="lf" placeholder="分类二">
-        <input id="e_menu" class="lf" placeholder="菜单对应品名(可空)">
-        <input id="e_spec" class="lf" placeholder="规格">
-        <input id="e_qty" class="lf" type="number" step="0.01" placeholder="数量">
-        <input id="e_price" class="lf" type="number" step="0.01" placeholder="单价">
-        <input id="e_amount" class="lf" type="number" step="0.01" placeholder="实付金额*">
-        <select id="e_costkind" class="lf">
-          <option value="food">成本归类:食材</option><option value="outsource">搭建/场地</option><option value="fuel">配送</option><option value="labor">人工</option><option value="consume">耗材</option><option value="other">其他</option>
-        </select>
-        <input id="e_batch" class="lf" placeholder="批次(如 第3批)">
-        <input id="e_purpose" class="lf" placeholder="用途">
-        <input id="e_note" class="lf" placeholder="备注">
-        <label class="lf chk"><input type="checkbox" id="e_iscost" checked> 计入成本</label>
-        <button class="btn btn-primary btn-sm" onclick="saveExpense()">💾 保存这笔</button>
+      <div class="led-tip">👇 只要 <b>3 样</b> 就能存：<b>日期（默认今天）、用途、金额</b>。渠道默认「微信」，分类/购物人等都不用管——导出时系统自动补齐成完整表格。要一次记很多笔？用上方「📋 粘贴账单文字识别」。</div>
+
+      <!-- 核心必填：只有这 3 个常驻 -->
+      <div class="led-field">
+        <label>日期 *</label>
+        <input type="date" id="e_date">
       </div>
-      <div class="led-tip">带 * 的必填。先记下来、下次再补细节也行——重点是别让支出散在各渠道里最后理不清。</div>
+      <div class="led-field">
+        <label>用途 / 买了啥 *</label>
+        <input id="e_item" placeholder="如 付兼职工资 / 买牛肉 / 炭火费">
+      </div>
+      <div class="led-field">
+        <label>金额（元）*</label>
+        <input id="e_amount" type="number" step="0.01" placeholder="例如 100">
+      </div>
+
+      <!-- 其余全部收起：绝大多数情况不用碰 -->
+      <details class="led-more">
+        <summary>更多（渠道 / 供应商 / 分类 / 规格 / 购物人 … 一般不填）</summary>
+        <div class="led-2col" style="margin-top:10px">
+          <div class="led-field">
+            <label>从哪付的（渠道）</label>
+            <select id="e_channel">
+              <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+            </select>
+          </div>
+          <div class="led-field">
+            <label>供应商 / 商户</label>
+            <input id="e_merchant" placeholder="如 美团 / 1688某店">
+          </div>
+        </div>
+        <div class="led-2col">
+          <div class="led-field">
+            <label>谁买的（购物人）</label>
+            <input id="e_buyer" placeholder="如 刘 / 孙">
+          </div>
+          <div class="led-field">
+            <label>分类一</label>
+            <select id="e_cat1">
+              <option value="">不填</option><option>食材采购</option><option>厨房设备</option><option>场地相关</option><option>包装耗材</option><option>交通配送</option><option>营销</option><option>其他</option>
+            </select>
+          </div>
+        </div>
+        <div class="led-2col">
+          <div class="led-field">
+            <label>分类二</label>
+            <input id="e_cat2" placeholder="如 肉类 / 调料">
+          </div>
+          <div class="led-field">
+            <label>规格</label>
+            <input id="e_spec" placeholder="如 5kg/箱">
+          </div>
+        </div>
+        <div class="led-2col">
+          <div class="led-field">
+            <label>菜单对应品名</label>
+            <input id="e_menu" placeholder="可空">
+          </div>
+          <div class="led-field">
+            <label>数量</label>
+            <input id="e_qty" type="number" step="0.01" placeholder="如 2">
+          </div>
+        </div>
+        <div class="led-2col">
+          <div class="led-field">
+            <label>单价</label>
+            <input id="e_price" type="number" step="0.01" placeholder="如 85">
+          </div>
+          <div class="led-field">
+            <label>批次</label>
+            <input id="e_batch" placeholder="如 第3批">
+          </div>
+        </div>
+        <div class="led-field">
+          <label>用途备注（不填则同上方用途）</label>
+          <input id="e_purpose" placeholder="如 9月20日团建">
+        </div>
+        <div class="led-field">
+          <label>备注</label>
+          <input id="e_note" placeholder="可空">
+        </div>
+        <div class="led-field">
+          <label>成本归类（计入成本才进利润核算）</label>
+          <select id="e_costkind">
+            <option value="food">食材</option><option value="outsource">搭建/场地</option><option value="fuel">配送</option><option value="labor">人工</option><option value="consume">耗材</option><option value="other">其他</option>
+          </select>
+        </div>
+        <label class="led-check"><input type="checkbox" id="e_iscost" checked> 计入成本（勾上才会算进「含门店支出净利」）</label>
+      </details>
+
+      <button class="btn btn-primary" style="margin-top:14px;width:100%;padding:12px;font-size:15px" onclick="saveExpense()">💾 保存这笔</button>
     </div>
 
     <!-- 文字识别 -->
@@ -1510,6 +1584,8 @@ function setLedgerMode(mode){
 }
 
 function loadLedger(){
+  const dEl = document.getElementById('e_date');
+  if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
   const mEl = document.getElementById('ledgerMonth');
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
@@ -1579,7 +1655,8 @@ function saveExpense(){
   fetch('/api/finance/expense',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(r=>r.json()).then(d=>{
       if(d.ok){ showRefreshToast(); loadLedger();
-        ['e_merchant','e_buyer','e_item','e_cat2','e_menu','e_spec','e_qty','e_price','e_amount','e_batch','e_purpose','e_note'].forEach(id=>document.getElementById(id).value='');
+        ['e_merchant','e_buyer','e_item','e_cat1','e_cat2','e_menu','e_spec','e_qty','e_price','e_amount','e_batch','e_purpose','e_note'].forEach(id=>document.getElementById(id).value='');
+        document.getElementById('e_date').value = new Date().toISOString().slice(0,10);
       } else alert(d.msg||'保存失败');
     });
 }
