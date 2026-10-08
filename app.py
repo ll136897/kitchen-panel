@@ -3848,6 +3848,12 @@ def _dt_year():
     return _dt.date.today().year
 
 def _exp_cols(data, user):
+    qty = _exp_float(data.get('qty'))
+    up = _exp_float(data.get('unit_price'))
+    amt = _exp_float(data.get('amount'))
+    # 模块5：总金额 = 数量 × 单价 自动算（避免手填出错）。仅当未显式给金额、且数量单价齐全时自动推导
+    if not amt and qty and up:
+        amt = round(qty * up, 2)
     return {
         'use_date': _exp_str(data.get('use_date')),
         'channel': _exp_str(data.get('channel')) or '其他',
@@ -3856,11 +3862,11 @@ def _exp_cols(data, user):
         'cat1': _exp_str(data.get('cat1')),
         'cat2': _exp_str(data.get('cat2')),
         'menu_item': _exp_str(data.get('menu_item')),
-        'ingredient_id': _exp_int(data.get('ingredient_id')),
+        'ingredient_id': _exp_int(data.get('ingredient_id')) or None,
         'spec': _exp_str(data.get('spec')),
-        'qty': _exp_float(data.get('qty')),
-        'unit_price': _exp_float(data.get('unit_price')),
-        'amount': _exp_float(data.get('amount')) or 0,
+        'qty': qty,
+        'unit_price': up,
+        'amount': amt or 0,
         'is_cost': 1 if data.get('is_cost', True) else 0,
         'cost_kind': _exp_str(data.get('cost_kind')) or 'other',
         'batch': _exp_str(data.get('batch')),
@@ -4000,7 +4006,8 @@ def map_expense_ingredient(eid):
     要改某食材采购价请用食材单价管理或订单利润弹窗。"""
     data = request.get_json(force=True) or {}
     db = g.db
-    iid = _exp_int(data.get("ingredient_id"))
+    # 0 / 空 / None 一律视为"不关联"（避免外键指向不存在的食材 id）
+    iid = _exp_int(data.get("ingredient_id")) or None
     db.execute("UPDATE expenses SET ingredient_id=?, menu_item=? WHERE id=?",
                (iid, _exp_str(data.get("menu_item")), eid))
     db.commit()
