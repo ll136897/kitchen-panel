@@ -3847,6 +3847,30 @@ def _dt_year():
     import datetime as _dt
     return _dt.date.today().year
 
+# ===== 门店支出自动分类 ====================================================
+# 按「用途 / 物料名」关键词推断 分类一/分类二/成本归类。
+# 仅当使用者在「更多」里没手填分类时才自动补；识别不到则留空（不强塞）。
+_AUTO_CAT_RULES = [
+    # (关键词元组, 分类一, 分类二, cost_kind)
+    (("兼职","工资","人工","劳务","佣金","提成","小时工","服务费","帮工","小工","人员","工人","师傅","临工"), "其他", "人工", "labor"),
+    (("牛肉","猪肉","羊肉","鸡肉","鸭","鹅","鱼","虾","海鲜","蟹","蔬菜","青菜","生菜","白菜","土豆","洋葱","番茄","西红柿","黄瓜","调料","调味料","香料","食材","大米","米","面粉","面条","食用油","盐","酱","酱油","醋","葱","姜","蒜","辣椒","火锅","蘸料","腌料","芝麻","花生","豆腐","豆","鸡蛋","芝士","奶酪","年糕","粉条","海带","木耳","蘑菇","菌","五花","里脊","排骨","牛排","鸡翅","虾仁","鱿鱼"), "食材采购", "", "food"),
+    (("炭","炭火","碳","烤炉","烤盘","烧烤架","烤网","设备","锅","平底锅","灶","刀具","刀","冰柜","冰箱","货架","推车","卡式炉","气罐","煤气","炉具","夹子","铲子","签子","竹签","烤叉"), "厨房设备", "", "other"),
+    (("桌布","一次性","餐具","杯子","纸巾","湿巾","手套","垃圾袋","打包盒","餐盒","饭盒","牙签","保鲜膜","锡纸","铝箔","包装","盘子","碗","筷子","勺子","吸管"), "包装耗材", "", "consume"),
+    (("场地","租金","租","帐篷","天幕","桌椅","遮阳","场地费","电费","水费","物业","管理费","停车费"), "场地相关", "", "outsource"),
+    (("油费","打车","滴滴","配送","运费","快递","物流","货拉拉","汽油","柴油","路费","过路","外卖","跑腿","开车","车费"), "交通配送", "", "fuel"),
+    (("推广","广告","抖音","美团","大众点评","投放","营销","宣传","海报","拍摄","视频","小红书","网红","探店","流量","推广费"), "营销", "", "other"),
+]
+
+def _auto_classify(text):
+    if not text:
+        return None
+    t = str(text)
+    for kws, c1, c2, ck in _AUTO_CAT_RULES:
+        for kw in kws:
+            if kw in t:
+                return {"cat1": c1, "cat2": c2, "cost_kind": ck}
+    return None
+
 def _exp_cols(data, user):
     qty = _exp_float(data.get('qty'))
     up = _exp_float(data.get('unit_price'))
@@ -3908,6 +3932,14 @@ def add_expense():
     data = request.get_json(force=True) or {}
     db = g.db
     cols = _exp_cols(data, getattr(g, "cur_user", None))
+    # 自动分类：用途/物料能识别时补全 分类一/二/成本归类（用户没手填分类才补）
+    if not cols.get('cat1'):
+        ac = _auto_classify((data.get('item_name') or '') + ' ' + (data.get('purpose') or ''))
+        if ac:
+            cols['cat1'] = ac['cat1']
+            if ac['cat2']:
+                cols['cat2'] = ac['cat2']
+            cols['cost_kind'] = ac['cost_kind']
     keys = list(cols.keys())
     db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" +
                ",".join("?" * len(keys)) + ")", [cols[k] for k in keys])
@@ -3939,6 +3971,12 @@ def delete_expense(eid):
 def parse_expense_text():
     data = request.get_json(force=True) or {}
     return jsonify({"ok": True, "lines": _exp_parse(data.get("text", ""))})
+
+@app.route("/api/finance/expense/auto-classify")
+def auto_classify_expense():
+    """实时预览：根据用途/物料名返回建议分类（供录入时给提示，不强制）。"""
+    text = request.args.get("text", "")
+    return jsonify({"ok": True, "result": _auto_classify(text)})
 
 @app.route("/api/finance/expense-statement", methods=["POST"])
 def create_statement():
@@ -3990,6 +4028,14 @@ def batch_save_expenses():
     saved = 0
     for it in items:
         cols = _exp_cols(it, u)
+        # 批量入库同样自动分类（粘贴账单里的行通常没填分类）
+        if not cols.get('cat1'):
+            ac = _auto_classify((it.get('item_name') or '') + ' ' + (it.get('purpose') or ''))
+            if ac:
+                cols['cat1'] = ac['cat1']
+                if ac['cat2']:
+                    cols['cat2'] = ac['cat2']
+                cols['cost_kind'] = ac['cost_kind']
         keys = list(cols.keys())
         db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" +
                    ",".join("?" * len(keys)) + ")", [cols[k] for k in keys])

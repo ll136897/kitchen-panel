@@ -141,6 +141,10 @@
   }
   /* ===== 门店支出台账（2026-10-08 重构：标签化竖排，杜绝输入框重叠）===== */
   .led-tip{font-size:12px;color:#8a7364;background:#fdf6ec;border:1px solid #f3e6d2;border-radius:8px;padding:8px 10px;margin:4px 0 12px;line-height:1.6}
+  .led-owner{font-size:12px;color:#6b4f3a;background:#eef6ee;border:1px solid #d6e8d6;border-radius:8px;padding:6px 10px;margin:2px 0 10px}
+  .led-owner b{color:#2f7d32}
+  .led-autocat{font-size:11px;color:#2f7d32;margin-top:2px;min-height:14px}
+  .led-autocat.empty{color:#a08c7a}
   .led-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
   .led-field>label{font-size:12px;color:#6b4f3a;font-weight:600}
   .led-field input,.led-field select{padding:10px 11px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;width:100%;background:#fff}
@@ -273,7 +277,8 @@
 
     <!-- 手动录入 -->
     <div id="ledgerManual">
-      <div class="led-tip">👇 只要 <b>3 样</b> 就能存：<b>日期（默认今天）、用途、金额</b>。渠道默认「微信」，分类/购物人等都不用管——导出时系统自动补齐成完整表格。要一次记很多笔？用上方「📋 粘贴账单文字识别」。</div>
+      <div class="led-tip">👇 只要 <b>3 样</b> 就能存：<b>日期（默认今天）、用途、金额</b>。渠道默认「微信」，分类/购物人等都不用管——系统会按用途自动归类，导出时再补齐成完整表格。要一次记很多笔？用上方「📋 粘贴账单文字识别」。</div>
+      <div class="led-owner">归属：<b id="ledOwnerName">本账号</b> · 用哪个号登录就归哪个号，自动记录（两人都看得到，但能区分是谁记的）</div>
 
       <!-- 核心必填：只有这 3 个常驻 -->
       <div class="led-field">
@@ -282,7 +287,8 @@
       </div>
       <div class="led-field">
         <label>用途 / 买了啥 *</label>
-        <input id="e_item" placeholder="如 付兼职工资 / 买牛肉 / 炭火费">
+        <input id="e_item" placeholder="如 付兼职工资 / 买牛肉 / 炭火费" oninput="onItemInput()">
+        <div class="led-autocat" id="e_auto_cat"></div>
       </div>
       <div class="led-field">
         <label>金额（元）*</label>
@@ -390,7 +396,7 @@
       <table class="fin-tbl" id="ledgerTable">
         <thead><tr>
           <th>日期</th><th>渠道</th><th>供应商</th><th>购物人</th><th>物料</th><th>分类</th>
-          <th>金额</th><th>计入成本</th><th>批次</th><th>用途</th><th></th>
+          <th>金额</th><th>计入成本</th><th>批次</th><th>用途</th><th>归属</th><th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -1586,6 +1592,9 @@ function setLedgerMode(mode){
 function loadLedger(){
   const dEl = document.getElementById('e_date');
   if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
+  // 归属：默认本账号（用哪个号登录就归哪个号）
+  const onEl = document.getElementById('ledOwnerName');
+  if(onEl && CUR_USER && CUR_USER.name) onEl.textContent = CUR_USER.name;
   const mEl = document.getElementById('ledgerMonth');
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
@@ -1620,7 +1629,7 @@ function renderLedgerKpi(d, cash, net){
 
 function renderLedgerList(rows){
   const tb = document.querySelector('#ledgerTable tbody');
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
   tb.innerHTML = rows.map(r=>{
     const cost = r.is_cost ? '<span class="badge badge-cost">计入</span>' : '<span class="badge badge-nocost">不计入</span>';
     const cat = [r.cat1, r.cat2].filter(Boolean).join('/');
@@ -1636,9 +1645,33 @@ function renderLedgerList(rows){
       +'<td>'+cost+'</td>'
       +'<td>'+escHtml(r.batch||'')+'</td>'
       +'<td style="text-align:left;font-size:11px;color:#7a6a5c">'+escHtml(r.purpose||'')+'</td>'
+      +'<td style="color:#2f7d32">'+escHtml(r.created_by_name||'')+'</td>'
       +'<td><button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="deleteExpense('+r.id+')">删</button></td>'
       +'</tr>';
   }).join('');
+}
+
+// 录入用途时实时预览系统会自动归到哪类
+let _acTimer = null;
+function onItemInput(){
+  const box = document.getElementById('e_auto_cat');
+  const txt = (document.getElementById('e_item').value||'').trim();
+  if(!box) return;
+  if(!txt){ box.textContent=''; box.className='led-autocat'; return; }
+  clearTimeout(_acTimer);
+  _acTimer = setTimeout(function(){
+    fetch('/api/finance/expense/auto-classify?text='+encodeURIComponent(txt)).then(r=>r.json()).then(d=>{
+      const ac = d && d.result;
+      if(ac){
+        const ck = {food:'食材',outsource:'搭建/场地',fuel:'配送',labor:'人工',consume:'耗材',other:'其他'}[ac.cost_kind]||'';
+        box.textContent = '🤖 系统自动归类：'+ac.cat1+(ac.cat2?' / '+ac.cat2:'')+(ck?'（计入成本·'+ck+'）':'')+' —— 不对手填可在「更多」里改';
+        box.className = 'led-autocat';
+      } else {
+        box.textContent = '暂未自动识别分类，可在「更多」里手选';
+        box.className = 'led-autocat empty';
+      }
+    }).catch(function(){ box.textContent=''; });
+  }, 350);
 }
 
 function saveExpense(){
