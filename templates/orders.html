@@ -50,7 +50,7 @@
   .ochip-sep{width:1px;height:18px;background:var(--border);margin:0 2px;flex:0 0 auto}
   /* 点击月份弹出的"具体日期"下拉框（挂 body、fixed 定位，避免被日期条 overflow 裁掉） */
   .month-menu{position:fixed;z-index:200;background:#fff;border:1px solid var(--border);border-radius:12px;
-    box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;max-height:62vh;overflow:auto}
+    box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;max-height:62vh;overflow:auto;overscroll-behavior:contain}
   .month-menu .mm-head{font-size:12px;color:var(--muted);padding:4px 8px 6px;font-weight:700}
   .month-menu .mm-item{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;
     padding:8px 10px;border:none;background:#fff;border-radius:8px;font-size:14px;color:#3a2c20;cursor:pointer;text-align:left}
@@ -380,6 +380,25 @@ function renderOrderDateChips(){
 // ===== 月份 → 具体日期 下拉框 =====
 let _monthMenuEl = null;
 function closeMonthMenu(){ if(_monthMenuEl){ _monthMenuEl.remove(); _monthMenuEl=null; } }
+// 把下拉框定位到对应日期框下方；日期框滚出视口才自动关
+function placeMonthMenu(){
+  const el = _monthMenuEl; if(!el) return;
+  const chip = document.querySelector('#orderDateChips .date-chip[data-mk="'+el.dataset.k+'"]');
+  if(!chip){ closeMonthMenu(); return; }
+  const r = chip.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  if(r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw){ closeMonthMenu(); return; }
+  el.style.minWidth = Math.max(170, Math.min(240, r.width+70)) + 'px';
+  let left = r.left, top = r.bottom + 4;
+  const ew = el.offsetWidth, eh = el.offsetHeight;
+  if(left + ew > vw - 8) left = Math.max(8, vw - ew - 8);
+  if(top + eh > vh - 8){
+    const above = r.top - eh - 4;                 // 下方放不下就翻到日期框上方
+    top = above >= 8 ? above : Math.max(8, vh - eh - 8);
+  }
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+}
 function monthDatesDesc(k){
   const counts={}; allOrders.forEach(o=>{ if(o.booking_date) counts[o.booking_date]=(counts[o.booking_date]||0)+1; });
   return { counts, ds: Object.keys(counts).filter(d=>d.slice(0,7)===k).sort().reverse() }; // 该月日期降序（最新天在最前）
@@ -398,25 +417,32 @@ function openMonthMenu(k){
   h += ds.map(d=> '<button class="mm-item '+(filterDate===d?'cur':'')+'" onclick="setOrderDate(\''+d+'\');closeMonthMenu()">'+d.slice(5)+' <span class="cnt">'+counts[d]+'单</span></button>').join('');
   el.innerHTML = h;
   document.body.appendChild(el);
-  // 按 chip 位置 fixed 定位，并夹在视口内
-  const r = chip.getBoundingClientRect();
-  const mw = Math.max(170, Math.min(240, r.width+70));
-  el.style.minWidth = mw+'px';
-  let left = r.left, top = r.bottom + 4;
-  const ew = el.offsetWidth, eh = el.offsetHeight;
-  if(left + ew > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ew - 8);
-  if(top + eh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - eh - 8);
-  el.style.left = left+'px';
-  el.style.top = top+'px';
   _monthMenuEl = el;
+  placeMonthMenu();
 }
 function toggleMonthMenu(k){ if(_monthMenuEl && _monthMenuEl.dataset.k===k) closeMonthMenu(); else openMonthMenu(k); }
-// 点其它地方 / 滚动 / 缩放 → 关掉下拉框
+// 只有点"真正外面"的地方才关：菜单内部、横向日期条本身（含它的滚动条和空白处）都不算外面
 document.addEventListener('click', function(e){
-  if(_monthMenuEl && !_monthMenuEl.contains(e.target) && !(e.target.closest && e.target.closest('#orderDateChips .date-chip[data-mk]'))) closeMonthMenu();
+  if(!_monthMenuEl) return;
+  if(_monthMenuEl.contains(e.target)) return;
+  if(e.target.closest && e.target.closest('.date-chips')) return;
+  closeMonthMenu();
 }, true);
-window.addEventListener('scroll', ()=>closeMonthMenu(), true);
-window.addEventListener('resize', ()=>closeMonthMenu(), true);
+// 滚动 / 缩放：下拉框跟着日期框走，不再粗暴关掉
+// ⚠️ 旧写法是 window 捕获阶段 scroll -> closeMonthMenu()，后果是**菜单自己内部滚动也会把自己关掉**
+//    （9月有31行，必然超出 62vh 要内部滚动 → 一动滚轮菜单就消失，这正是用户报的现象）
+let _mmRaf = 0;
+function _mmReposition(){
+  if(_mmRaf) return;
+  _mmRaf = requestAnimationFrame(function(){ _mmRaf = 0; placeMonthMenu(); });
+}
+window.addEventListener('scroll', function(e){
+  if(!_monthMenuEl) return;
+  const t = e.target;
+  if(t && (t===_monthMenuEl || _monthMenuEl.contains(t))) return;   // 菜单内部滚动：保持打开
+  _mmReposition();
+}, true);
+window.addEventListener('resize', function(){ if(_monthMenuEl) _mmReposition(); }, true);
 
 // 归属筛选：全部 / 刘 / 孙（两人都能看，用来分开看各自录的单）
 function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
