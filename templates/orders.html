@@ -69,7 +69,7 @@
   .sort-hint{display:none}
   /* 订单归属：谁归属的（我=蓝、别人=灰、未标注=淡） */
   .chip.who{font-weight:700}
-  .chip.who-me{background:#e8f1fb;color:#1b5e9e;border:1px solid #bcd8f2}
+  .chip.who-me{background:#fdeede;color:#c8651a;border:1px solid #f3c79a}
   .chip.who-other{background:#f3efe9;color:#6b5b4b;border:1px solid var(--border)}
   .chip.who-none{background:#f6f6f6;color:#999;border:1px solid #e5e5e5}
   .lock-note{font-size:12px;color:#9a8f83;background:#f7f4ef;border:1px dashed var(--border);border-radius:8px;padding:6px 10px}
@@ -220,10 +220,9 @@ function ownerBreakdown(list){
     if(!m[id]) m[id] = {name:(o && o.created_by_name) || '未标注', n:0};
     m[id].n++;
   });
-  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
   return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
-    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
     const label = id==='0' ? '未标注' : ownerSign(m[id].name);
+    const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
     return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
   }).join('');
 }
@@ -588,11 +587,11 @@ function buildCard(o, isAnchor){
 // 卡片上的"谁归属的"标签（归属=主色，我=蓝色，别人=灰色）
 // 归属的和实际录入的不是同一个人时（代录），在 title 里说明，不占卡片位置
 function ownerChip(o){
-  const mine = o && o.created_by && CUR_USER && o.created_by === CUR_USER.id;
-  const cls = mine ? 'who-me' : ((o && o.created_by) ? 'who-other' : 'who-none');
+  const label = creatorLabel(o);
+  const cls = label==='未标注' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
   const proxy = (o && o.entered_by && o.created_by && o.entered_by !== o.created_by)
     ? ('（' + prettyName(o.entered_by_name) + '代录）') : '';
-  return `<span class="chip who ${cls}" title="归属：${creatorLabel(o)}${proxy}">👤 ${creatorLabel(o)}${proxy}</span>`;
+  return `<span class="chip who ${cls}" title="归属：${label}${proxy}">👤 ${label}${proxy}</span>`;
 }
 function renderOrders(){
   const box = document.getElementById('orderList');

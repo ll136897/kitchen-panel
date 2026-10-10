@@ -450,9 +450,8 @@ function prepOwnerSign(name){
 // 单订单的归属圆点（用在缩略行，不占版面）
 function prepOwnerDot(o){
   const id = (o && o.created_by) ? String(o.created_by) : '0';
-  const isMine = CUR_USER && CUR_USER.id && id===String(CUR_USER.id);
-  const cls = id==='0' ? 'who-none' : (isMine ? 'who-me' : 'who-other');
   const label = id==='0' ? '未标注' : prepOwnerSign(o.created_by_name);
+  const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
   return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}</span>`;
 }
 // 一组订单的归属数量拆分（用在日期/汇总处）
@@ -464,10 +463,9 @@ function ownerBreakdown(list){
     if(!m[id]) m[id] = {name:(o && o.created_by_name) || '未标注', n:0};
     m[id].n++;
   });
-  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
   return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
-    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
     const label = id==='0' ? '未标注' : prepOwnerSign(m[id].name);
+    const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
     return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
   }).join('');
 }

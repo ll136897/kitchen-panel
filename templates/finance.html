@@ -579,10 +579,10 @@ function ownerBreakdown(list){
     const u = SIGNERS.find(s=> String(s.id)===id);
     return finShortSign(u);
   };
-  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
   return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
-    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
-    return `<span class="obd ${cls}"><i class="obd-dot"></i>${nameOf(id)}${m[id].n}</span>`;
+    const label = nameOf(id);
+    const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
+    return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
   }).join('');
 }
 function renderFinSignBar(){
