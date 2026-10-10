@@ -45,24 +45,12 @@ def _github_api(method, path, data=None):
 
 
 def backup_to_github():
-    """把当前 kitchen.db 推到 GitHub。
-
-    推之前先「合并」：把远端备份里有、本地没有的订单并进本地（只补不覆盖），
-    这样"两处同时备份互相覆盖"时也**丢不了单**——这正是同一仓库挂多个实例时的根治手段。
-    """
+    """把当前 kitchen.db 推到 GitHub（忠实备份本地现状，不回拉任何云端订单）。"""
     global _last_backup
     if not GITHUB_TOKEN:
         return False
     if not os.path.exists(DB_PATH):
         return False
-
-    # 先合并（补回被覆盖掉的单），再推；失败不阻断推送
-    try:
-        _n = merge_remote_into_local()
-        if _n and _n > 0:
-            _last_merge_added = _n
-    except Exception as e:
-        print("[backup] 合并步骤跳过：%s" % e)
 
     if not _backup_lock.acquire(blocking=False):
         print("[backup] 已有备份任务在跑，跳过")
@@ -95,100 +83,6 @@ def backup_to_github():
         return False
     finally:
         _backup_lock.release()
-
-
-# 与订单关联的子表（都带 order_id），合并时一并补齐
-_ORDER_CHILD_TABLES = ("order_packages", "order_costs", "tool_loans", "order_dishes", "prep_checklist")
-_last_merge_added = 0
-
-
-def _download_remote_bytes():
-    """下载 GitHub 上当前的 kitchen.db 字节；失败返回 None。"""
-    if not GITHUB_TOKEN:
-        return None
-    info = _github_api("GET", "")
-    if not info:
-        return None
-    try:
-        url = info.get("download_url")
-        if url:
-            rq = urllib.request.Request(url)
-            rq.add_header("Authorization", f"token {GITHUB_TOKEN}")
-            with urllib.request.urlopen(rq, timeout=30) as r:
-                return r.read()
-        return base64.b64decode(info.get("content", ""))
-    except Exception as e:
-        print(f"[merge] 下载远端库失败: {e}")
-        return None
-
-
-def _table_cols(conn, table):
-    try:
-        return [r[1] for r in conn.execute("PRAGMA table_info(%s)" % table)]
-    except Exception:
-        return []
-
-
-def merge_remote_into_local():
-    """把"远端备份里有、本地没有"的订单（及其子表）并入本地库 —— **只补不覆盖**。
-
-    返回并入的订单数；失败返回 -1。这是"备份不再互相覆盖丢单"的核心：
-    不做"谁少谁不许推"的一刀切，而是"不丢内容"。
-    """
-    global _last_merge_added
-    data = _download_remote_bytes()
-    if not data or len(data) < 100:
-        return -1
-    tmp = DB_PATH + ".remote.db"
-    try:
-        with open(tmp, "wb") as f:
-            f.write(data)
-    except Exception as e:
-        print("[merge] 写临时文件失败：%s" % e)
-        return -1
-    added = 0
-    try:
-        lc = sqlite3.connect(DB_PATH)
-        lc.row_factory = sqlite3.Row
-        rc = sqlite3.connect(tmp)
-        rc.row_factory = sqlite3.Row
-        l_ids = set(r[0] for r in lc.execute("SELECT id FROM orders"))
-        r_ids = set(r[0] for r in rc.execute("SELECT id FROM orders"))
-        missing = sorted(r_ids - l_ids)
-        if missing:
-            ocols = _table_cols(rc, "orders")
-            for oid in missing:
-                row = rc.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-                if not row:
-                    continue
-                cols = [c for c in ocols if c in row.keys()]
-                lc.execute("INSERT OR IGNORE INTO orders (%s) VALUES (%s)" % (
-                    ",".join(cols), ",".join("?" * len(cols))), [row[c] for c in cols])
-                for t in _ORDER_CHILD_TABLES:
-                    tcols = _table_cols(rc, t)
-                    if "order_id" not in tcols:
-                        continue
-                    lcols = _table_cols(lc, t)
-                    keep = [c for c in tcols if c in lcols]
-                    for cr in rc.execute("SELECT * FROM %s WHERE order_id=?" % t, (oid,)):
-                        lc.execute("INSERT INTO %s (%s) VALUES (%s)" % (
-                            t, ",".join(keep), ",".join("?" * len(keep))), [cr[c] for c in keep])
-                added += 1
-            lc.commit()
-        lc.close()
-        rc.close()
-    except Exception as e:
-        print("[merge] 合并失败：%s" % e)
-        return -1
-    finally:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-    if added:
-        _last_merge_added = added
-        print("[merge] 已从远端备份并入 %d 单（只补不覆盖）" % added)
-    return added
 
 
 def _local_has_data():
