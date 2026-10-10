@@ -52,6 +52,9 @@
       <label>👤 联系人<input type="text" id="edName"></label>
       <label>📞 电话<input type="tel" id="edPhone"></label>
       <label style="grid-column:1/-1">📍 地址<input type="text" id="edAddr"></label>
+      <label style="grid-column:1/-1">📝 备注（打折 / 加减菜 / 特殊要求）
+        <textarea id="edNote" rows="2" placeholder="例如：现场打折50、少了一份拌牛肉、多加了一份五花肉" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
+      </label>
       <label id="edOwnerWrap" style="display:none;grid-column:1/-1">👤 归属（这单算谁的）
         <select id="edOwner" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
         <span class="edit-hint">改成谁，这单就归到谁名下（他就成了能改的人，你如果改给别人就改不动了）。另外一方也能在这里把单署回给自己。</span>
@@ -366,6 +369,7 @@ function fillEdit(){
   document.getElementById('edName').value = o.contact_name || '';
   document.getElementById('edPhone').value = o.contact_phone || '';
   document.getElementById('edAddr').value = o.address || '';
+  document.getElementById('edNote').value = o.note || '';
   fillLedgerFields(o);
   const box = document.getElementById('pkgRows');
   box.innerHTML = '';
@@ -446,6 +450,7 @@ function saveEdit(){
     contact_name: document.getElementById('edName').value,
     contact_phone: document.getElementById('edPhone').value,
     address: document.getElementById('edAddr').value,
+    note: (document.getElementById('edNote')||{}).value || '',
     menu_name: (document.getElementById('edMenuName')||{}).value || '',
     setup_flag: (document.getElementById('edSetup')||{}).value || '',
     delivery_fee: (document.getElementById('edDeliveryFee')||{}).value || '',

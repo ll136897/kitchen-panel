@@ -539,6 +539,7 @@ function buildCard(o, isAnchor){
       <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
       <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="location.href='/prep?focus=${o.id}'">🍱 备餐核对</button>
       ${canTouch(o) ? `
+      <button class="btn btn-sm" style="background:#eef2ff;color:#2b50c0;border:1px solid #cfd8ff" onclick="location.href='/orders/${o.id}'">✏️ 改单</button>
       ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
       ${o.status!=='done' && o.status!=='cancelled' ? `<button class="btn btn-sm btn-success" onclick="setStatus(${o.id},'done')">✅ 完成</button>` : ''}
       ${(o.status==='preparing' || o.status==='done') ? `<button class="btn btn-sm" onclick="openReturn(${o.id})">🔧 归还工具</button>` : ''}
