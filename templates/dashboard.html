@@ -59,6 +59,7 @@
     <input type="file" id="imgInput" accept="image/*" style="display:none" onchange="ocrFromFile(this)">
     <textarea id="rawText" placeholder="📋 粘贴微信客户确认订单文字，或选照片识别&#10;&#10;可以连着粘好几单：微信聊天记录会自动拆，空行隔开的多段也会拆，不用加分隔号&#10;&#10;预约时间:9.15 12.00&#10;预约项目:&#10;3-4人餐 （搭建）&#10;预约地址:青龙湖&#10;联系人:刘和牛&#10;联系电话:15108302848&#10;金额:458元&#10;---&#10;预约时间:9.16 18.00&#10;预约项目:&#10;5-6人餐 （搭建）&#10;预约地址:..."></textarea>
     <div class="btn-row">
+      <span class="owner-pick" id="signPickInline" style="display:none;align-items:center;gap:4px"><span class="muted">记在</span></span>
       <button class="btn btn-accent" onclick="pasteFromClipboard()">📋 粘贴</button>
       <button class="btn btn-accent" onclick="document.getElementById('imgInput').click()">📷 选照片</button>
       <button class="btn btn-primary" id="btnParse" onclick="parseCurrent()">🔍 解析预览</button>
@@ -66,9 +67,6 @@
       <button class="btn" onclick="clearText()">🗑️ 清空</button>
     </div>
     <div id="pasteCount" class="muted" style="font-size:12px;margin-top:6px"></div>
-    <!-- 这单算谁的（归属）：默认自己，可以改成对方——方便替对方录单 -->
-    <div class="sign-bar" id="signPick" style="display:none;margin-top:8px"></div>
-    <div class="sign-note" id="signPickNote" style="display:none">👆 这单会记在选中的那个人名下（他能改、你也还能改你的）；归属不算谁敲进系统的，代录也会留痕。</div>
     <div id="ocrStatus" style="display:none;margin:8px 0;padding:10px;background:#fff7e6;border-radius:8px;border:1px dashed var(--accent);font-size:13px">
       <span id="ocrProgress">🔄 正在识别图片文字...</span>
     </div>
@@ -124,25 +122,25 @@ let SIGNERS = [];          // 可归属的人（/api/signers）
 let pickSigner = 'me';     // 录入时选的归属（'me' 或 用户id 字符串）
 let dashSigner = '';       // 今日数据的归属筛选（''=全部 | 'me' | 用户id）
 
-function signerLabel(u, short){
-  const n = u.name || ('用户' + u.id);
-  return u.is_me ? ('我（' + n + '）') : n;
+function shortSign(u){
+  const n = ((u && u.name) || '').trim();
+  if(!n) return '未标注';
+  if(n.indexOf('管理员')===0 || n.indexOf('老板')>-1) return '刘';
+  return n.charAt(0);   // 刘 / 孙
 }
+function signerLabel(u){ return shortSign(u); }
 function renderSignBars(){
-  // 1) 录入时"这单算谁的"
-  const pick = document.getElementById('signPick');
-  const note = document.getElementById('signPickNote');
+  // 1) 录入时"这单算谁的"：收进粘贴那一行，用 刘/孙 单字表示
+  const pick = document.getElementById('signPickInline');
   if(pick){
     if(SIGNERS.length > 1){
-      pick.style.display = '';
-      if(note) note.style.display = '';
-      pick.innerHTML = '<span class="sign-lbl">这单算谁的</span>' + SIGNERS.map(function(u){
+      pick.style.display = 'inline-flex';
+      pick.innerHTML = '<span class="muted">记在</span>' + SIGNERS.map(function(u){
         const v = u.is_me ? 'me' : String(u.id);
-        return `<button class="sign-chip ${pickSigner===v?'active':''}" onclick="setPickSigner('${v}')">👤 ${signerLabel(u)}</button>`;
+        return `<button class="sign-chip ${pickSigner===v?'active':''}" style="font-size:12px;padding:3px 10px" onclick="setPickSigner('${v}')">${shortSign(u)}</button>`;
       }).join('');
     } else {
       pick.style.display = 'none';
-      if(note) note.style.display = 'none';
     }
   }
   // 2) 今日数据按归属筛选

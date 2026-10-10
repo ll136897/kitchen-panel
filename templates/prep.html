@@ -450,8 +450,8 @@ function renderPrepSignBar(){
     '<button class="sign-chip '+(prepBy===''?'active':'')+'" onclick="setPrepBy(\'\')">全部</button>';
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
-    const label = u.name + (u.is_me ? '（我）' : '');
-    html += '<button class="sign-chip '+(prepBy===v?'active':'')+'" onclick="setPrepBy(\''+v+'\')">👤 '+label+'</button>';
+    const label = (function(){ const n=(u.name||'').trim(); if(!n) return '未标注'; if(n.indexOf('管理员')===0||n.indexOf('老板')>-1) return '刘'; return n.charAt(0); })();
+    html += '<button class="sign-chip '+(prepBy===v?'active':'')+'" onclick="setPrepBy(\''+v+'\')">'+label+'</button>';
   });
   el.innerHTML = html;
   el.style.display = '';

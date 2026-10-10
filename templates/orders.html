@@ -177,6 +177,19 @@
 <script>
 // 当前登录人（服务端注入）——用来区分"谁归属的"、并决定给不给"改单"按钮
 const CUR_USER = {{ (cur_user or {})|tojson }};
+// 横向筛选条（日期/归属）只截"横向意图"的滚轮，竖向滚轮交给页面，
+// 否则鼠标停在条上滚不动、整页像被卡住
+document.querySelectorAll('.date-chips').forEach(function(el){
+  el.addEventListener('wheel', function(e){
+    if(e.deltaY===0 || e.deltaX!==0) return;          // 纯横向滚轮 → 默认横滑
+    const max = el.scrollWidth - el.clientWidth;
+    if(max<=0) return;                                  // 没横向溢出 → 页面照常竖向滚动
+    const atStart = el.scrollLeft<=0, atEnd = el.scrollLeft>=max-1;
+    if((e.deltaY<0 && !atStart) || (e.deltaY>0 && !atEnd)){
+      e.preventDefault(); el.scrollLeft += e.deltaY;
+    }
+  }, {passive:false});
+});
 function isBoss(){ return (CUR_USER && CUR_USER.role) === 'boss'; }
 // 能不能改/删这一单：老板全权；其他人只能动自己归属的（和服务端判定保持一致）
 function canTouch(o){
@@ -190,9 +203,13 @@ function prettyName(n){
   if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘';
   return n;
 }
+function ownerSign(name){
+  const n = prettyName(name);
+  if(!n || n==='未标注') return '未标注';
+  return n.charAt(0);   // 刘 / 孙
+}
 function creatorLabel(o){
-  if(o && o.created_by && CUR_USER && o.created_by === CUR_USER.id) return '我归属的';
-  return (o && o.created_by_name) ? (prettyName(o.created_by_name) + ' 归属的') : '未标注';
+  return ownerSign(o && o.created_by_name);
 }
 function statusLabel(s){
   const map = {
@@ -257,11 +274,11 @@ function inScope(dateStr, anchorDate, scope){
 
 function groupBy(field, anchorId){
   groupField = field; groupAnchorId = anchorId; groupScope = 'all';
-  renderOrders(); window.scrollTo(0,0);
+  renderOrders();
 }
 function clearGroup(){
   groupField = null; groupAnchorId = null; groupScope = 'all';
-  renderOrders(); window.scrollTo(0,0);
+  renderOrders();
 }
 function setScope(s){
   groupScope = s;
@@ -403,8 +420,8 @@ function renderOrderOwnerChips(){
   const others = Object.keys(cnt).filter(k=>k && k!==mine).sort((a,b)=> cnt[b]-cnt[a]);
   let html = `<span class="sort-label" style="flex:0 0 100%">归属</span>`;
   html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrders.length}</button>`;
-  if(mine && cnt[mine]) html += `<button class="date-chip ${filterOwner==='me'?'active':''}" onclick="setOrderOwner('me')">我归属的 ${cnt[mine]}</button>`;
-  html += others.map(k=>`<button class="date-chip ${filterOwner===k?'active':''}" onclick="setOrderOwner('${k}')">${nm[k]} ${cnt[k]}</button>`).join('');
+  if(mine && cnt[mine]) html += `<button class="date-chip ${filterOwner==='me'?'active':''}" onclick="setOrderOwner('me')">${ownerSign(CUR_USER.name)} ${cnt[mine]}</button>`;
+  html += others.map(k=>`<button class="date-chip ${filterOwner===k?'active':''}" onclick="setOrderOwner('${k}')">${ownerSign(nm[k])} ${cnt[k]}</button>`).join('');
   if(cnt['']) html += `<button class="date-chip ${filterOwner==='0'?'active':''}" onclick="setOrderOwner('0')">未标注 ${cnt['']}</button>`;
   box.innerHTML = html;
 }
@@ -600,8 +617,8 @@ function renderOrders(){
   if(hint){
     if(anyFilter){
       hint.style.display='block';
-      const ownerTxt = filterOwner==='me' ? '我归属的'
-        : (filterOwner ? ((allOrders.find(o=>ownerKey(o)===filterOwner)||{}).created_by_name || '某人')+' 归属的' : '');
+      const ownerTxt = filterOwner==='me' ? ownerSign(CUR_USER.name)
+        : (filterOwner ? ownerSign((allOrders.find(o=>ownerKey(o)===filterOwner)||{}).created_by_name) : '');
       const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:'', ownerTxt].filter(Boolean).join(' · ');
       hint.textContent = `🔎 ${list.length} 条（共 ${allOrders.length} 条）${scopeTxt?' · '+scopeTxt:''}${filterText?(' · 含“'+filterText+'”'):''} · 合计 ¥${money(totalAmt)}`;
     } else hint.style.display='none';

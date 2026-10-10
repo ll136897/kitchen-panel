@@ -225,25 +225,28 @@
     <div class="fin-kpi" id="payBox"></div>
   </div>
 
-  <!-- 每单利润 -->
+  <!-- 每单利润（默认收起为缩略框，点标题展开，省版面/少翻页） -->
   <div class="fin-card">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-      <div class="sec-title" style="margin:0"><span class="dot" style="background:#3a2416"></span>📋 每单赚多少</div>
-      <div style="font-size:11px;color:#888">点「改成本」可调整这一单的开销</div>
+    <div class="sec-title-click" onclick="toggleProfit()" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;cursor:pointer">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#3a2416"></span>📋 每单赚多少 <span id="profitCaret" style="font-size:11px">▸</span></div>
+      <div id="profitSummary" class="muted" style="font-size:12px"></div>
     </div>
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-      <table class="fin-tbl tbl-profit" id="profitTable">
-        <thead>
-          <tr>
-            <th>日期</th><th>客户</th><th>收入</th><th class="c-opt">成本</th><th>利润</th><th>真实毛利率</th>
-            <th class="c-opt">货款</th><th class="c-opt">押金</th><th></th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div id="profitBody" style="display:none;margin-top:8px">
+      <div class="led-tip" style="margin-bottom:8px">点「改成本」可调整这一单的开销</div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table class="fin-tbl tbl-profit" id="profitTable">
+          <thead>
+            <tr>
+              <th>日期</th><th>客户</th><th>收入</th><th class="c-opt">成本</th><th>利润</th><th>真实毛利率</th>
+              <th class="c-opt">货款</th><th class="c-opt">押金</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <!-- 手机版：卡片（表格列多会要左右滑，改成卡片一眼看完） -->
+      <div id="profitCards" class="pf-cards"></div>
     </div>
-    <!-- 手机版：卡片（表格列多会要左右滑，改成卡片一眼看完） -->
-    <div id="profitCards" class="pf-cards"></div>
   </div>
 
   <!-- ===== 门店支出台账（2026-10-08）===== -->
@@ -551,11 +554,17 @@ const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
 const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
 
-// ===== 归属筛选（这单算谁的）：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）=====
+// ===== 归属筛选（这单算谁的）：全部 / 刘 / 孙（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
 let SIGNERS = [];
 let finBy = '';
 let signerCounts = null, signerTotal = 0;   // 归属角标：按日期范围、不受 by 影响
+function finShortSign(u){
+  const n = ((u && u.name) || '').trim();
+  if(!n) return '未标注';
+  if(n.indexOf('管理员')===0 || n.indexOf('老板')>-1) return '刘';
+  return n.charAt(0);   // 刘 / 孙
+}
 function renderFinSignBar(){
   const el = document.getElementById('finSignBar');
   if(!el) return;
@@ -567,8 +576,7 @@ function renderFinSignBar(){
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
     const cnt = (c[String(u.id)] && c[String(u.id)].cnt) || 0;
-    const label = u.name + (u.is_me ? '（我）' : '') + ' ' + cnt;
-    html += '<button class="sign-chip '+(finBy===v?'active':'')+'" onclick="setFinBy(\''+v+'\')">👤 '+label+'</button>';
+    html += '<button class="sign-chip '+(finBy===v?'active':'')+'" onclick="setFinBy(\''+v+'\')">'+finShortSign(u)+' '+cnt+'</button>';
   });
   el.innerHTML = html;
   el.style.display = '';
@@ -1143,6 +1151,8 @@ function renderProfitOrders(orders){
   if(!orders.length){
     tb.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">这个区间没有订单</td></tr>';
     cards.innerHTML = '<div class="muted" style="padding:16px;text-align:center">这个区间没有订单</div>';
+    const summ0 = document.getElementById('profitSummary');
+    if(summ0) summ0.textContent = '这个区间没有订单';
     return;
   }
   tb.innerHTML = orders.map(o=>{
@@ -1194,6 +1204,21 @@ function renderProfitOrders(orders){
       </div>
     </div>`;
   }).join('');
+  const totalRev = orders.reduce((s,o)=>s+(o.revenue||0),0);
+  const totalCost = orders.reduce((s,o)=>s+(o.cost_total||0),0);
+  const totalProfit = totalRev - totalCost;
+  const margin = totalRev>0 ? Math.round(totalProfit/totalRev*100) : 0;
+  const summ = document.getElementById('profitSummary');
+  if(summ) summ.innerHTML = `共 ${orders.length} 单 · 收入 ¥${fmtY(totalRev)} · 利润 ¥${fmtY(totalProfit)} · 毛利率 ${margin}%`;
+}
+
+// 每单赚多少：默认收起为缩略框，点标题展开
+let profitCollapsed = true;
+function toggleProfit(){
+  profitCollapsed = !profitCollapsed;
+  const b = document.getElementById('profitBody'), c = document.getElementById('profitCaret');
+  if(b) b.style.display = profitCollapsed ? 'none' : '';
+  if(c) c.textContent = profitCollapsed ? '▸' : '▾';
 }
 
 function setPay(oid, status){

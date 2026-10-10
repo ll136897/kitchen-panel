@@ -137,10 +137,15 @@ function prettyName(n){
   if(n.indexOf('管理员') === 0 || n.indexOf('老板') > -1) return '刘';
   return n;
 }
+function ownerSign(name){
+  const n = prettyName(name);
+  if(!n || n==='未标注') return '未标注';
+  return n.charAt(0);   // 刘 / 孙
+}
 function ownerText(o){
   if(!o) return '-';
-  if(o.created_by && CUR_USER && o.created_by === CUR_USER.id) return '我归属的';
-  return o.created_by ? (prettyName(o.created_by_name) + ' 归属的') : '未标注';
+  if(o.created_by && CUR_USER && o.created_by === CUR_USER.id) return ownerSign(CUR_USER.name);
+  return o.created_by ? ownerSign(o.created_by_name) : '未标注';
 }
 // 没有权限时：藏掉"编辑本单"，换成一句说明（服务端也会拦，这里只是别让人白点）
 function applyPermUI(o){
