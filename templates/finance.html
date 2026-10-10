@@ -1670,6 +1670,7 @@ function loadLedger(){
   if(ch) p.push('channel='+encodeURIComponent(ch));
   if(ic) p.push('is_cost='+encodeURIComponent(ic));
   if(q)  p.push('q='+encodeURIComponent(q));
+  if(finBy) p.push('by='+encodeURIComponent(finBy));   // 归属筛选条同样管住支出台账
   fetchJSONRetry('/api/finance/expense?'+p.join('&')).then(r=> renderLedgerList(r&&r.data||[]));
 }
 

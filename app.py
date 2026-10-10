@@ -4218,6 +4218,12 @@ def list_expenses():
     if q:
         where.append("(item_name LIKE ? OR merchant LIKE ? OR menu_item LIKE ? OR note LIKE ?)")
         params += ["%" + q + "%"] * 4
+    # 归属筛选（?by=me|0|<user_id>）：支出台账同样受顶部"归属"筛选条控制，
+    # 不再只筛订单/利润而漏掉台账——做到"哪里显示归属，哪里就能按归属筛"。
+    by_clause, by_params = _signer_clause(request.args)
+    if by_clause:
+        where.append(by_clause.lstrip(" AND "))
+        params += by_params
     rows = db.execute(
         "SELECT * FROM expenses WHERE " + " AND ".join(where) +
         " ORDER BY use_date DESC, id DESC", params).fetchall()

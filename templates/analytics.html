@@ -185,7 +185,7 @@ function renderByRow(){
   el.innerHTML = '<span style="font-weight:700;color:#9a3412">归属</span> ' +
     '<button class="an-tab' + (anBy === '' ? ' active' : '') + '" onclick="setBy(\'\')">全部 ' + total + '</button> ' +
     cs.map(function(c){
-      const isMine = (c.id && c.id === mine); const label = anPrettyName(c.name) + (isMine ? '（我）' : '') + ' ' + c.orders;
+      const isMine = (c.id && c.id === mine); const label = anPrettyName(c.name) + ' ' + c.orders;
       const val = (c.id && c.id === mine) ? 'me' : (c.id === '' ? '0' : c.id);
       return '<button class="an-tab' + (anBy === val ? ' active' : '') + '" onclick="setBy(\'' + val + '\')">' +
              anEsc(label) + '</button>';
