@@ -211,6 +211,22 @@ function ownerSign(name){
 function creatorLabel(o){
   return ownerSign(o && o.created_by_name);
 }
+// 归属紧凑拆分：给定一组订单，返回 "●刘5 ●孙3 ●未标注1"（彩色圆点+单字+数量），用于总数后展示各自归属数量
+function ownerBreakdown(list){
+  if(!list || !list.length) return '';
+  const m = {};
+  list.forEach(o=>{
+    const id = (o && o.created_by) ? String(o.created_by) : '0';
+    if(!m[id]) m[id] = {name:(o && o.created_by_name) || '未标注', n:0};
+    m[id].n++;
+  });
+  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
+  return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
+    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
+    const label = id==='0' ? '未标注' : ownerSign(m[id].name);
+    return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
+  }).join('');
+}
 function statusLabel(s){
   const map = {
     pending:   ['⏳ 待备',    'tag-orange'],
@@ -513,7 +529,7 @@ function renderOrderList(list, isGroup){
       <div class="month-head" onclick="toggleMonth('${k}')">
         <span class="month-caret">${collapsed?'▸':'▾'}</span>
         <span class="month-name">${monthLabel(k)}</span>
-        <span class="month-meta">${arr.length} 单 · ¥${money(amt)}</span>
+        <span class="month-meta">${arr.length} 单 · ¥${money(amt)}${ownerBreakdown(arr)}</span>
       </div>
       ${collapsed ? '' : `<div class="month-body">${arr.map(cardAt).join('')}</div>`}
     </div>`;
@@ -602,7 +618,7 @@ function renderOrders(){
   scope.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
   const scName = filterOwner ? '筛选订单' : (filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单')));
   const anyFilter = !!(filterDate||filterMonth||filterText||filterOwner);
-  const scNote = anyFilter ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)}`;
+  const scNote = anyFilter ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)} · ${ownerBreakdown(allOrders)}`;
   if(kpis) kpis.innerHTML = [
     {cls:'kpi-dark',icon:'📋',num:scope.length,lbl:scName,sub:scNote},
     {cls:'kpi-red',icon:'⏳',num:count.pending,lbl:'待备'},

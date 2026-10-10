@@ -440,6 +440,37 @@ const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','p
 
 // ===== 归属筛选（这单算谁的）：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
+// 归属单字（刘/孙/未标注），与全局一致
+function prepOwnerSign(name){
+  const n = (name||'').trim();
+  if(!n || n==='未标注') return '未标注';
+  if(n.indexOf('管理员')===0 || n.indexOf('老板')>-1) return '刘';
+  return n.charAt(0);
+}
+// 单订单的归属圆点（用在缩略行，不占版面）
+function prepOwnerDot(o){
+  const id = (o && o.created_by) ? String(o.created_by) : '0';
+  const isMine = CUR_USER && CUR_USER.id && id===String(CUR_USER.id);
+  const cls = id==='0' ? 'who-none' : (isMine ? 'who-me' : 'who-other');
+  const label = id==='0' ? '未标注' : prepOwnerSign(o.created_by_name);
+  return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}</span>`;
+}
+// 一组订单的归属数量拆分（用在日期/汇总处）
+function ownerBreakdown(list){
+  if(!list || !list.length) return '';
+  const m = {};
+  list.forEach(o=>{
+    const id = (o && o.created_by) ? String(o.created_by) : '0';
+    if(!m[id]) m[id] = {name:(o && o.created_by_name) || '未标注', n:0};
+    m[id].n++;
+  });
+  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
+  return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
+    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
+    const label = id==='0' ? '未标注' : prepOwnerSign(m[id].name);
+    return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
+  }).join('');
+}
 let SIGNERS = [];
 let prepBy = '';
 function renderPrepSignBar(){
@@ -1113,6 +1144,7 @@ function render(){
     const nm = o.contact_name || '—';
     const nt = o.note || '';
     return `<div class="orow" onclick="enterFocus(${o.id})" title="点一下 → 打开这单的备餐核对清单（整页）">
+      ${prepOwnerDot(o)}
       <span class="c-pkg">🍱 ${pkgs||'套餐未记录'}</span>
       <span class="c-addr">📍 ${addr}</span>
       <span class="c-date">${dateText2}</span>

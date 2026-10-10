@@ -957,7 +957,8 @@ def calc_merged_prep(order_ids):
         for oid in order_ids:
             cur.execute("""
                 SELECT id, booking_date, booking_time, meal_time, address, contact_name,
-                       contact_phone, amount, status, note, delivered, served
+                       contact_phone, amount, status, note, delivered, served,
+                       created_by, created_by_name
                 FROM orders WHERE id = ?
             """, (oid,))
             r = cur.fetchone()

@@ -267,6 +267,17 @@ input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0
 .chip.pkg{background:linear-gradient(135deg,#fde5e1,#fdefdc);color:var(--primary);border-color:#f5c7c1}
 .chip.warn{background:var(--red-bg);color:var(--red);border-color:#f7d5d0}
 
+/* 归属紧凑指示（彩色圆点 + 单字）：用在月份总数、备餐缩略行、财务汇总等，不占版面 */
+.obd{display:inline-flex;align-items:center;gap:3px;font-size:11px;line-height:1;white-space:nowrap;margin-left:5px;vertical-align:middle}
+.obd-dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.obd.who-me{color:#1b7a43;font-weight:700}
+.obd.who-me .obd-dot{background:#1b7a43}
+.obd.who-other{color:#2b50c0;font-weight:700}
+.obd.who-other .obd-dot{background:#2b50c0}
+.obd.who-none{color:#9a8f80}
+.obd.who-none .obd-dot{background:#b0a89c}
+
+
 /* 订单卡片列表 */
 .order-list .order-card{
   background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;

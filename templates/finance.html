@@ -565,6 +565,26 @@ function finShortSign(u){
   if(n.indexOf('管理员')===0 || n.indexOf('老板')>-1) return '刘';
   return n.charAt(0);   // 刘 / 孙
 }
+// 归属紧凑拆分：把一组订单按 created_by 拆成 "●刘5 ●孙3 ●未标注1"（财务页利润订单只带 created_by，用 SIGNERS 映射名字）
+function ownerBreakdown(list){
+  if(!list || !list.length) return '';
+  const m = {};
+  list.forEach(o=>{
+    const id = (o && o.created_by) ? String(o.created_by) : '0';
+    if(!m[id]) m[id] = {name:'未标注', n:0};
+    m[id].n++;
+  });
+  const nameOf = (id)=>{
+    if(id==='0') return '未标注';
+    const u = SIGNERS.find(s=> String(s.id)===id);
+    return finShortSign(u);
+  };
+  const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
+  return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
+    const cls = id==='0' ? 'who-none' : (id===mine ? 'who-me' : 'who-other');
+    return `<span class="obd ${cls}"><i class="obd-dot"></i>${nameOf(id)}${m[id].n}</span>`;
+  }).join('');
+}
 function renderFinSignBar(){
   const el = document.getElementById('finSignBar');
   if(!el) return;
@@ -1209,7 +1229,7 @@ function renderProfitOrders(orders){
   const totalProfit = totalRev - totalCost;
   const margin = totalRev>0 ? Math.round(totalProfit/totalRev*100) : 0;
   const summ = document.getElementById('profitSummary');
-  if(summ) summ.innerHTML = `共 ${orders.length} 单 · 收入 ¥${fmtY(totalRev)} · 利润 ¥${fmtY(totalProfit)} · 毛利率 ${margin}%`;
+  if(summ) summ.innerHTML = `共 ${orders.length} 单 · 收入 ¥${fmtY(totalRev)} · 利润 ¥${fmtY(totalProfit)} · 毛利率 ${margin}%${ownerBreakdown(orders)}`;
 }
 
 // 每单赚多少：默认收起为缩略框，点标题展开
