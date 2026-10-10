@@ -413,7 +413,7 @@ _PARTNER_WRITE = _STAFF_WRITE + (
     # 单笔成本/收款/押金：能不能动由"这单是不是你录的"决定（见 _can_touch_order）
     "/api/finance/order", "/api/finance/payment", "/api/finance/deposit",
     # 门店支出台账：合伙人也能记/改/删门店支出、导入账单对账（运营数据，非原数据）；老板当然可以
-    "/api/finance/expense", "/api/finance/expense-statement",
+    "/api/finance/expense", "/api/finance/expense-statement", "/api/finance/labor",
 )
 # 只有老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置/账号等
 _PARTNER_READ = (
@@ -1726,6 +1726,27 @@ def edit_order(oid):
             return jsonify({"ok": False, "msg": "优惠格式不对"}), 400
         sets.append("discount=?")
         params.append(disc)
+    # 记账信息（销售流水表 / 算真实到手用，2026-10-10）
+    for k in ("menu_name", "delivery_person", "source"):
+        if k in data:
+            sets.append("%s=?" % k)
+            params.append(_txt(k))
+    if "delivery_fee" in data:
+        _rf = data.get("delivery_fee")
+        if _rf in (None, ""):
+            sets.append("delivery_fee=?"); params.append(None)
+        else:
+            try:
+                sets.append("delivery_fee=?"); params.append(float(_rf))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "msg": "配送费格式不对"}), 400
+    if "setup_flag" in data:
+        _sv = data.get("setup_flag")
+        if _sv in (None, ""):
+            sets.append("setup_flag=?"); params.append(None)
+        else:
+            sets.append("setup_flag=?")
+            params.append(1 if str(_sv) in ("1", "是", "true", "True") else 0)
     if sets:
         params.append(oid)
         cur.execute("UPDATE orders SET %s WHERE id=?" % ", ".join(sets), params)
@@ -1766,6 +1787,198 @@ def edit_order(oid):
 
     db.commit()
     return jsonify({"ok": True, "msg": "已保存"})
+
+
+@app.route("/api/orders/ledger-options")
+def order_ledger_options():
+    """销售流水/记账用的下拉选项 + 数据驱动的默认值（默认 = 历史最常用那个）。
+    目的：记账时尽量少手填——配送人/配送费/套餐名都给下拉，且预选最常用的。"""
+    db = g.db
+    persons = [r["v"] for r in db.execute(
+        "SELECT delivery_person AS v, COUNT(*) AS c FROM orders "
+        "WHERE deleted_at IS NULL AND delivery_person IS NOT NULL AND TRIM(delivery_person)<>'' "
+        "GROUP BY delivery_person ORDER BY c DESC LIMIT 10").fetchall()]
+    fees = [r["v"] for r in db.execute(
+        "SELECT delivery_fee AS v, COUNT(*) AS c FROM orders "
+        "WHERE deleted_at IS NULL AND delivery_fee IS NOT NULL AND delivery_fee>0 "
+        "GROUP BY delivery_fee ORDER BY c DESC LIMIT 10").fetchall()]
+    menu_names = [r["menu_name"] for r in db.execute(
+        "SELECT DISTINCT menu_name FROM orders "
+        "WHERE deleted_at IS NULL AND menu_name IS NOT NULL AND TRIM(menu_name)<>''").fetchall()]
+    for r in db.execute("SELECT name FROM packages ORDER BY id"):
+        if r["name"] and r["name"] not in menu_names:
+            menu_names.append(r["name"])
+    return jsonify({"ok": True, "data": {
+        "delivery_persons": persons,
+        "default_person": persons[0] if persons else "",
+        "delivery_fees": fees or [100, 200, 150, 45],
+        "default_fee": fees[0] if fees else 100,
+        "menu_names": menu_names,
+        "sources": ["私人关系", "美团", "抖音", "小红书", "朋友介绍", "其他"],
+        "default_source": "私人关系",
+    }})
+
+
+@app.route("/api/finance/labor", methods=["POST"])
+def add_daily_labor():
+    """按天记一笔「兼职制作人员工资」——写进门店支出台账（归类=人工/labor）。
+    这样月度可汇总，导出销售流水表时再按当天单数摊到每单，得到"真实到手"。"""
+    data = request.get_json(force=True) or {}
+    u = getattr(g, "cur_user", None) or {}
+    db = g.db
+    d = _exp_str(data.get("date"))
+    if not d:
+        import datetime as _dt
+        d = _dt.date.today().isoformat()
+    amt = _exp_float(data.get("amount"))
+    if amt is None:
+        return jsonify({"ok": False, "msg": "请填工资金额"}), 400
+    cols = {
+        'use_date': d, 'channel': '现金', 'merchant': '兼职制作', 'item_name': '兼职工资',
+        'cat1': '人工', 'cat2': '人工', 'cost_kind': 'labor', 'is_cost': 1,
+        'amount': amt, 'purpose': '当日兼职工资', 'note': _exp_str(data.get("note")),
+        'created_by': u.get('id'), 'created_by_name': u.get('name') or u.get('username'),
+    }
+    keys = list(cols.keys())
+    db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" + ",".join("?" * len(keys)) + ")",
+               [cols[k] for k in keys])
+    db.commit()
+    return jsonify({"ok": True, "id": db.execute("SELECT last_insert_rowid()").fetchone()[0]})
+
+
+@app.route("/api/finance/labor")
+def list_daily_labor():
+    """按月看兼职工资（按天汇总），供财务页显示。"""
+    month = request.args.get("month")
+    where = ["deleted_at IS NULL", "cost_kind='labor'"]
+    params = []
+    if month:
+        where.append("use_date LIKE ?"); params.append(month + "%")
+    rows = g.db.execute(
+        "SELECT use_date, COALESCE(SUM(amount),0) AS amount, COUNT(*) AS n FROM expenses "
+        "WHERE " + " AND ".join(where) + " GROUP BY use_date ORDER BY use_date DESC", params).fetchall()
+    total = sum(float(r["amount"] or 0) for r in rows)
+    return jsonify({"ok": True, "data": [dict(r) for r in rows], "total": round(total, 2)})
+
+
+@app.route("/api/orders/export/sales")
+def export_sales_ledger():
+    """导出「销售流水表」（复刻原表格式）：每单一行 + 月份合并单元格 + 右侧月度汇总块。
+    单笔口径：价格 − 配送费 = 实收；周期口径：实收 − 当日兼职工资分摊 = 净到手。"""
+    from flask import Response
+    from urllib.parse import quote as _q
+    import io, datetime as _dt
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except Exception:
+        return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
+    month = request.args.get("month")
+    db = g.db
+    where = ["o.deleted_at IS NULL"]
+    params = []
+    if month:
+        where.append("o.booking_date LIKE ?"); params.append(month + "%")
+    rows = db.execute("""
+        SELECT o.id, o.booking_date, o.menu_name, o.setup_flag, o.delivery_fee, o.amount,
+               o.delivery_person, o.address, o.source, o.note,
+               (SELECT GROUP_CONCAT(p.name, '、') FROM order_packages op JOIN packages p ON p.id=op.package_id
+                 WHERE op.order_id=o.id) AS pkgnames,
+               (SELECT SUM(COALESCE(op.price, p.price)*op.quantity) FROM order_packages op JOIN packages p ON p.id=op.package_id
+                 WHERE op.order_id=o.id) AS price_total
+        FROM orders o WHERE """ + " AND ".join(where) + " ORDER BY o.booking_date ASC, o.id ASC", params).fetchall()
+
+    labor_by_date = {}
+    labor_sql = ("SELECT use_date AS d, COALESCE(SUM(amount),0) AS a FROM expenses "
+                 "WHERE deleted_at IS NULL AND cost_kind='labor'")
+    if month:
+        labor_sql += " AND use_date LIKE ?"
+        for r in db.execute(labor_sql + " GROUP BY use_date", (month + "%",)):
+            labor_by_date[r["d"]] = float(r["a"] or 0)
+    else:
+        for r in db.execute(labor_sql + " GROUP BY use_date"):
+            labor_by_date[r["d"]] = float(r["a"] or 0)
+    cnt_by_date = {}
+    for r in rows:
+        d = r["booking_date"] or ""
+        cnt_by_date[d] = cnt_by_date.get(d, 0) + 1
+
+    wb = Workbook(); ws = wb.active; ws.title = "销售流水"
+    thin = Side(style="thin", color="999999")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    head_fill = PatternFill("solid", fgColor="EFE6DA")
+    head_font = Font(bold=True, size=11)
+    center = Alignment(horizontal="center", vertical="center")
+    headers = ["月份", "时间", "套餐", "搭建", "价格", "配送费", "实收", "配送", "地址",
+               "客户来源", "备注", "兼职工资分摊", "净到手"]
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(1, c, h)
+        cell.font = head_font; cell.fill = head_fill; cell.alignment = center; cell.border = border
+
+    months, month_amt = [], {}
+    r_idx = 2; month_start = 2; prev_month = None
+    for r in rows:
+        d = r["booking_date"] or ""
+        mon = ("%d月" % int(d[5:7])) if (len(d) >= 7 and d[5:7].isdigit()) else ""
+        price = r["price_total"]
+        if price in (None, 0):
+            price = (r["amount"] or 0) + (r["delivery_fee"] or 0)
+        fee = r["delivery_fee"] if r["delivery_fee"] is not None else None
+        amt = r["amount"] or 0
+        labor = labor_by_date.get(d, 0) / max(cnt_by_date.get(d, 1), 1)
+        net = amt - labor
+        pkg = r["menu_name"] or r["pkgnames"] or ""
+        setup = "是" if r["setup_flag"] == 1 else ("否" if r["setup_flag"] == 0 else "")
+        vals = [mon, d, pkg, setup, price, fee, amt, r["delivery_person"] or "", r["address"] or "",
+                r["source"] or "", r["note"] or "", round(labor, 2) if labor else None, round(net, 2)]
+        for c, v in enumerate(vals, 1):
+            cell = ws.cell(r_idx, c, v); cell.border = border
+            if c in (1, 4):
+                cell.alignment = center
+        if mon:
+            if mon != prev_month:
+                if prev_month is not None and month_start <= r_idx - 1:
+                    ws.merge_cells(start_row=month_start, start_column=1, end_row=r_idx - 1, end_column=1)
+                months.append(mon); month_start = r_idx; prev_month = mon
+            month_amt[mon] = month_amt.get(mon, 0.0) + amt
+        r_idx += 1
+    if prev_month is not None and month_start <= r_idx - 1:
+        ws.merge_cells(start_row=month_start, start_column=1, end_row=r_idx - 1, end_column=1)
+
+    sc = 15  # 右侧汇总块从第 O 列开始
+    ws.cell(1, sc, "月度汇总").font = head_font
+    for j, h in enumerate(["月份", "实收合计", "兼职工资", "净到手", "环比"]):
+        cell = ws.cell(2, sc + j, h)
+        cell.font = head_font; cell.fill = head_fill; cell.alignment = center; cell.border = border
+    month_labor = {}
+    for _dd, _aa in labor_by_date.items():
+        if len(_dd) >= 7 and _dd[5:7].isdigit():
+            _mm = "%d月" % int(_dd[5:7])
+            month_labor[_mm] = month_labor.get(_mm, 0.0) + _aa
+    prev_net = None
+    for i, mon in enumerate(months):
+        amt_s = month_amt.get(mon, 0.0)
+        labor_s = month_labor.get(mon, 0.0)
+        net_s = amt_s - labor_s
+        chg = "" if prev_net in (None, 0) else ("%.1f%%" % ((net_s - prev_net) / abs(prev_net) * 100))
+        for j, v in enumerate([mon, round(amt_s, 2), round(labor_s, 2), round(net_s, 2), chg]):
+            cell = ws.cell(3 + i, sc + j, v); cell.border = border; cell.alignment = center
+        prev_net = net_s
+
+    for i, w in enumerate([7, 12, 12, 6, 9, 9, 9, 8, 18, 10, 16, 11, 10], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for j in range(5):
+        ws.column_dimensions[get_column_letter(sc + j)].width = 11
+    ws.freeze_panes = "A2"
+
+    bio = io.BytesIO(); wb.save(bio); bio.seek(0)
+    _now = _dt.datetime.now()
+    fname = "销售流水表%s-%d-%d.xlsx" % (("（%s）" % month) if month else "", _now.month, _now.day)
+    resp = Response(bio.getvalue(),
+                    mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    resp.headers["Content-Disposition"] = "attachment; filename=\"sales.xlsx\"; filename*=UTF-8''" + _q(fname)
+    return resp
 
 
 @app.route("/api/orders/batch", methods=["POST"])

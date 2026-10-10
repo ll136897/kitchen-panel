@@ -268,6 +268,7 @@
       </select>
       <input type="text" id="ledgerQ" placeholder="🔍 搜索物料/商户" oninput="debounceLedger()" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;flex:1 1 120px;min-width:90px">
       <button class="btn btn-sm" onclick="exportLedger()">⬇ 导出本月 CSV</button>
+      <button class="btn btn-sm" onclick="exportSales()" title="导出销售流水表（含兼职工资分摊与净到手）">⬇ 导出销售流水表</button>
     </div>
 
     <!-- 录入方式切换 -->
@@ -412,6 +413,22 @@
         <tbody></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- 当日兼职工资（按天记一笔；导出销售流水表时按当天单数摊到每单） -->
+  <div class="fin-card" id="laborCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#e67e22"></span>🧑🍳 当日兼职工资</div>
+      <div style="font-size:11px;color:#888">按天记 · 导出时自动摊到当天每单</div>
+    </div>
+    <div class="led-tip">哪天请了兼职做餐，就记哪天。导出「销售流水表」时按<b>当天单数</b>均摊到每单，算出<b>真实到手</b>（不用你逐单去摊）。</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div class="led-field" style="flex:1 1 120px"><label>日期</label><input type="date" id="laborDate"></div>
+      <div class="led-field" style="flex:1 1 120px"><label>金额（元）</label><input type="number" id="laborAmount" step="0.01" placeholder="例如 300"></div>
+      <div class="led-field" style="flex:1 1 120px"><label>备注（可空）</label><input id="laborNote" placeholder="如 3人做餐"></div>
+      <button class="btn btn-primary btn-sm" style="padding:10px 16px" onclick="saveLabor()">💾 记这笔</button>
+    </div>
+    <div id="laborList" style="margin-top:8px;font-size:12px;color:#6b4f3a"></div>
   </div>
 
   <!-- 成本与利润设置 -->
@@ -1610,6 +1627,7 @@ function loadLedger(){
   const mEl = document.getElementById('ledgerMonth');
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
+  if(typeof loadLabor==='function') loadLabor();
   fetchJSONRetry('/api/finance/expense-summary?month='+encodeURIComponent(month)).then(s=>{
     const d = s&&s.data || {};
     const pm = month.split('-');
@@ -1880,9 +1898,44 @@ function exportLedger(){
   window.location = '/api/finance/expense/export?month='+encodeURIComponent(month||'');
 }
 
+// ===== 当日兼职工资（按天记；导出销售流水表时按当天单数摊到每单）=====
+function exportSales(){
+  const month = document.getElementById('ledgerMonth').value;
+  window.location = '/api/orders/export/sales'+(month?('?month='+encodeURIComponent(month)):'');
+}
+function saveLabor(){
+  const date = (document.getElementById('laborDate')||{}).value || '';
+  const amount = parseFloat((document.getElementById('laborAmount')||{}).value||0) || 0;
+  const note = (document.getElementById('laborNote')||{}).value || '';
+  if(!amount){ alert('请填工资金额'); return; }
+  fetch('/api/finance/labor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:date, amount:amount, note:note})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){
+        showRefreshToast();
+        document.getElementById('laborAmount').value='';
+        document.getElementById('laborNote').value='';
+        loadLabor(); loadLedger();
+      } else alert(d.msg||'保存失败');
+    });
+}
+function loadLabor(){
+  const box = document.getElementById('laborList'); if(!box) return;
+  const mEl = document.getElementById('ledgerMonth');
+  const month = (mEl && mEl.value) || '';
+  const dEl = document.getElementById('laborDate');
+  if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
+  fetchJSONRetry('/api/finance/labor'+(month?('?month='+encodeURIComponent(month)):'')).then(d=>{
+    const arr = (d&&d.data)||[];
+    if(!arr.length){ box.innerHTML='本月还没记兼职工资。'; return; }
+    box.innerHTML = '本月合计 <b>'+fmtY(d.total||0)+'</b>（'+arr.length+' 天）：'
+      + arr.map(r=>'<span style="display:inline-block;background:#fdf3e7;border:1px solid #f0dcc0;border-radius:6px;padding:1px 7px;margin:2px 4px 0 0">'+(r.use_date||'').slice(5)+' '+fmtY(r.amount)+'</span>').join('');
+  });
+}
+
 loadAll();
 loadSigners();
 loadLedger();
+loadLabor();
 
 // ===== 刷新特效 =====
 function refreshWithFx(fn){

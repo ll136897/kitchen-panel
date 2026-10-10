@@ -56,6 +56,22 @@
         <select id="edOwner" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
         <span class="edit-hint">改成谁，这单就归到谁名下（他就成了能改的人，你如果改给别人就改不动了）。另外一方也能在这里把单署回给自己。</span>
       </label>
+      <div style="grid-column:1/-1;margin-top:8px;font-weight:700;font-size:13px">🧾 记账信息（导出销售流水表用 · 能下拉就别手打）</div>
+      <label>🍱 套餐名(记账显示)
+        <select id="edMenuName" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
+      </label>
+      <label>🏕️ 搭建
+        <select id="edSetup" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"><option value="1">是</option><option value="0">否</option><option value="">未填</option></select>
+      </label>
+      <label>🛵 配送费(付配送员)
+        <select id="edDeliveryFee" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
+      </label>
+      <label>🧍 配送人
+        <select id="edDeliveryPerson" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
+      </label>
+      <label>🧭 客户来源
+        <select id="edSource" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
+      </label>
     </div>
     <div class="edit-hint" id="calcHint" style="margin-top:8px;font-size:13px;font-weight:600;color:#8a5a2b"></div>
     <div style="margin:12px 0 6px;font-weight:700;font-size:13px">🍱 套餐明细（份数、本单单价可改，🗑 可删）</div>
@@ -158,6 +174,7 @@ function loadDetail(){
       <div class="cell"><div class="k">🔒 押金</div><div class="v">¥${o.deposit||0} (${depMap[o.deposit_status]||'-'})</div></div>
       <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
       <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
+      <div class="cell"><div class="k">🧾 记账</div><div class="v" style="font-size:13px">${(o.menu_name||((o.packages&&o.packages[0])?o.packages[0].pkg_name:'')||'-')}${o.setup_flag===1?' · 搭建':(o.setup_flag===0?' · 不搭建':'')}${o.delivery_fee?' · 配送¥'+o.delivery_fee:''}${o.delivery_person?' · '+o.delivery_person:''}${o.source?' · '+o.source:''}</div></div>
       <div class="cell"><div class="k">📋 状态</div><div class="v">${stMap[o.status]||o.status}</div></div>
       <div class="cell"><div class="k">👤 归属</div><div class="v">${ownerText(o)}</div></div>
       ${(o.entered_by && o.created_by && o.entered_by !== o.created_by) ?
@@ -349,6 +366,7 @@ function fillEdit(){
   document.getElementById('edName').value = o.contact_name || '';
   document.getElementById('edPhone').value = o.contact_phone || '';
   document.getElementById('edAddr').value = o.address || '';
+  fillLedgerFields(o);
   const box = document.getElementById('pkgRows');
   box.innerHTML = '';
   (o.packages||[]).forEach(p=>{
@@ -357,6 +375,57 @@ function fillEdit(){
   });
   document.getElementById('editMsg').textContent = '';
   updateCalcHint();
+}
+
+// ===== 记账信息（下拉 + 默认最常用；少手填）=====
+let _ledgerOpts = null;
+function _optHtml(arr, cur, addEmpty){
+  let list = (arr||[]).map(String);
+  const c = (cur==null?'':String(cur));
+  if(c && list.indexOf(c) < 0) list = list.concat([c]);   // 保留本单历史值，别丢
+  let html = addEmpty ? '<option value="">未填</option>' : '';
+  html += list.map(function(v){
+    const sel = (v === c) ? ' selected' : '';
+    return '<option value="'+v+'"'+sel+'>'+v+'</option>';
+  }).join('');
+  return html;
+}
+function ensureLedgerOpts(cb){
+  if(_ledgerOpts){ cb(_ledgerOpts); return; }
+  fetch('/api/orders/ledger-options').then(function(r){return r.json();}).then(function(d){
+    _ledgerOpts = (d && d.data) || {};
+    cb(_ledgerOpts);
+  }).catch(function(){ _ledgerOpts = {}; cb(_ledgerOpts); });
+}
+function fillLedgerFields(o){
+  ensureLedgerOpts(function(L){
+    const menu = document.getElementById('edMenuName');
+    if(menu){
+      const curMenu = o.menu_name || ((o.packages && o.packages[0]) ? o.packages[0].pkg_name : '') || '';
+      menu.innerHTML = _optHtml(L.menu_names, curMenu, true);
+      menu.value = curMenu;
+    }
+    const setup = document.getElementById('edSetup');
+    if(setup) setup.value = (o.setup_flag === 1) ? '1' : (o.setup_flag === 0 ? '0' : '');
+    const fee = document.getElementById('edDeliveryFee');
+    if(fee){
+      const curFee = (o.delivery_fee != null) ? String(o.delivery_fee) : String(L.default_fee != null ? L.default_fee : '');
+      fee.innerHTML = _optHtml(L.delivery_fees, curFee, true);
+      fee.value = curFee;
+    }
+    const dp = document.getElementById('edDeliveryPerson');
+    if(dp){
+      const curDp = o.delivery_person || L.default_person || '';
+      dp.innerHTML = _optHtml(L.delivery_persons, curDp, true);
+      dp.value = curDp;
+    }
+    const src = document.getElementById('edSource');
+    if(src){
+      const curSrc = o.source || L.default_source || '';
+      src.innerHTML = _optHtml(L.sources, curSrc, true);
+      src.value = curSrc;
+    }
+  });
 }
 
 function saveEdit(){
@@ -377,6 +446,11 @@ function saveEdit(){
     contact_name: document.getElementById('edName').value,
     contact_phone: document.getElementById('edPhone').value,
     address: document.getElementById('edAddr').value,
+    menu_name: (document.getElementById('edMenuName')||{}).value || '',
+    setup_flag: (document.getElementById('edSetup')||{}).value || '',
+    delivery_fee: (document.getElementById('edDeliveryFee')||{}).value || '',
+    delivery_person: (document.getElementById('edDeliveryPerson')||{}).value || '',
+    source: (document.getElementById('edSource')||{}).value || '',
     packages: pkgs
   };
   // 改"归属"（这单算谁的）：能改这一单的人就能改归属（服务端会按归属候选校验）

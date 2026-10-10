@@ -267,6 +267,17 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN delivered INTEGER DEFAULT 0")
         if "served" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN served INTEGER DEFAULT 0")
+        # 销售流水表 / 记账口径（2026-10-10）：这几个字段是"导出记账表"和"算真实到手"用的
+        #   menu_name       —— 套餐名(展示用)：备餐表按内部套餐拆料，但记账只写一个名字（如"16人餐"）
+        #   setup_flag      —— 是否搭建 1/0（NULL=没填）
+        #   delivery_fee    —— 本单付给配送员的费用（从价格里剔除 → 实收）
+        #   delivery_person —— 配送人（基本固定，前端下拉 + 默认最常用）
+        #   source          —— 客户来源（私人关系/美团/抖音/小红书…）
+        for _col, _typ in [("menu_name", "TEXT"), ("setup_flag", "INTEGER"),
+                           ("delivery_fee", "REAL"), ("delivery_person", "TEXT"),
+                           ("source", "TEXT")]:
+            if _col not in cols:
+                cur.execute("ALTER TABLE orders ADD COLUMN %s %s" % (_col, _typ))
         # 老数据：created_by 当初既是"录入人"也是"归属"，两者补成一致
         # （放在下面 created_by 建好之后再补，见后文）
         # 归属（2026-10-02）：订单归属到"谁的归属"，用于权限（只能改自己归属的单）+ 独立统计
