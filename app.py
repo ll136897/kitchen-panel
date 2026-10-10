@@ -412,8 +412,8 @@ _PARTNER_WRITE = _STAFF_WRITE + (
     "/api/backup", "/api/catering/suggest",
     # 单笔成本/收款/押金：能不能动由"这单是不是你录的"决定（见 _can_touch_order）
     "/api/finance/order", "/api/finance/payment", "/api/finance/deposit",
-    # 门店支出台账：合伙人也能记/改/删门店支出（运营数据，非原数据）；老板当然可以
-    "/api/finance/expense",
+    # 门店支出台账：合伙人也能记/改/删门店支出、导入账单对账（运营数据，非原数据）；老板当然可以
+    "/api/finance/expense", "/api/finance/expense-statement",
 )
 # 只有老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置/账号等
 _PARTNER_READ = (
@@ -3847,6 +3847,89 @@ def _dt_year():
     import datetime as _dt
     return _dt.date.today().year
 
+def _exp_parse_csv(text):
+    """解析「账单导出 CSV」（微信/支付宝「用于个人对账」账单明细）为候选支出行。
+
+    与 _exp_parse（一行一段的乱文本）不同：这里先用表头定位列，再只取「支出」方向的行，
+    所以是"全量、结构化、零识别误差"的付款台账来源。
+      日期=交易时间、商户=交易对方(缺则取商品)、金额=金额(元) 去掉 ¥￥, 空格。
+    找不到可识别表头时，回退到 _exp_parse（按行文本解析兜底）。
+    """
+    if not text:
+        return []
+    import csv as _csv, io as _io
+    text = text.lstrip('\ufeff')
+    try:
+        rows = list(_csv.reader(_io.StringIO(text)))
+    except Exception:
+        return _exp_parse(text)
+    hi, idx = -1, {}
+    for i, r in enumerate(rows):
+        cells = [(c or '').strip() for c in r]
+        joined = '|'.join(cells)
+        if ('时间' in joined) and ('金额' in joined) and ('对方' in joined or '收' in joined or '商品' in joined):
+            idx = {}
+            for j, c in enumerate(cells):
+                if not c:
+                    continue
+                if ('交易时间' in c or c == '时间') and 'date' not in idx:
+                    idx['date'] = j
+                elif ('交易对方' in c or '对方' in c or '商户' in c) and 'merchant' not in idx:
+                    idx['merchant'] = j
+                elif ('金额' in c) and 'amount' not in idx:
+                    idx['amount'] = j
+                elif ('收/支' in c or '收支' in c) and 'dir' not in idx:
+                    idx['dir'] = j
+                elif ('商品' in c) and 'item' not in idx:
+                    idx['item'] = j
+                elif ('交易类型' in c) and 'type' not in idx:
+                    idx['type'] = j
+                elif ('状态' in c) and 'status' not in idx:
+                    idx['status'] = j
+            if 'date' in idx and 'amount' in idx:
+                hi = i
+                break
+    if hi < 0:
+        return _exp_parse(text)  # 不是可识别账单 CSV → 按文本兜底
+
+    def _cell(r, k):
+        j = idx.get(k)
+        return (r[j] or '').strip() if (j is not None and j < len(r)) else ''
+
+    out = []
+    for r in rows[hi + 1:]:
+        if not r or all((c or '').strip() == '' for c in r):
+            continue
+        d = _cell(r, 'dir')
+        if '收入' in d:
+            continue
+        if '退款' in _cell(r, 'status'):
+            continue
+        tp = _cell(r, 'type')
+        if not d and not any(k in tp for k in ('转账', '红包', '付款', '消费', '支出')):
+            continue
+        raw_date = _cell(r, 'date')
+        pdate = None
+        m = _re.search(r'(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})', raw_date)
+        if m:
+            try:
+                pdate = '%04d-%02d-%02d' % (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except Exception:
+                pdate = None
+        amt_clean = _re.sub(r'[^0-9.]', '', _cell(r, 'amount'))
+        amt = None
+        try:
+            if amt_clean not in ('', '.'):
+                amt = round(float(amt_clean), 2)
+        except Exception:
+            amt = None
+        merchant = _cell(r, 'merchant') or _cell(r, 'item')
+        if amt is None and not merchant:
+            continue
+        out.append({'line_no': len(out) + 1, 'raw': ','.join([x or '' for x in r]),
+                    'date': pdate, 'merchant': merchant.strip(), 'amount': amt})
+    return out
+
 # ===== 门店支出自动分类 ====================================================
 # 按「用途 / 物料名」关键词推断 分类一/分类二/成本归类。
 # 仅当使用者在「更多」里没手填分类时才自动补；识别不到则留空（不强塞）。
@@ -3944,6 +4027,11 @@ def add_expense():
     db.execute("INSERT INTO expenses (" + ",".join(keys) + ") VALUES (" +
                ",".join("?" * len(keys)) + ")", [cols[k] for k in keys])
     eid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    # 「补记」对账：这笔来自某条待对账账单行时回写关联 → 该行标记为已入账（不再出现在未入账清单）
+    if cols.get("statement_id") and cols.get("statement_line_no"):
+        db.execute("UPDATE expense_statement_lines SET matched_expense_id=? "
+                   "WHERE statement_id=? AND line_no=? AND matched_expense_id IS NULL",
+                   (eid, cols["statement_id"], cols["statement_line_no"]))
     db.commit()
     return jsonify({"ok": True, "id": eid})
 
@@ -4016,6 +4104,50 @@ def statement_unmatched(sid):
     rows = g.db.execute(
         "SELECT * FROM expense_statement_lines WHERE statement_id=? AND matched_expense_id IS NULL "
         "ORDER BY line_no", (sid,)).fetchall()
+    return jsonify({"ok": True, "data": [dict(r) for r in rows]})
+
+@app.route("/api/finance/expense-statement/csv", methods=["POST"])
+def create_statement_csv():
+    """导入「微信/支付宝账单 CSV」：一次把整月付款变成待对账行（付款台账 = 系统真账）。
+    结构化解析、零识别误差，用于根治"月底翻所有渠道逐笔对、怕漏"的问题。"""
+    data = request.get_json(force=True) or {}
+    text = data.get("text", "")
+    channel = _exp_str(data.get("channel")) or "微信"
+    u = getattr(g, "cur_user", None) or {}
+    db = g.db
+    lines = _exp_parse_csv(text)
+    db.execute("INSERT INTO expense_statements (channel, raw_text, line_count, created_by, created_by_name) "
+               "VALUES (?,?,?,?,?)",
+               (channel, (text or "")[:20000], len(lines), u.get("id"), u.get("name") or u.get("username")))
+    sid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    out = []
+    for ln in lines:
+        db.execute("INSERT INTO expense_statement_lines "
+                   "(statement_id, line_no, raw_line, parsed_date, parsed_merchant, parsed_amount) "
+                   "VALUES (?,?,?,?,?,?)",
+                   (sid, ln["line_no"], ln["raw"], ln["date"], ln["merchant"], ln["amount"]))
+        out.append({"id": db.execute("SELECT last_insert_rowid()").fetchone()[0],
+                    "statement_id": sid, **ln, "matched_expense_id": None})
+    db.commit()
+    return jsonify({"ok": True, "statement_id": sid, "lines": out, "count": len(out)})
+
+@app.route("/api/finance/expense/unmatched")
+def expense_unmatched_all():
+    """跨批次的「全局未入账清单」：所有付了但还没记成支出的行，一条不漏地列出来。
+    这是"对账看板"的数据源——你只需看这一栏，不用再翻聊天记录逐笔找。"""
+    month = request.args.get("month")
+    channel = request.args.get("channel")
+    where = ["l.matched_expense_id IS NULL"]
+    params = []
+    if month:
+        where.append("l.parsed_date LIKE ?"); params.append(month + "%")
+    if channel:
+        where.append("s.channel=?"); params.append(channel)
+    rows = g.db.execute(
+        "SELECT l.id, l.statement_id, l.line_no, l.parsed_date AS date, l.parsed_merchant AS merchant, "
+        "l.parsed_amount AS amount, s.channel AS channel, s.created_at AS stmt_at "
+        "FROM expense_statement_lines l JOIN expense_statements s ON s.id=l.statement_id "
+        "WHERE " + " AND ".join(where) + " ORDER BY l.parsed_date ASC, l.id ASC", params).fetchall()
     return jsonify({"ok": True, "data": [dict(r) for r in rows]})
 
 @app.route("/api/finance/expense/batch", methods=["POST"])
