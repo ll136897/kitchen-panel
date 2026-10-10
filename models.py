@@ -588,9 +588,73 @@ def init_db():
 
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
+        restore_recovered_orders(cur)   # 一次性找回被"备份互相覆盖"弄丢的订单（幂等）
 
         conn.commit()
     print(f"[OK] 数据库已初始化: {DB_PATH}")
+
+
+def restore_recovered_orders(cur):
+    """一次性找回：把 recovered_orders.json 里被"备份互相覆盖"弄丢的订单补回（幂等）。
+
+    · 靠 settings 标记只跑一次；
+    · 只 INSERT（已存在则跳过），**绝不动任何已有 / 最近的单**；
+    · 文件不在（比如线上没带上）就静默跳过。
+    """
+    import json as _json, os as _os
+    KEY = "restore_recovered_20261010"
+    try:
+        if cur.execute("SELECT 1 FROM settings WHERE key=?", (KEY,)).fetchone():
+            return
+    except Exception:
+        return
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "recovered_orders.json")
+    if not _os.path.exists(path):
+        return
+    try:
+        data = _json.load(open(path, encoding="utf-8"))
+    except Exception as e:
+        print("[找回] 读取 recovered_orders.json 失败：%s" % e)
+        return
+
+    def _cols(t):
+        try:
+            return [r[1] for r in cur.execute("PRAGMA table_info(%s)" % t)]
+        except Exception:
+            return []
+
+    added = 0
+    for item in (data.get("orders") or []):
+        o = item.get("order") or {}
+        oid = o.get("id")
+        if oid is None:
+            continue
+        if cur.execute("SELECT 1 FROM orders WHERE id=?", (oid,)).fetchone():
+            continue
+        ocols = _cols("orders")
+        keep = [k for k in o.keys() if k in ocols]
+        if not keep:
+            continue
+        cur.execute("INSERT INTO orders (%s) VALUES (%s)" % (",".join(keep), ",".join("?" * len(keep))),
+                    [o[k] for k in keep])
+        for t, rows in (item.get("children") or {}).items():
+            tcols = _cols(t)
+            if not tcols:
+                continue
+            for row in rows:
+                kk = [k for k in row.keys() if k in tcols]
+                if not kk:
+                    continue
+                cur.execute("INSERT INTO %s (%s) VALUES (%s)" % (t, ",".join(kk), ",".join("?" * len(kk))),
+                            [row[k] for k in kk])
+        added += 1
+    try:
+        cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES (?,?,?)",
+                    (KEY, "1", "2026-10-10 一次性找回被覆盖弄丢的订单"))
+    except Exception:
+        pass
+    if added:
+        print("[找回] 已补回 %d 单（此前被备份互相覆盖弄丢的）" % added)
 
 
 def backfill_purchase(cur):

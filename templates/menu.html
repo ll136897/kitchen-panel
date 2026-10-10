@@ -730,7 +730,7 @@ function showRefreshToast(){
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 2200);
 }
-async function doBackup(){const b=event.target;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
+async function doBackup(){const b=event.target;if(!confirm('备份会先把云端已有的订单合并进来（不会丢单），再把当前数据推上去。确定现在备份？'))return;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 // 页面打开即自动加载菜单
 // （原来这里缺少初始调用，导致菜单页打开是空白、必须手动点「刷新」才显示）
 loadMenu();
