@@ -9,6 +9,12 @@
   .cell.clickable{cursor:pointer;transition:color .12s}
   .cell.clickable:hover .v{text-decoration:underline;color:var(--primary)}
   .cell.clickable .k::after{content:' 🔗';font-size:11px;opacity:.5}
+  /* 卡片里可点的值（每个套餐、归属）：点了就按这个值筛选，不占额外版面 */
+  .v-click{cursor:pointer;text-decoration:underline dotted;text-decoration-color:#c8a45c;text-underline-offset:3px}
+  .v-click:hover{color:var(--primary);text-decoration-color:var(--primary)}
+  .chip.who.clickable{cursor:pointer}
+  .chip.who.clickable:hover{filter:brightness(.96)}
+  .tel-mini{margin-left:7px;font-size:12px;text-decoration:none;opacity:.7;white-space:nowrap}
   /* 分组筛选条 */
   #groupBar{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;
     padding:12px 14px;background:linear-gradient(90deg,#fff7ed,#fff);border:1px solid #fed7aa}
@@ -242,7 +248,8 @@ let allOrders = [];
 let selMode = false;          // 是否进入批量选择模式
 let selectedIds = new Set();  // 已勾选的订单 id
 let currentVisibleIds = [];   // 当前渲染出来的订单 id（用于全选）
-let groupField = null;     // 'address' | 'contact_name' | null
+let groupField = null;     // 'address' | 'contact_name' | 'pkg' | 'phone' | null
+let groupVal = '';         // 点的是哪个值（套餐名 / 电话 / 归一地址 / 联系人）
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
 let filterText = '';       // 搜索关键字
@@ -287,12 +294,26 @@ function inScope(dateStr, anchorDate, scope){
   return true;
 }
 
-function groupBy(field, anchorId){
-  groupField = field; groupAnchorId = anchorId; groupScope = 'all';
+// 从某一单里取出"这一组按什么值聚合"：套餐 = 第 idx 个套餐名；电话 / 地址(归一) / 联系人 = 字符串
+function groupValue(o, field, idx){
+  if(field==='pkg'){ const p=(o.packages||[])[idx||0]||{}; return p.name||''; }
+  if(field==='phone') return o.contact_phone||'';
+  if(field==='address') return addrKey(o);
+  return o.contact_name||'';
+}
+// 点卡片上的某个值 → 筛出所有"同值"的订单
+//   · 叠加当前日期/月份/归属筛选（先按 scope 过滤，再在同组内筛）
+//   · 再点同一个值 = 取消筛选，回到全部
+function groupByValue(field, anchorId, idx){
+  const a = allOrders.find(o=>o.id===anchorId) || {};
+  const v = String(groupValue(a, field, idx));
+  if(groupField===field && String(groupVal)===v){ clearGroup(); return; }
+  groupField = field; groupVal = v; groupAnchorId = anchorId; groupScope = 'all';
   renderOrders();
 }
+function groupBy(field, anchorId){ groupByValue(field, anchorId, 0); }
 function clearGroup(){
-  groupField = null; groupAnchorId = null; groupScope = 'all';
+  groupField = null; groupVal = ''; groupAnchorId = null; groupScope = 'all';
   renderOrders();
 }
 function setScope(s){
@@ -564,6 +585,11 @@ function renderOrderList(list, isGroup){
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
 function buildCard(o, isAnchor){
   const pkgsText = (o.packages||[]).map(p=>`${p.name}·${p.people}人 ×${p.quantity}`).join(' · ') || '';
+  // 每个套餐单独可点：点某个套餐 = 筛出所有点了同套餐的订单
+  // （套餐仍是首要信息、仍排在地址前面，只是值本身变成可点，样式规格不变）
+  const pkgHtml = (o.packages||[]).length
+    ? (o.packages||[]).map((p,i)=>`<span class="v-click" onclick="groupByValue('pkg', ${o.id}, ${i})">${p.name}·${p.people}人 ×${p.quantity}</span>`).join(' · ')
+    : (pkgsText || '未记录');
   const [stText, stCls] = statusLabel(o.status);
   const anchorFlag = isAnchor ? `<span class="anchor-flag">← 你点的这单</span>` : '';
   return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}${selectedIds.has(o.id)?' selected':''}" id="ocard-${o.id}">
@@ -578,10 +604,10 @@ function buildCard(o, isAnchor){
     </div>
 
     <div class="preview-grid" style="margin:8px 0">
-      <div class="cell pkg-cell"><div class="k">🍱 套餐</div><div class="v">${pkgsText||'未记录'}</div></div>
+      <div class="cell pkg-cell"><div class="k">🍱 套餐</div><div class="v">${pkgHtml}</div></div>
       <div class="cell clickable" onclick="groupBy('address', ${o.id})"><div class="k">📍 地址</div><div class="v">${o.address||'-'}</div></div>
       <div class="cell clickable" onclick="groupBy('contact_name', ${o.id})"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
-      <div class="cell"><div class="k">📞 电话</div><div class="v">${o.contact_phone?`<a href="tel:${o.contact_phone}">${o.contact_phone}</a>`:'-'}</div></div>
+      <div class="cell clickable" ${o.contact_phone?`onclick="groupByValue('phone', ${o.id}, 0)"`:''}><div class="k">📞 电话</div><div class="v">${o.contact_phone?`${o.contact_phone}<a class="tel-mini" href="tel:${o.contact_phone}" onclick="event.stopPropagation()" title="拨号">📞</a>`:'-'}</div></div>
       <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
     </div>
 
@@ -617,7 +643,14 @@ function ownerChip(o){
   const cls = label==='未标注' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
   const proxy = (o && o.entered_by && o.created_by && o.entered_by !== o.created_by)
     ? ('（' + prettyName(o.entered_by_name) + '代录）') : '';
-  return `<span class="chip who ${cls}" title="归属：${label}${proxy}">👤 ${label}${proxy}</span>`;
+  return `<span class="chip who ${cls} clickable" title="归属：${label}${proxy}｜点击筛出归属为「${label}」的订单" onclick="clickOwnerChip(${o.id})">👤 ${label}${proxy}</span>`;
+}
+// 点卡片上的归属（刘/孙/未标注）→ 按归属筛选，走的是顶部同一个筛选口径；再点一次 = 取消
+function clickOwnerChip(oid){
+  const o = allOrders.find(x=>x.id===oid) || {};
+  const key = ownerKey(o) || '0';                                          // 没有归属人 = 未标注
+  const cur = (filterOwner==='me') ? String((CUR_USER && CUR_USER.id) || '') : filterOwner;
+  setOrderOwner(cur===key ? '' : key);
 }
 function renderOrders(){
   const box = document.getElementById('orderList');
@@ -684,14 +717,17 @@ function renderOrders(){
   // 分组视图：按地址/联系人聚合，默认按点击订单的时间排（默认全部时段）
   // 地址用"归一后的地址"（青龙湖二期 → 青龙湖），同一个地方的不同写法算一个地方
   const anchor = list.find(o=>o.id===groupAnchorId) || {};
-  const val = (groupField==='address' ? addrKey(anchor) : (anchor.contact_name||''));
-  list = list.filter(o=> (groupField==='address' ? addrKey(o) : (o.contact_name||'')) === val);
+  const val = (groupVal !== '' ? groupVal : String(groupValue(anchor, groupField, 0)));
+  list = list.filter(o=>{
+    if(groupField==='pkg') return (o.packages||[]).some(p=> (p.name||'')===val);   // 套餐：一单多套餐，命中任意一个就算
+    return groupValue(o, groupField, 0) === val;                                    // 电话 / 地址(归一) / 联系人
+  });
   if(groupScope!=='all') list = list.filter(o=> inScope(o.booking_date, anchor.booking_date, groupScope));
   // 排序已在上文按 sortMode 完成（出餐日期 / 加入顺序）
 
   const gb = document.getElementById('groupBar');
   gb.style.display = 'flex';
-  const tagIcon = groupField==='address' ? '📍' : '👤';
+  const tagIcon = groupField==='address' ? '📍' : (groupField==='pkg' ? '🍱' : (groupField==='phone' ? '📞' : '👤'));
   // 合并了不同写法的场地时，把其它写法标注出来——解释"为什么这两个也算同一个地方"
   let tagTxt = `${tagIcon} ${val || '（空）'}`;
   if(groupField==='address'){
