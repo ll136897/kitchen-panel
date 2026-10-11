@@ -1808,9 +1808,11 @@ def order_ledger_options():
     for r in db.execute("SELECT name FROM packages ORDER BY id"):
         if r["name"] and r["name"] not in menu_names:
             menu_names.append(r["name"])
+    if DEFAULT_DELIVERY_PERSON not in persons:
+        persons.insert(0, DEFAULT_DELIVERY_PERSON)
     return jsonify({"ok": True, "data": {
         "delivery_persons": persons,
-        "default_person": persons[0] if persons else "",
+        "default_person": DEFAULT_DELIVERY_PERSON,
         "delivery_fees": fees or [100, 200, 150, 45],
         "default_fee": fees[0] if fees else 100,
         "menu_names": menu_names,
@@ -1861,6 +1863,60 @@ def list_daily_labor():
     return jsonify({"ok": True, "data": [dict(r) for r in rows], "total": round(total, 2)})
 
 
+# ===== 销售流水表：搭建 / 配送费 自动推导（2026-10-11）=====
+# 依据就是系统里已有的两套数据，不新增配置：
+#   1) 套餐正价 packages.price = base_price + 100（那 100 就是"配送搭建费"）
+#   2) 场地单价表 places：青龙湖/北湖/玉石/江家艺苑=100、锦城湖=130、双流中心公园=150，
+#      地址匹配不到时用 default_outsource（默认 100）
+# 用户手工填过的 setup_flag / delivery_fee 永远优先，只在为空时才自动推导。
+DEFAULT_DELIVERY_PERSON = "陈卓"
+_RENT_KW = ("桌椅", "卡式炉", "气罐", "烤盘", "租赁", "出租", "租用")
+_LABOR_KW = ("兼职", "工资", "人工", "帮工", "小时工", "临工", "小工", "劳务")
+
+
+def _place_delivery_fee(db, address):
+    """按地址匹配场地单价表 → 这一单要付给配送/搭建师傅的钱。"""
+    try:
+        from profit import get_config as _gc
+        cfg = _gc(db) or {}
+    except Exception:
+        cfg = {}
+    addr = address or ""
+    for p in (cfg.get("places") or []):
+        nm = (p.get("name") or "").strip()
+        if nm and nm in addr:
+            return float(p.get("outsource") or 0)
+    return float(cfg.get("default_outsource") or 100)
+
+
+def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note):
+    """推导 (搭建 1/0, 配送费, 依据)。
+    正价合计 = Σ(套餐正价 × 份数)；半包价 = 正价合计 − 配送搭建费 × 份数
+      · 金额 ≥ 正价合计 → 全包：搭建=是，配送费=按地址
+      · 金额 ≤ 半包价   → 半包：搭建=否，配送费=0
+      · 中间地带（半包加租赁 / 全包被砍价）：
+          备注出现租赁物（桌椅/卡式炉/气罐/烤盘…）→ 判半包；否则看金额更靠近哪一边
+    """
+    total = float(price_total or 0)
+    qty = int(pkg_qty or 1) or 1
+    amt = float(amount or 0)
+    if total <= 0:
+        return None, None, ""
+    unit = _place_delivery_fee(db, address)          # 每份套餐的配送搭建费
+    half = total - unit * qty
+    fee_full = unit * qty          # 全包：每个套餐价里含的那份配送搭建费都要付出去
+    if amt >= total - 0.5:
+        return 1, fee_full, "全包（金额≥套餐正价）"
+    if amt <= half + 0.5:
+        return 0, 0.0, "半包（金额=正价−配送搭建费）"
+    for kw in _RENT_KW:
+        if kw in (note or ""):
+            return 0, 0.0, "半包加租赁（备注有%s）" % kw
+    if abs(amt - total) <= abs(amt - half):
+        return 1, fee_full, "全包（金额接近正价）"
+    return 0, 0.0, "半包（金额接近半包价）"
+
+
 @app.route("/api/orders/export/sales")
 def export_sales_ledger():
     """导出「销售流水表」（复刻原表格式）：每单一行 + 月份合并单元格 + 右侧月度汇总块。
@@ -1886,18 +1942,25 @@ def export_sales_ledger():
                (SELECT GROUP_CONCAT(p.name, '、') FROM order_packages op JOIN packages p ON p.id=op.package_id
                  WHERE op.order_id=o.id) AS pkgnames,
                (SELECT SUM(COALESCE(op.price, p.price)*op.quantity) FROM order_packages op JOIN packages p ON p.id=op.package_id
-                 WHERE op.order_id=o.id) AS price_total
+                 WHERE op.order_id=o.id) AS price_total,
+               (SELECT SUM(op.quantity) FROM order_packages op WHERE op.order_id=o.id) AS pkg_qty
         FROM orders o WHERE """ + " AND ".join(where) + " ORDER BY o.booking_date ASC, o.id ASC", params).fetchall()
 
+    # 兼职工资：不只认 cost_kind='labor'——在支出台账里随手记的"兼职/工资/帮工…"也算进来，
+    # 这样在其他页面记过一笔就不用再来财务页补填（用户要的"联动其他页面、少动手自动识别"）
     labor_by_date = {}
+    _kw_or, _kw_p = "", []
+    for _k in _LABOR_KW:
+        _kw_or += " OR item_name LIKE ? OR merchant LIKE ? OR note LIKE ? OR purpose LIKE ? OR cat1 LIKE ?"
+        _kw_p += ["%" + _k + "%"] * 5
     labor_sql = ("SELECT use_date AS d, COALESCE(SUM(amount),0) AS a FROM expenses "
-                 "WHERE deleted_at IS NULL AND cost_kind='labor'")
+                 "WHERE deleted_at IS NULL AND (cost_kind='labor'" + _kw_or + ")")
     if month:
         labor_sql += " AND use_date LIKE ?"
-        for r in db.execute(labor_sql + " GROUP BY use_date", (month + "%",)):
+        for r in db.execute(labor_sql + " GROUP BY use_date", _kw_p + [month + "%"]):
             labor_by_date[r["d"]] = float(r["a"] or 0)
     else:
-        for r in db.execute(labor_sql + " GROUP BY use_date"):
+        for r in db.execute(labor_sql + " GROUP BY use_date", _kw_p):
             labor_by_date[r["d"]] = float(r["a"] or 0)
     cnt_by_date = {}
     for r in rows:
@@ -1921,16 +1984,18 @@ def export_sales_ledger():
     for r in rows:
         d = r["booking_date"] or ""
         mon = ("%d月" % int(d[5:7])) if (len(d) >= 7 and d[5:7].isdigit()) else ""
-        price = r["price_total"]
-        if price in (None, 0):
-            price = (r["amount"] or 0) + (r["delivery_fee"] or 0)
-        fee = r["delivery_fee"] if r["delivery_fee"] is not None else None
-        amt = r["amount"] or 0
+        # 手工填过的优先；没填的按规则自动推导（搭建 / 配送费），配送人默认陈卓
+        g_setup, g_fee, _why = _guess_setup_and_fee(
+            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"])
+        setup_flag = r["setup_flag"] if r["setup_flag"] is not None else g_setup
+        fee = float(r["delivery_fee"]) if r["delivery_fee"] is not None else g_fee
+        price = float(r["amount"] or 0)              # 客户实际付的钱（含要转给配送员的那部分）
+        amt = price - (fee or 0)                     # 实收 = 价格 − 配送费
         labor = labor_by_date.get(d, 0) / max(cnt_by_date.get(d, 1), 1)
         net = amt - labor
         pkg = r["menu_name"] or r["pkgnames"] or ""
-        setup = "是" if r["setup_flag"] == 1 else ("否" if r["setup_flag"] == 0 else "")
-        vals = [mon, d, pkg, setup, price, fee, amt, r["delivery_person"] or "", r["address"] or "",
+        setup = "是" if setup_flag == 1 else ("否" if setup_flag == 0 else "")
+        vals = [mon, d, pkg, setup, price, fee, amt, r["delivery_person"] or DEFAULT_DELIVERY_PERSON, r["address"] or "",
                 r["source"] or "", r["note"] or "", round(labor, 2) if labor else None, round(net, 2)]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r_idx, c, v); cell.border = border

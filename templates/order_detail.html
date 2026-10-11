@@ -69,8 +69,9 @@
       <label>🛵 配送费(付配送员)
         <select id="edDeliveryFee" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
       </label>
-      <label>🧍 配送人
-        <select id="edDeliveryPerson" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
+      <label>🧍 配送人（可下拉选，也可直接打字加新人）
+        <input id="edDeliveryPerson" list="edDeliveryPersonList" placeholder="陈卓" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box">
+        <datalist id="edDeliveryPersonList"></datalist>
       </label>
       <label>🧭 客户来源
         <select id="edSource" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:15px;width:100%;box-sizing:border-box"></select>
@@ -423,10 +424,15 @@ function fillLedgerFields(o){
       fee.value = curFee;
     }
     const dp = document.getElementById('edDeliveryPerson');
+    const dpl = document.getElementById('edDeliveryPersonList');
     if(dp){
-      const curDp = o.delivery_person || L.default_person || '';
-      dp.innerHTML = _optHtml(L.delivery_persons, curDp, true);
-      dp.value = curDp;
+      const curDp = o.delivery_person || L.default_person || '陈卓';
+      if(dpl){
+        const names = (L.delivery_persons || []).map(String);
+        if(curDp && names.indexOf(curDp) < 0) names.unshift(curDp);
+        dpl.innerHTML = names.map(function(v){ return '<option value="'+v+'"></option>'; }).join('');
+      }
+      dp.value = curDp;   // input + datalist：既能选，也能自己打一个新名字
     }
     const src = document.getElementById('edSource');
     if(src){
