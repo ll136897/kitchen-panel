@@ -74,7 +74,7 @@
       <div class="sub page-sub">查看/修改套餐食材配量 · 份数 × 每份数量(单位) = 总量</div>
     </div>
     <div class="toolbar">
-      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadMenu)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
       <button class="btn btn-sm btn-save-all" style="background:#27ae60;color:#fff" onclick="saveAll()">💾 保存全部修改</button>
       <button class="btn btn-sm" style="background:#6b4f3a;color:#fff" onclick="openCatering()">🍱 餐标配餐器</button>
       <button class="btn btn-accent btn-sm" onclick="expandAll()">📂 全展开</button>
@@ -734,6 +734,7 @@ async function doBackup(){const b=event.target;if(!confirm('备份会先把云�
 // 页面打开即自动加载菜单
 // （原来这里缺少初始调用，导致菜单页打开是空白、必须手动点「刷新」才显示）
 loadMenu();
+autoSync(loadMenu, 60000);
 </script>
 </body>
 </html>

@@ -333,7 +333,7 @@
     </div>
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="date" id="datePick" class="date-picker" onchange="onDatePicked()">
-      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(function(){loadPrepDates(false);loadPrep()})"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
       <button class="btn btn-accent btn-sm" onclick="downloadFile('/api/prep/export/matrix?date='+encodeURIComponent(document.getElementById('datePick').value)+(prepBy?('&by='+encodeURIComponent(prepBy)):''))">📥 导出备餐表(Excel)</button>
       <button class="btn btn-primary btn-sm" onclick="downloadFile('/api/prep/export/setup?date='+encodeURIComponent(document.getElementById('datePick').value||todayDateStr||''))">🚚 导出搭建装备表</button>
       <!-- 备餐保活：一个小胶囊。灰=关，绿=正在保活（数字=已保活分钟），红=连不上。

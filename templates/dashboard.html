@@ -48,7 +48,7 @@
     <div style="display:flex;gap:8px">
       <a href="/prep" class="btn btn-accent btn-sm">🍱 去备餐</a>
       <button class="btn btn-accent btn-sm" onclick="window.open('/api/print/menu','_blank')">🖨️ 打印</button>
-      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadDash)"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadDash)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
     </div>
   </div>
 
@@ -814,6 +814,7 @@ fetch('/api/backup/status').then(function(r){return r.json();}).then(function(d)
     document.body.style.paddingTop='62px';
   }
 }).catch(function(){});
+autoSync(loadDash, 60000);
 </script>
 </body>
 </html>

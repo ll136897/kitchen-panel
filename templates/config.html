@@ -72,7 +72,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 10px">
     <div><div class="title">📦 库存管理</div>
     <div class="sub page-sub">台账 · 出入库 · 盘点 · 流水</div></div>
-    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(reloadAll)"><span class="btn-icon">🔄</span> 刷新</button>
+    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(reloadAll)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
   </div>
 
   <div class="tabs" id="tabBar">
@@ -1043,6 +1043,7 @@ function loadVersion(){
 loadOverview();
 loadVersion();
 loadPriceHint();
+autoSync(reloadAll, 60000);
 </script>
 </body>
 </html>

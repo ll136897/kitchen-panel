@@ -20,4 +20,19 @@
     if (h && (p === h || (h !== '/' && p.indexOf(h) === 0))) a.classList.add('active');
   });
 })();
+
+// 自动同步：页面在前台、且你没正在打字时，每 60 秒自己拉一次新数据。
+// 这样别人（比如孙）新录的单会自己冒出来，不用手动点刷新——刷新键也就不再是摆设。
+// 两个保护：①页面在后台不刷（省资源） ②光标在输入框/下拉里时不刷（不打断你打字）
+window.autoSync = function(fn, ms){
+  if(typeof fn !== 'function') return;
+  setInterval(function(){
+    try{
+      if(document.hidden) return;
+      var ae = document.activeElement;
+      if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+      fn();
+    }catch(e){}
+  }, ms || 60000);
+};
 </script>

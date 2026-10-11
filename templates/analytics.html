@@ -71,7 +71,7 @@
         <button class="an-tab" data-g="day" onclick="setGran('day')">日</button>
         <button class="an-tab" data-g="month" onclick="setGran('month')">月</button>
       </div>
-      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAn)"><span class="btn-icon">🔄</span> 刷新</button>
+      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAn)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
     </div>
   </div>
 
@@ -445,6 +445,7 @@ function drillPhone(ph){
 }
 
 loadAn();
+autoSync(loadAn, 60000);
 </script>
 </body>
 </html>
