@@ -17,7 +17,12 @@ DB_FILE_PATH = "kitchen.db"  # 仓库中的路径
 
 # 备份锁（防止并发）
 _backup_lock = threading.Lock()
-_last_backup = 0  # 上次备份时间戳
+_last_backup = 0   # 上次备份成功的时间戳
+_last_ok = None    # 上次备份是否成功（None=还没跑过）
+_last_write = 0    # 最后一次数据变更的时间（用来判断"有没有改动还没存下来"）
+_dirty = False     # 备份推送期间是否又发生了写入（有就必须在跑完后补存一次）
+_pending_timer = None
+_pending_lock = threading.Lock()
 
 
 def _github_api(method, path, data=None):
@@ -46,16 +51,21 @@ def _github_api(method, path, data=None):
 
 def backup_to_github():
     """把当前 kitchen.db 推到 GitHub（忠实备份本地现状，不回拉任何云端订单）。"""
-    global _last_backup
+    global _last_backup, _last_ok
     if not GITHUB_TOKEN:
         return False
     if not os.path.exists(DB_PATH):
         return False
 
     if not _backup_lock.acquire(blocking=False):
-        print("[backup] 已有备份任务在跑，跳过")
+        # ⚠️ 以前这里是"直接跳过"——连续录入时，后几单就这么漏掉了（2026-10-11 丢单事故）
+        # 现在改成：记下"还有改动没存"，等正在跑的那次结束后立刻补存一次
+        print("[backup] 上一次备份还在跑 -> 已标记，跑完会立刻补存一次")
+        schedule_backup(delay=5)
         return False
     try:
+        with _pending_lock:
+            _dirty = False
         # 读取数据库文件
         with open(DB_PATH, "rb") as f:
             content = base64.b64encode(f.read()).decode()
@@ -73,16 +83,24 @@ def backup_to_github():
             data["sha"] = sha
 
         result = _github_api("PUT", "", data)
+        _last_ok = bool(result)
         if result:
             _last_backup = time.time()
             print(f"[backup] 已备份到 GitHub (sha: {result.get('content',{}).get('sha','')[:8]})")
             return True
+        print("[backup] 推送失败（GitHub 没有返回内容）")
         return False
     except Exception as e:
+        _last_ok = False
         print(f"[backup] 备份失败: {e}")
         return False
     finally:
         _backup_lock.release()
+        with _pending_lock:
+            _again = _dirty
+        if _again:
+            print("[backup] 备份期间又有新改动 -> 补存一次")
+            schedule_backup(delay=2)
 
 
 def _local_has_data():
@@ -152,10 +170,53 @@ def restore_from_github():
         return False
 
 
+def mark_write():
+    """任何数据变更后调用：记下"有改动"并预约一次备份。"""
+    global _last_write
+    _last_write = time.time()
+    schedule_backup()
+
+
+def schedule_backup(delay=3):
+    """预约备份：把短时间内的多次写入合并成一次推送（别每写一笔就打一次 GitHub）。
+    如果上一次备份正在跑，跑完会自动补存一次 —— 保证最后一次改动一定存得下来。"""
+    global _pending_timer, _dirty
+    with _pending_lock:
+        _dirty = True
+        if _pending_timer is not None:
+            return True                      # 已经排上了，不必重复排
+        if not GITHUB_TOKEN:
+            return False
+        _pending_timer = threading.Timer(delay, _run_pending)
+        _pending_timer.daemon = True
+        _pending_timer.start()
+        return True
+
+
+def _run_pending():
+    global _pending_timer
+    with _pending_lock:
+        _pending_timer = None
+    try:
+        backup_to_github()
+    except Exception as e:
+        print("[backup] 预约备份出错:", e)
+
+
+def backup_status():
+    """给页面显示用：有没有配 token、上次什么时候存的、现在有没有改动还没存下来。"""
+    return {
+        "configured": bool(GITHUB_TOKEN),
+        "last_backup": _last_backup,
+        "last_ok": _last_ok,
+        "last_write": _last_write,
+        "dirty": bool(_last_write and _last_write > _last_backup),
+    }
+
+
 def backup_async():
     """异步备份（不阻塞请求）"""
-    thread = threading.Thread(target=backup_to_github, daemon=True)
-    thread.start()
+    schedule_backup(delay=1)
 
 
 def start_auto_backup(interval=600):

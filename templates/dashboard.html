@@ -36,6 +36,10 @@
 {% include 'topbar.html' %}
 
 <div class="container">
+  <div id="saveBar" onclick="saveNow()" title="点一下立刻存到云端（系统休眠或重新部署会丢掉还没存的数据）" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin:10px 0 0;cursor:pointer">
+    <span id="saveDot" style="width:8px;height:8px;border-radius:50%;background:#b0a89c;display:inline-block;flex:0 0 auto"></span>
+    <span id="saveTxt">检查保存状态…</span>
+  </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px">
     <div>
       <div class="title"><span class="fire">🔥</span>刘和牛门店系统</div>
@@ -783,7 +787,20 @@ function showRefreshToast(){
   setTimeout(()=>t.remove(), 2200);
 }
 
-async function doBackup(){const b=event.target;if(!confirm('备份会先把云端已有的订单合并进来（不会丢单），再把当前数据推上去。确定现在备份？'))return;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
+async function doBackup(){const b=event.target;if(!confirm('把当前数据存到云端。存过之后，系统休眠或重新部署都不会丢。确定保存？'))return;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
+function fmtAgo(s){ if(s==null) return '还没存过'; if(s<60) return s+'秒前'; if(s<3600) return Math.floor(s/60)+'分钟前'; return Math.floor(s/3600)+'小时前'; }
+function saveNow(){ var t=document.getElementById('saveTxt'); if(t) t.textContent='保存中…'; fetch('/api/backup',{method:'POST'}).then(function(r){return r.json();}).then(function(d){ if(d && !d.ok) alert(d.msg||'保存失败'); refreshSave(); }).catch(function(){ alert('保存失败：网络错误'); refreshSave(); }); }
+function refreshSave(){
+  fetch('/api/backup/status').then(function(r){return r.json();}).then(function(d){
+    var dot=document.getElementById('saveDot'), txt=document.getElementById('saveTxt');
+    if(!dot||!txt) return;
+    if(d.configured===false){ dot.style.background='#c0392b'; txt.textContent='没配 GITHUB_TOKEN，数据存不下来'; return; }
+    if(d.dirty){ dot.style.background='#d97706'; txt.textContent='有改动还没保存 · 点这里保存'; }
+    else { dot.style.background='#1b7a43'; txt.textContent='已保存 · '+fmtAgo(d.last_backup_ago); }
+  }).catch(function(){});
+}
+refreshSave();
+setInterval(refreshSave, 60000);
 </script>
 
 <div id="bkWarn" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#c0392b;color:#fff;padding:10px 14px;font-size:13px;line-height:1.6;text-align:center">

@@ -184,7 +184,7 @@ except Exception as _e:
 
 # 启动定时备份（10分钟）
 try:
-    start_auto_backup(600)
+    start_auto_backup(300)   # 5 分钟兜底一次（写入后另有即时预约备份，双保险）
 except Exception as _e:
     print(f"[init] auto_backup skipped: {_e}")
 
@@ -730,8 +730,10 @@ except Exception as _e:
 def auto_backup(response):
     if request.method in ("POST", "PUT", "DELETE") and "/api/backup" not in request.path:
         try:
-            from db_backup import backup_async
-            backup_async()
+            # mark_write：记下"有改动"，并预约一次备份（短时间内的多次写入合并成一次推送；
+            # 若上一次备份还在跑，跑完会自动补存一次，不会像以前那样直接跳过导致漏存）
+            from db_backup import mark_write
+            mark_write()
         except Exception:
             pass
     return response
@@ -791,14 +793,13 @@ def keepalive_config():
 
 @app.route("/api/backup/status", methods=["GET"])
 def backup_status():
-    """查询备份配置状态"""
-    from db_backup import GITHUB_TOKEN, _last_backup
+    """查询备份状态：有没有配 token、上次什么时候存的、现在有没有改动还没存下来。
+    页面用它显示"已保存 X 分钟前 / 有改动未保存"，让用户知道数据安不安全。"""
     import time as _time
-    return jsonify({
-        "configured": bool(GITHUB_TOKEN),
-        "last_backup": _last_backup,
-        "last_backup_ago": f"{int(_time.time() - _last_backup)}s" if _last_backup else None,
-    })
+    from db_backup import backup_status as _bs
+    st = _bs()
+    st["last_backup_ago"] = (int(_time.time() - st["last_backup"]) if st["last_backup"] else None)
+    return jsonify(st)
 
 
 @app.route("/api/version", methods=["GET"])
