@@ -184,7 +184,7 @@ except Exception as _e:
 
 # 启动定时备份（10分钟）
 try:
-    start_auto_backup(300)   # 5 分钟兜底一次（写入后另有即时预约备份，双保险）
+    start_auto_backup(30)    # 每 30 秒检查一次，有改动才存（空闲零推送）；写入后另有即时预约，双保险
 except Exception as _e:
     print(f"[init] auto_backup skipped: {_e}")
 
@@ -741,9 +741,9 @@ def auto_backup(response):
 
 @app.route("/api/backup", methods=["POST"])
 def manual_backup():
-    """手动触发备份"""
+    """手动保存：force=True —— 点了就立刻存，不受"最小间隔"限制"""
     from db_backup import backup_to_github
-    ok = backup_to_github()
+    ok = backup_to_github(force=True)
     if ok:
         return jsonify({"ok": True, "msg": "备份成功"})
     return jsonify({"ok": False, "msg": "备份失败（未配置 GITHUB_TOKEN 或网络错误）"})

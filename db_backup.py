@@ -49,12 +49,25 @@ def _github_api(method, path, data=None):
         return None
 
 
-def backup_to_github():
-    """把当前 kitchen.db 推到 GitHub（忠实备份本地现状，不回拉任何云端订单）。"""
+# 两次推送之间的最小间隔（秒）。
+# 每次推送 = 一条提交 + 一份 300 多 KB 的 db 副本，太频繁会把 GitHub 仓库撑爆；
+# 所以自动存会稍微等一等，但**用户手动点"保存"不受这个限制**（点了就立刻存）。
+MIN_INTERVAL = 15
+
+
+def backup_to_github(force=False):
+    """把当前 kitchen.db 推到 GitHub（忠实备份本地现状，不回拉任何云端订单）。
+    force=True = 忽略最小间隔，立刻存（手动保存用）。"""
     global _last_backup, _last_ok
     if not GITHUB_TOKEN:
         return False
     if not os.path.exists(DB_PATH):
+        return False
+    if not force and _last_backup and (time.time() - _last_backup) < MIN_INTERVAL:
+        # 刚存过不久：不是丢弃，而是稍等一下再存（既保住了数据，又不刷爆仓库提交）
+        _wait = int(MIN_INTERVAL - (time.time() - _last_backup)) + 1
+        print("[backup] 距上次保存不足 %ds，延后 %ds 再存" % (MIN_INTERVAL, _wait))
+        schedule_backup(delay=_wait)
         return False
 
     if not _backup_lock.acquire(blocking=False):
@@ -219,12 +232,27 @@ def backup_async():
     schedule_backup(delay=1)
 
 
-def start_auto_backup(interval=600):
-    """启动定时备份（默认10分钟）"""
+def backup_if_dirty():
+    """定时兜底用：先看有没有改动，没有就一次都不推（不浪费 GitHub 提交次数）。"""
+    if not GITHUB_TOKEN:
+        return False
+    if not os.path.exists(DB_PATH):
+        return False
+    if _last_write and _last_write > _last_backup:
+        return backup_to_github()
+    return False
+
+
+def start_auto_backup(interval=30):
+    """定时兜底：每 30 秒**检查**一次，只有真有改动才推。
+    空闲时零推送，所以频率高也不占仓库、不耗额度。"""
     def _loop():
         while True:
             time.sleep(interval)
-            backup_to_github()
+            try:
+                backup_if_dirty()
+            except Exception as e:
+                print("[backup] 定时兜底出错:", e)
     thread = threading.Thread(target=_loop, daemon=True)
     thread.start()
-    print(f"[backup] 定时备份已启动，间隔 {interval}s")
+    print(f"[backup] 定时兜底已启动：每 {interval}s 检查一次（有改动才存，空闲不推）")
