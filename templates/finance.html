@@ -32,6 +32,9 @@
   .range-tabs{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:3px;gap:2px}
   .range-tab{padding:6px 14px;border:none;background:transparent;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;color:#6b4f3a;transition:all .15s}
   .range-tab.active{background:#3a2416;color:#fff;box-shadow:0 2px 4px rgba(0,0,0,.15)}
+  .labor-toggle{display:inline-flex;background:#f3ebe0;border-radius:8px;padding:2px;gap:1px}
+  .ltab{padding:4px 12px;border:none;background:transparent;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;color:#6b4f3a;transition:all .15s}
+  .ltab.active{background:#3a2416;color:#fff;box-shadow:0 2px 4px rgba(0,0,0,.15)}
   .range-date{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff}
   .quick-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
   .qchip{padding:6px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#6b4f3a;font-weight:600;transition:all .15s}
@@ -229,9 +232,17 @@
   <div class="fin-card">
     <div class="sec-title-click" onclick="toggleProfit()" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;cursor:pointer">
       <div class="sec-title" style="margin:0"><span class="dot" style="background:#3a2416"></span>📋 每单赚多少 <span id="profitCaret" style="font-size:11px">▸</span></div>
-      <div id="profitSummary" class="muted" style="font-size:12px"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="labor-toggle" onclick="event.stopPropagation()">
+          <span style="font-size:11px;color:#888;margin-right:2px">人工</span>
+          <button class="ltab" id="ltEst" onclick="setLaborMode('estimate')">估算</button>
+          <button class="ltab" id="ltAct" onclick="setLaborMode('actual')">实际</button>
+        </div>
+        <div id="profitSummary" class="muted" style="font-size:12px"></div>
+      </div>
     </div>
     <div id="profitBody" style="display:none;margin-top:8px">
+      <div id="realProfitNote" style="margin-bottom:8px"></div>
       <div class="led-tip" style="margin-bottom:8px">点「改成本」可调整这一单的开销</div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
         <table class="fin-tbl tbl-profit" id="profitTable">
@@ -611,6 +622,7 @@ function loadSigners(){
 
 let currentRange = 'day';     // 默认看"今天"（与工具栏高亮一致）
 let cfgData = null;
+let laborMode = 'estimate';   // 利润里"人工"口径：estimate=配置估算；actual=支出台账实际日结工资÷当天单数
 
 // ===== 日期范围 =====
 // 注意用本地时间（不能用 toISOString，那是 UTC——早上 8 点前会错成前一天）
@@ -759,7 +771,7 @@ function loadAll(){
   if(r.to)   scParams.push('date_to='+encodeURIComponent(r.to));
   const scQ = scParams.length ? ('?'+scParams.join('&')) : '';
   Promise.all([
-    fetchJSONRetry('/api/finance/profit-overview' + q),
+    fetchJSONRetry((laborMode==='actual' ? '/api/finance/period-real-profit' : '/api/finance/profit-overview') + q),
     fetchJSONRetry('/api/finance/summary' + q),
     fetchJSONRetry('/api/finance/signer-counts' + scQ)
   ]).then(([pfRes, sumRes, scRes])=>{
@@ -773,6 +785,8 @@ function loadAll(){
     pfData = pfRes.data || {};
     renderProfitKpi(pfData.totals||{});
     renderProfitOrders(pfData.orders||[]);
+    renderRealProfitNote(pfData.totals||{});
+    renderLaborToggle();
     if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
     signerCounts = scRes ? (scRes.data || {}) : {};
     signerTotal = scRes ? (scRes.total || 0) : 0;
@@ -1239,6 +1253,37 @@ function toggleProfit(){
   const b = document.getElementById('profitBody'), c = document.getElementById('profitCaret');
   if(b) b.style.display = profitCollapsed ? 'none' : '';
   if(c) c.textContent = profitCollapsed ? '▸' : '▾';
+}
+
+// 人工口径切换：估算（配置）↔ 实际（支出台账里记的日结工资 ÷ 当天单数）
+function setLaborMode(m){
+  if(laborMode === m) return;
+  laborMode = m;
+  renderLaborToggle();
+  loadAll();
+}
+function renderLaborToggle(){
+  const e = document.getElementById('ltEst'), a = document.getElementById('ltAct');
+  if(e) e.classList.toggle('active', laborMode==='estimate');
+  if(a) a.classList.toggle('active', laborMode==='actual');
+}
+function renderRealProfitNote(t){
+  const box = document.getElementById('realProfitNote');
+  if(!box) return;
+  if(laborMode !== 'actual'){ box.innerHTML = ''; return; }
+  const rec = t.labor_recorded||0, days = t.labor_days||0, od = t.order_days||0, miss = t.labor_missing||0;
+  let tip;
+  if(miss > 0){
+    tip = `<div style="font-size:12px;color:#b3261e;background:#fdecea;border:1px solid #f3c0bb;border-radius:8px;padding:8px 10px;line-height:1.6">
+      ⚠️ 有 ${miss} 天有单但没记人工 → 那几天的「实际人工」按 0 算，利润率会虚高。去「🧑🍳 当日兼职工资」把那几天的日结工资补上就准了。</div>`;
+  } else if(days > 0){
+    tip = `<div style="font-size:12px;color:#2f7d32;background:#eef6ee;border:1px solid #cfe6cf;border-radius:8px;padding:8px 10px;line-height:1.6">
+      ✅ 已按实际日结人工计算：${days} 天有单、全部已录人工（共 ¥${rec}），每天工资均摊到当天每一单。这版利润率就是"真实到手"。</div>`;
+  } else {
+    tip = `<div style="font-size:12px;color:#8a7364;background:#fbf6ef;border:1px solid #f3e6d2;border-radius:8px;padding:8px 10px;line-height:1.6">
+      ℹ️ 实际人工口径：把支出台账里记的日结工资 ÷ 当天单数。这个区间还没录过人工（共 ¥0），所以每单人工按 0 算。去「🧑🍳 当日兼职工资」记一笔即可。</div>`;
+  }
+  box.innerHTML = tip;
 }
 
 function setPay(oid, status){

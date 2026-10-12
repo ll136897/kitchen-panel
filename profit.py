@@ -414,3 +414,159 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
                             "fixed_monthly": fixed_monthly,
                             "fixed_orders_per_month": cfg.get("fixed_orders_per_month"),
                             "margin_alert": cfg.get("margin_alert")}}
+
+
+# ---------- 实际人工（按天日结，均摊到当天每一单） ----------
+_LABOR_KW = ("兼职", "工资", "人工", "帮工", "小时工", "临工", "小工", "劳务")
+
+
+def real_labor_by_date(db, date_from=None, date_to=None):
+    """按天汇总"实际兼职/人工"支出：cost_kind='labor' 或 关键词命中（item_name/merchant/note/purpose/cat1）。
+    返回 {use_date: 当天人工总额}。用于把"日结兼职工资"均摊到当天每一单，得到真实到手利润。"""
+    kw_or, kw_p = "", []
+    for k in _LABOR_KW:
+        kw_or += " OR item_name LIKE ? OR merchant LIKE ? OR note LIKE ? OR purpose LIKE ? OR cat1 LIKE ?"
+        kw_p += ["%" + k + "%"] * 5
+    sql = ("SELECT use_date AS d, COALESCE(SUM(amount),0) AS a FROM expenses "
+           "WHERE deleted_at IS NULL AND (cost_kind='labor'" + kw_or + ")")
+    params = list(kw_p)
+    if date_from:
+        sql += " AND use_date >= ?"; params.append(date_from)
+    if date_to:
+        sql += " AND use_date <= ?"; params.append(date_to)
+    sql += " GROUP BY use_date"
+    return {r["d"]: float(r["a"] or 0) for r in db.execute(sql, params).fetchall()}
+
+
+def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
+    """周期真实利润：与 period_overview 同口径、同返回结构，
+    唯一差别——人工用「支出台账里实际记的日结工资 ÷ 当天单数」替换掉配置估算值。
+    食材=实际消耗（order_profit 已含）；配送/搭建=地址规则（特殊情况你手填的优先）；人工=实际。
+
+    返回结构里 totals 额外带：
+      labor_recorded   实际人工总额（你真的转出去的钱）
+      labor_days       有录人工的天数
+      order_days       有订单的天数
+      labor_missing    有单但没录人工的天数（数据缺口提示）
+    """
+    cfg = cfg or get_config(db)
+    cur = db.cursor()
+    clause = "o.status!='cancelled' AND o.deleted_at IS NULL"
+    params = []
+    if date_from:
+        clause += " AND o.booking_date >= ?"; params.append(date_from)
+    if date_to:
+        clause += " AND o.booking_date <= ?"; params.append(date_to)
+    if extra_clause:
+        clause += " " + extra_clause
+        params.extend(extra_params)
+    rows = cur.execute(
+        "SELECT o.id, o.created_by, o.booking_date FROM orders o WHERE %s ORDER BY o.booking_date ASC, o.id ASC" % clause,
+        params).fetchall()
+
+    labor_by_date = real_labor_by_date(db, date_from, date_to)
+    cnt_by_date = {}
+    for r in rows:
+        d = r["booking_date"] or ""
+        cnt_by_date[d] = cnt_by_date.get(d, 0) + 1
+
+    orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
+                       "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
+                       "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
+                       "fuel_cost": 0.0, "consume_cost": 0.0, "other_cost": 0.0,
+                       "fixed_alloc": 0.0}
+    by_kind = {}
+    labor_days = set()
+    order_days = set()
+    for r in rows:
+        p = order_profit(db, r["id"], cfg)
+        if not p:
+            continue
+        date = p["booking_date"]
+        order_days.add(date)
+        food = next((i["amount"] for i in p["items"] if i["kind"] == "food"), 0.0)
+        # —— 核心：把估算人工换成「实际日结 ÷ 当天单数」 ——
+        day_labor = labor_by_date.get(date, 0.0)
+        day_cnt = cnt_by_date.get(date, 1) or 1
+        real_labor = round(day_labor / day_cnt, 2)
+        if date in labor_by_date:
+            labor_days.add(date)
+        new_items, cost_total, bk = [], 0.0, {}
+        for it in p["items"]:
+            if it["kind"] == "labor":
+                it = dict(it)
+                it["amount"] = real_labor
+                it["auto"] = real_labor
+                it["overridden"] = True
+                it["detail"] = "实际日结 ¥%g ÷ %d 单" % (day_labor, day_cnt)
+            cost_total += float(it["amount"] or 0)
+            bk[it["kind"]] = round(bk.get(it["kind"], 0.0) + float(it["amount"] or 0), 2)
+            new_items.append(it)
+        cost_total = round(cost_total, 2)
+        cash_profit = round(p["revenue"] - cost_total, 2)
+        margin_base = p["margin_base"]
+        margin = round(cash_profit / margin_base * 100, 1) if margin_base > 0 else 0.0
+        alert_pct = cfg.get("margin_alert", 40) or 0
+        if cash_profit < 0:
+            level = "loss"
+        elif margin < alert_pct:
+            level = "warn"
+        else:
+            level = "ok"
+        fixed_alloc = p.get("fixed_alloc", 0.0)
+        net_profit = round(cash_profit - fixed_alloc, 2)
+        # 汇总
+        tot["revenue"] += p["revenue"]
+        tot["food"] += food
+        tot["other"] += round(cost_total - food, 2)
+        tot["cost"] += cost_total
+        tot["profit"] += cash_profit
+        tot["net"] += net_profit
+        tot["delivery"] += p.get("delivery_passthrough", 0.0)
+        tot["food_cost"] += bk.get("food", 0.0)
+        tot["labor_cost"] += bk.get("labor", 0.0)
+        tot["outsource_cost"] += bk.get("outsource", 0.0)
+        tot["fuel_cost"] += bk.get("fuel", 0.0)
+        tot["consume_cost"] += bk.get("consume", 0.0)
+        tot["other_cost"] += bk.get("other", 0.0)
+        tot["fixed_alloc"] += fixed_alloc
+        if level == "loss":
+            tot["loss"] += 1
+        elif level == "warn":
+            tot["warn"] += 1
+        for k, v in bk.items():
+            by_kind[k] = round(by_kind.get(k, 0.0) + v, 2)
+        orders.append({
+            "id": p["order_id"], "created_by": r["created_by"],
+            "booking_date": date, "contact_name": p["contact_name"],
+            "address": p["address"], "revenue": p["revenue"], "food": food, "other": round(cost_total - food, 2),
+            "cost_total": cost_total, "profit": cash_profit, "margin": margin,
+            "net_profit": net_profit, "alert": level,
+            "payment_status": p["payment_status"], "deposit_status": p.get("deposit_status"),
+            "deposit": p["deposit"], "fixed_alloc": fixed_alloc, "by_kind": bk,
+        })
+    tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
+    tot["order_cnt"] = len(orders)
+    tot["by_kind"] = {k: round(v, 2) for k, v in by_kind.items()}
+    _mbase = tot["revenue"] - tot["delivery"]
+    tot["margin_base"] = round(_mbase, 2)
+    tot["margin"] = round(tot["profit"] / _mbase * 100, 1) if _mbase > 0 else 0.0
+    tot["avg_margin"] = round(sum(o["margin"] for o in orders) / len(orders), 1) if orders else 0.0
+    fixed_monthly = float(cfg.get("fixed_monthly", 0) or 0)
+    tot["fixed_monthly"] = fixed_monthly
+    if fixed_monthly > 0:
+        base = float(cfg.get("fixed_orders_per_month") or 0) or float(max(1, len(orders)))
+        tot["fixed_alloc_per_order"] = round(fixed_monthly / base, 2)
+    else:
+        tot["fixed_alloc_per_order"] = 0.0
+    tot["margin_alert"] = cfg.get("margin_alert", 40)
+    tot["labor_recorded"] = round(sum(labor_by_date.values()), 2)
+    tot["labor_days"] = len(labor_days)
+    tot["order_days"] = len(order_days)
+    tot["labor_missing"] = len(order_days - labor_days)
+    return {"totals": tot, "orders": orders,
+            "config_used": {"places": cfg.get("places"), "defaults": cfg.get("defaults"),
+                            "people_per_unit": cfg.get("people_per_unit"),
+                            "fixed_monthly": fixed_monthly,
+                            "fixed_orders_per_month": cfg.get("fixed_orders_per_month"),
+                            "margin_alert": cfg.get("margin_alert")}}

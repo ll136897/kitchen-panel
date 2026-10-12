@@ -4045,6 +4045,18 @@ def finance_profit_overview():
     return jsonify({"ok": True, "data": ov})
 
 
+@app.route("/api/finance/period-real-profit")
+def finance_period_real_profit():
+    """周期真实利润：人工用「支出台账里实际记的日结工资 ÷ 当天单数」替换配置估算值。
+    其余口径与 profit-overview 一致（食材=实际消耗、配送/搭建=地址规则、特殊情况手填优先）。
+    支持 by=me|0|<user_id> 归属筛选。"""
+    from profit import period_real_profit
+    _sc, _sp = _signer_clause(request.args, "o")
+    ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
+                            extra_clause=_sc, extra_params=_sp)
+    return jsonify({"ok": True, "data": ov})
+
+
 # ===== 门店支出台账（2026-10-08）=====
 # 散落各渠道的支出统一登记，支持手动录入 / 粘贴账单文字识别 / 渠道对账（不丢项、知道上次做到哪），
 # 「是否计入成本」标记后联动财务页利润。
