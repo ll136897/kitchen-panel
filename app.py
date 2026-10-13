@@ -4447,6 +4447,31 @@ def expense_unmatched_all():
         "WHERE " + " AND ".join(where) + " ORDER BY l.parsed_date ASC, l.id ASC", params).fetchall()
     return jsonify({"ok": True, "data": [dict(r) for r in rows]})
 
+@app.route("/api/finance/channel-progress")
+def channel_progress():
+    """各渠道「录到哪了」：记住每渠道上次录入的日期与笔数（实时、准确）。
+    用户每次重新录入前都要去各 APP 查上次录到哪——这个接口让他一眼看到，
+    不用再逐个 APP 翻。淘宝/阿里巴巴等渠道各自独立统计，不会混淆。"""
+    db = g.db
+    by_clause, by_params = _signer_clause(request.args)
+    where = "WHERE deleted_at IS NULL"
+    params = []
+    if by_clause:
+        where += " AND " + by_clause.lstrip(" AND ")
+        params += by_params
+    rows = db.execute(
+        "SELECT channel, use_date, item_name, amount FROM expenses " + where +
+        " ORDER BY use_date DESC, id DESC", params).fetchall()
+    prog = {}
+    for r in rows:
+        ch = (r["channel"] or "其他").strip() or "其他"
+        if ch not in prog:
+            prog[ch] = {"channel": ch, "last_date": r["use_date"], "cnt": 0,
+                        "last_item": r["item_name"], "last_amount": r["amount"]}
+        prog[ch]["cnt"] += 1
+    data = sorted(prog.values(), key=lambda x: (x["last_date"] or ""), reverse=True)
+    return jsonify({"ok": True, "data": data})
+
 @app.route("/api/finance/expense/batch", methods=["POST"])
 def batch_save_expenses():
     data = request.get_json(force=True) or {}

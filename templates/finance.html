@@ -38,6 +38,18 @@
   .range-date{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff}
   .quick-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
   .qchip{padding:6px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#6b4f3a;font-weight:600;transition:all .15s}
+  /* 各渠道录入进度（记住每渠道上次录到哪） */
+  .ch-prog{background:#f7f2ea;border:1px solid #ead9c4;border-radius:10px;padding:8px 10px}
+  .ch-prog-title{font-size:11px;color:#8a7364;margin-bottom:6px}
+  .ch-chips{display:flex;gap:6px;flex-wrap:wrap}
+  .ch-chip{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid #e6d6c2;border-radius:999px;padding:4px 9px;font-size:12px;color:#4a3a2c}
+  .ch-chip b{color:#2a1d12}
+  .ch-chip .ch-last{color:#999;font-size:11px}
+  .ch-dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:#bbb}
+  .ch-dot.green{background:#2ecc71}
+  .ch-dot.amber{background:#f1c40f}
+  .ch-dot.gray{background:#bbb}
+  @media(max-width:600px){ .ch-chip .ch-last{display:none} }
   .qchip.active{background:#3a2416;color:#fff;border-color:#3a2416}
   .cost-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
   .cost-item{background:#faf6ef;border:1px solid #f0ebe3;border-radius:8px;padding:8px 10px}
@@ -270,12 +282,15 @@
     <!-- 概览 KPI -->
     <div class="fin-kpi" id="ledgerKpi" style="margin-top:10px"></div>
 
+    <!-- 各渠道录入进度：记住每渠道上次录到哪（不用再开各 APP 翻） -->
+    <div id="channelProgress" class="ch-prog" style="margin-top:10px"></div>
+
     <!-- 月份 + 筛选 -->
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px">
       <input type="month" id="ledgerMonth" class="range-date" onchange="loadLedger()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
       <select id="ledgerChannel" class="select-mini" onchange="loadLedger()">
         <option value="">全部渠道</option>
-        <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
+        <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
       </select>
       <select id="ledgerCost" class="select-mini" onchange="loadLedger()">
         <option value="">全部</option><option value="1">仅计入成本</option><option value="0">不计入成本</option>
@@ -321,12 +336,12 @@
           <div class="led-field">
             <label>从哪付的（渠道）</label>
             <select id="e_channel">
-              <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
+              <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
             </select>
           </div>
           <div class="led-field">
             <label>供应商 / 商户</label>
-            <input id="e_merchant" placeholder="如 美团 / 1688某店">
+            <input id="e_merchant" placeholder="如 美团 / 阿里巴巴某店">
           </div>
         </div>
         <div class="led-2col">
@@ -397,7 +412,7 @@
       <div style="margin:8px 0 6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;color:#666">这笔账单来自：</label>
         <select id="csvChannel" class="select-mini">
-          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
+          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
         </select>
       </div>
       <input type="file" id="csvFile" accept=".csv,.txt" onchange="importCsv(this)" style="font-size:13px;width:100%;max-width:100%;box-sizing:border-box">
@@ -406,10 +421,10 @@
 
     <!-- 文字识别 -->
     <div id="ledgerText" style="display:none">
-      <textarea id="e_text" placeholder="把微信/支付宝/淘宝/1688 的账单文字粘进来，一行一笔。系统自动拆出 日期 / 商户 / 金额，你勾选要记的即可。例：&#10;2026-09-12 12:34 美团 支出 ¥128.00 牛肉&#10;2026-09-13 京东 支出 ¥59.90 炭火" style="width:100%;height:120px;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;font-family:inherit"></textarea>
+      <textarea id="e_text" placeholder="把微信/支付宝/淘宝/阿里巴巴 的账单文字粘进来，一行一笔。系统自动拆出 日期 / 商户 / 金额，你勾选要记的即可。例：&#10;2026-09-12 12:34 美团 支出 ¥128.00 牛肉&#10;2026-09-13 京东 支出 ¥59.90 炭火" style="width:100%;height:120px;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;font-family:inherit"></textarea>
       <div style="margin:8px 0 2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="e_text_channel" class="select-mini">
-          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
+          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
         </select>
         <button class="btn btn-sm btn-primary" onclick="parseText()">🔍 识别</button>
         <button class="btn btn-sm" onclick="saveStatement()">📥 识别并存入「待对账」</button>
@@ -1714,6 +1729,32 @@ function setLedgerMode(mode){
   if(mode==='resume') loadResume();
 }
 
+function loadChannelProgress(){
+  const box = document.getElementById('channelProgress');
+  if(!box) return;
+  fetchJSONRetry('/api/finance/channel-progress').then(j=>{
+    if(!j||!j.ok){ box.style.display='none'; return; }
+    const data = j.data||[];
+    if(!data.length){ box.style.display='none'; return; }
+    const today = new Date();
+    const chip = d=>{
+      const dt = d.last_date||'';
+      let dot='gray';
+      if(dt){
+        const t = new Date(dt.replace(/-/g,'/'));
+        if(!isNaN(t)){ const days=Math.floor((today-t)/86400000); dot = days<=7?'green':(days<=30?'amber':'gray'); }
+      }
+      const md = dt? dt.slice(5).replace('-','/') : '—';
+      const last = d.last_item ? ' · 最近：'+escHtml(String(d.last_item)) : '';
+      return '<span class="ch-chip"><span class="ch-dot '+dot+'"></span><b>'+escHtml(d.channel)+
+             '</b> 录到 '+md+' · '+d.cnt+'笔<span class="ch-last">'+last+'</span></span>';
+    };
+    box.innerHTML = '<div class="ch-prog-title">📍 各渠道录到哪了（不用再开 APP 翻）</div>'+
+                    '<div class="ch-chips">'+data.map(chip).join('')+'</div>';
+    box.style.display='';
+  }).catch(()=>{ box.style.display='none'; });
+}
+
 function loadLedger(){
   const dEl = document.getElementById('e_date');
   if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
@@ -1724,6 +1765,7 @@ function loadLedger(){
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
   if(typeof loadLabor==='function') loadLabor();
+  loadChannelProgress();
   fetchJSONRetry('/api/finance/expense-summary?month='+encodeURIComponent(month)).then(s=>{
     const d = s&&s.data || {};
     const pm = month.split('-');
@@ -1847,7 +1889,7 @@ function saveStatement(){
     });
 }
 
-function _chOpts(sel){ return ['微信','支付宝','淘宝','1688','银行','现金','其他'].map(c=>'<option'+(c===sel?' selected':'')+'>'+c+'</option>').join(''); }
+function _chOpts(sel){ return ['微信','支付宝','淘宝','阿里巴巴','银行','现金','其他'].map(c=>'<option'+(c===sel?' selected':'')+'>'+c+'</option>').join(''); }
 function _ckOpts(sel){ const m={food:'食材',outsource:'搭建/场地',fuel:'配送',labor:'人工',consume:'耗材',other:'其他'};
   return Object.keys(m).map(k=>'<option value="'+k+'"'+(k===sel?' selected':'')+'>'+m[k]+'</option>').join(''); }
 
