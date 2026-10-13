@@ -590,8 +590,7 @@ const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素�
 
 // ===== 归属筛选（这单算谁的）：全部 / 刘 / 孙（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
-const IS_BOSS = !!(CUR_USER && CUR_USER.role==='boss');   // 老板：对任何人的账本都有最大权限
-let curBookName = '';                                      // 当前打开的是谁的账本
+let curBookName = '';                                      // 当前"看谁的账"（看的时候人人平等）
 let SIGNERS = [];
 let finBy = '';
 let signerCounts = null, signerTotal = 0;   // 归属角标：按日期范围、不受 by 影响
@@ -1765,32 +1764,20 @@ function loadChannelProgress(){
 function loadLedger(){
   const dEl = document.getElementById('e_date');
   if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
-  // 📒 账本归属：老板有最大权限（能打开任何人的账本）；其他人只能看自己的账
+  // 📒 当前"看谁的账"——看的时候人人平等，这里只是个筛选显示，不体现权限高低
   const onEl = document.getElementById('ledOwnerName');
   const noteEl = document.getElementById('ledBookNote');
   const myName = (CUR_USER && (CUR_USER.name || CUR_USER.username)) || '本账号';
-  const myId = String((CUR_USER||{}).id||'');
-  let bookName = myName, blocked = false;
-  if(IS_BOSS){
-    if(finBy === '') bookName = '全部人的账';
-    else if(finBy === 'me') bookName = myName;
-    else if(finBy === '0') bookName = '未标注';
-    else {
-      const u = (SIGNERS||[]).find(s => String(s.id) === String(finBy));
-      bookName = u ? finShortSign(u) : myName;
-    }
-  } else if(finBy && finBy !== 'me' && String(finBy) !== myId && String(finBy) !== '0'){
-    blocked = true;   // 别人的账本打不开：下面仍然只显示自己的账
+  let bookName = '全部人的账';
+  if(finBy === 'me') bookName = myName;
+  else if(finBy === '0') bookName = '未标注';
+  else if(finBy){
+    const u = (SIGNERS||[]).find(s => String(s.id) === String(finBy));
+    if(u) bookName = finShortSign(u);
   }
   curBookName = bookName;
   if(onEl) onEl.textContent = bookName;
-  if(noteEl){
-    noteEl.textContent = blocked
-      ? '· 别人的账本打不开，下面仍是「'+bookName+'」的账'
-      : (IS_BOSS ? '· 你有最大权限：点上方「归属」可打开任何人的账本'
-                 : '· 记一笔会自动归到你的账本');
-    noteEl.style.display = noteEl.textContent ? '' : 'none';
-  }
+  if(noteEl) noteEl.textContent = '· 点上方「归属」切换看谁的账';
   const mEl = document.getElementById('ledgerMonth');
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
