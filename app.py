@@ -4278,6 +4278,54 @@ def _exp_cols(data, user):
         'created_by_name': (user or {}).get('name') or (user or {}).get('username'),
     }
 
+# ===== 个人记账 = 各自的账本（2026-10-13）=====
+# 规则：记账是**个人账本**——每个人只能打开自己的账；
+#       老板对任何人的账本都有**最大权限**（能看、能改、能删）。
+# 只管"个人记账"（支出台账 / 账单对账）；门店级的利润·分析不受这条限制，
+# 合伙人依旧可以按归属筛选看门店整体数据。
+def _exp_scope(args, alias=""):
+    """支出台账的可见范围：返回 (SQL片段, 参数)。
+      老板：按 ?by= 走（me / 0 / <uid> / 空=所有人的账本）
+      其他人：强制只看自己的账本（传什么 by 都不管用）"""
+    col = (alias + "." if alias else "") + "created_by"
+    if _is_boss():
+        by = (args.get("by") or "").strip()
+        if not by:
+            return "", []
+        if by == "me":
+            return " AND %s = ? " % col, [_cur_uid()]
+        if by == "0":
+            return " AND %s IS NULL " % col, []
+        try:
+            return " AND %s = ? " % col, [int(by)]
+        except (TypeError, ValueError):
+            return "", []
+    return " AND %s = ? " % col, [_cur_uid()]
+
+
+def _can_touch_expense(db, eid):
+    """能不能改/删这笔支出：老板全权；其他人只能动自己账本里的。"""
+    if _is_boss():
+        return True
+    row = db.execute("SELECT created_by FROM expenses WHERE id=?", (eid,)).fetchone()
+    if not row:
+        return False
+    return row["created_by"] is not None and row["created_by"] == _cur_uid()
+
+
+def _can_touch_statement(db, sid):
+    """能不能看/用这份导入的账单：老板全权；其他人只能用自己的。"""
+    if _is_boss():
+        return True
+    row = db.execute("SELECT created_by FROM expense_statements WHERE id=?", (sid,)).fetchone()
+    if not row:
+        return False
+    return row["created_by"] is not None and row["created_by"] == _cur_uid()
+
+
+_NO_EXP_PERM = "无权限：这笔不在你的账本里，只有本人能动（老板可动所有人的账）"
+
+
 @app.route("/api/finance/expense")
 def list_expenses():
     db = g.db
@@ -4296,9 +4344,9 @@ def list_expenses():
     if q:
         where.append("(item_name LIKE ? OR merchant LIKE ? OR menu_item LIKE ? OR note LIKE ?)")
         params += ["%" + q + "%"] * 4
-    # 归属筛选（?by=me|0|<user_id>）：支出台账同样受顶部"归属"筛选条控制，
-    # 不再只筛订单/利润而漏掉台账——做到"哪里显示归属，哪里就能按归属筛"。
-    by_clause, by_params = _signer_clause(request.args)
+    # 账本归属（?by=me|0|<user_id>）：支出台账同样受顶部"归属"筛选条控制——
+    # 老板可以点开任何人的账本；其他人强制只看自己的账（传什么都只出自己的）。
+    by_clause, by_params = _exp_scope(request.args)
     if by_clause:
         where.append(by_clause.lstrip(" AND "))
         params += by_params
@@ -4338,6 +4386,9 @@ def update_expense(eid):
     db = g.db
     if not db.execute("SELECT id FROM expenses WHERE id=? AND deleted_at IS NULL", (eid,)).fetchone():
         return jsonify({"ok": False, "msg": "支出不存在"}), 404
+    # 个人账本：老板能动所有人的；其他人只能动自己账本里的
+    if not _can_touch_expense(db, eid):
+        return jsonify({"ok": False, "msg": _NO_EXP_PERM}), 403
     cols = _exp_cols(data, getattr(g, "cur_user", None))
     sets = [k + "=?" for k in cols if k not in ("created_by", "created_by_name")]
     db.execute("UPDATE expenses SET " + ",".join(sets) + " WHERE id=?",
@@ -4348,6 +4399,9 @@ def update_expense(eid):
 @app.route("/api/finance/expense/<int:eid>", methods=["DELETE"])
 def delete_expense(eid):
     db = g.db
+    # 个人账本：老板能删所有人的；其他人只能删自己账本里的
+    if not _can_touch_expense(db, eid):
+        return jsonify({"ok": False, "msg": _NO_EXP_PERM}), 403
     db.execute("UPDATE expenses SET deleted_at=datetime('now','localtime') WHERE id=?", (eid,))
     db.commit()
     return jsonify({"ok": True})
@@ -4388,16 +4442,21 @@ def create_statement():
 
 @app.route("/api/finance/expense-statement")
 def list_statements():
+    # 个人账本：老板看得到所有人导入的账单；其他人只看自己导入的
+    sc, sp = _exp_scope(request.args, "s")
     rows = g.db.execute("""
         SELECT s.id, s.channel, s.created_at, s.line_count,
                (SELECT COUNT(*) FROM expense_statement_lines l
                 WHERE l.statement_id=s.id AND l.matched_expense_id IS NULL) AS unmatched
-        FROM expense_statements s ORDER BY s.id DESC LIMIT 50
-    """).fetchall()
+        FROM expense_statements s WHERE 1=1 """ + sc + """
+        ORDER BY s.id DESC LIMIT 50
+    """, sp).fetchall()
     return jsonify({"ok": True, "data": [dict(r) for r in rows]})
 
 @app.route("/api/finance/expense-statement/<int:sid>")
 def statement_unmatched(sid):
+    if not _can_touch_statement(g.db, sid):
+        return jsonify({"ok": False, "msg": "无权限：这份账单不是你导入的"}), 403
     rows = g.db.execute(
         "SELECT * FROM expense_statement_lines WHERE statement_id=? AND matched_expense_id IS NULL "
         "ORDER BY line_no", (sid,)).fetchall()
@@ -4440,6 +4499,10 @@ def expense_unmatched_all():
         where.append("l.parsed_date LIKE ?"); params.append(month + "%")
     if channel:
         where.append("s.channel=?"); params.append(channel)
+    # 个人账本：只列自己导入的账单里没入账的行（老板则是全部人的）
+    sc, sp = _exp_scope(request.args, "s")
+    if sc:
+        where.append(sc.lstrip(" AND ")); params += sp
     rows = g.db.execute(
         "SELECT l.id, l.statement_id, l.line_no, l.parsed_date AS date, l.parsed_merchant AS merchant, "
         "l.parsed_amount AS amount, s.channel AS channel, s.created_at AS stmt_at "
@@ -4453,7 +4516,8 @@ def channel_progress():
     用户每次重新录入前都要去各 APP 查上次录到哪——这个接口让他一眼看到，
     不用再逐个 APP 翻。淘宝/阿里巴巴等渠道各自独立统计，不会混淆。"""
     db = g.db
-    by_clause, by_params = _signer_clause(request.args)
+    # 个人账本：各渠道"录到哪了"按账本分开记（老板可切到任何人的账本，其他人只看自己的）
+    by_clause, by_params = _exp_scope(request.args)
     where = "WHERE deleted_at IS NULL"
     params = []
     if by_clause:
@@ -4523,6 +4587,10 @@ def expense_summary():
     params = []
     if month:
         where.append("use_date LIKE ?"); params.append(month + "%")
+    # 个人账本：汇总口径跟列表一致（老板可切任何人的账本，其他人永远只算自己的）
+    sc, sp = _exp_scope(request.args)
+    if sc:
+        where.append(sc.lstrip(" AND ")); params += sp
     row = db.execute(
         "SELECT COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS total, "
         "COALESCE(SUM(CASE WHEN is_cost=1 THEN amount ELSE 0 END),0) AS cost_total "
@@ -4532,9 +4600,15 @@ def expense_summary():
         "SELECT cost_kind, COALESCE(SUM(amount),0) AS s FROM expenses WHERE " +
         " AND ".join(where) + " AND is_cost=1 GROUP BY cost_kind", params).fetchall():
         by_kind[r["cost_kind"]] = round(float(r["s"] or 0), 2)
+    un_where = ["l.matched_expense_id IS NULL"]
+    un_params = []
+    sc2, sp2 = _exp_scope(request.args, "s")
+    if sc2:
+        un_where.append(sc2.lstrip(" AND ")); un_params += sp2
     un = db.execute(
-        "SELECT COUNT(*) AS c, COALESCE(SUM(parsed_amount),0) AS a "
-        "FROM expense_statement_lines WHERE matched_expense_id IS NULL").fetchone()
+        "SELECT COUNT(*) AS c, COALESCE(SUM(l.parsed_amount),0) AS a "
+        "FROM expense_statement_lines l JOIN expense_statements s ON s.id=l.statement_id "
+        "WHERE " + " AND ".join(un_where), un_params).fetchone()
     return jsonify({"ok": True, "data": {
         "count": row["cnt"] or 0,
         "total": round(float(row["total"] or 0), 2),
@@ -4554,6 +4628,10 @@ def export_expenses():
     params = []
     if month:
         where.append("use_date LIKE ?"); params.append(month + "%")
+    # 个人账本：导出也按账本隔离（老板可导出任何人的，其他人只能导出自己的）
+    sc, sp = _exp_scope(request.args)
+    if sc:
+        where.append(sc.lstrip(" AND ")); params += sp
     rows = db.execute(
         "SELECT id, use_date, channel, merchant, item_name, cat1, cat2, menu_item, spec, "
         "qty, unit_price, amount, is_cost, cost_kind, batch, purpose, buyer, note, created_by_name "

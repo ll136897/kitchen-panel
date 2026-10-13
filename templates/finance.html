@@ -158,6 +158,8 @@
   .led-tip{font-size:12px;color:#8a7364;background:#fdf6ec;border:1px solid #f3e6d2;border-radius:8px;padding:8px 10px;margin:4px 0 12px;line-height:1.6}
   .led-owner{font-size:12px;color:#6b4f3a;background:#eef6ee;border:1px solid #d6e8d6;border-radius:8px;padding:6px 10px;margin:2px 0 10px}
   .led-owner b{color:#2f7d32}
+  .led-book-note{color:#8a6d4f;font-size:11px;margin-left:4px}
+  @media(max-width:600px){ .led-book-note{display:none} }
   .led-autocat{font-size:11px;color:#2f7d32;margin-top:2px;min-height:14px}
   .led-autocat.empty{color:#a08c7a}
   .led-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
@@ -311,7 +313,7 @@
     <!-- 手动录入 -->
     <div id="ledgerManual">
       <div class="led-tip">👇 只要 <b>3 样</b> 就能存：<b>日期（默认今天）、用途、金额</b>。渠道默认「微信」，分类/购物人等都不用管——系统会按用途自动归类，导出时再补齐成完整表格。要一次记很多笔？用上方「📋 粘贴账单文字识别」。</div>
-      <div class="led-owner">归属：<b id="ledOwnerName">本账号</b> · 用哪个号登录就归哪个号，自动记录（两人都看得到，但能区分是谁记的）</div>
+      <div class="led-owner">📒 当前账本：<b id="ledOwnerName">本账号</b><span class="led-book-note" id="ledBookNote"></span></div>
       <div class="led-link-tip" id="ledManualTip" style="display:none"></div>
 
       <!-- 核心必填：只有这 3 个常驻 -->
@@ -588,6 +590,8 @@ const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素�
 
 // ===== 归属筛选（这单算谁的）：全部 / 刘 / 孙（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
+const IS_BOSS = !!(CUR_USER && CUR_USER.role==='boss');   // 老板：对任何人的账本都有最大权限
+let curBookName = '';                                      // 当前打开的是谁的账本
 let SIGNERS = [];
 let finBy = '';
 let signerCounts = null, signerTotal = 0;   // 归属角标：按日期范围、不受 by 影响
@@ -1732,7 +1736,9 @@ function setLedgerMode(mode){
 function loadChannelProgress(){
   const box = document.getElementById('channelProgress');
   if(!box) return;
-  fetchJSONRetry('/api/finance/channel-progress').then(j=>{
+  // 按当前打开的账本统计（老板切到谁的账本，就显示那个人的进度）
+  const q = (typeof finBy!=='undefined' && finBy) ? '?by='+encodeURIComponent(finBy) : '';
+  fetchJSONRetry('/api/finance/channel-progress'+q).then(j=>{
     if(!j||!j.ok){ box.style.display='none'; return; }
     const data = j.data||[];
     if(!data.length){ box.style.display='none'; return; }
@@ -1749,7 +1755,8 @@ function loadChannelProgress(){
       return '<span class="ch-chip"><span class="ch-dot '+dot+'"></span><b>'+escHtml(d.channel)+
              '</b> 录到 '+md+' · '+d.cnt+'笔<span class="ch-last">'+last+'</span></span>';
     };
-    box.innerHTML = '<div class="ch-prog-title">📍 各渠道录到哪了（不用再开 APP 翻）</div>'+
+    const who = (curBookName && curBookName !== '全部人的账') ? ' · '+escHtml(curBookName)+'的账' : '';
+    box.innerHTML = '<div class="ch-prog-title">📍 各渠道录到哪了'+who+'（不用再开 APP 翻）</div>'+
                     '<div class="ch-chips">'+data.map(chip).join('')+'</div>';
     box.style.display='';
   }).catch(()=>{ box.style.display='none'; });
@@ -1758,15 +1765,39 @@ function loadChannelProgress(){
 function loadLedger(){
   const dEl = document.getElementById('e_date');
   if(dEl && !dEl.value) dEl.value = new Date().toISOString().slice(0,10);
-  // 归属：默认本账号（用哪个号登录就归哪个号）
+  // 📒 账本归属：老板有最大权限（能打开任何人的账本）；其他人只能看自己的账
   const onEl = document.getElementById('ledOwnerName');
-  if(onEl && CUR_USER && CUR_USER.name) onEl.textContent = CUR_USER.name;
+  const noteEl = document.getElementById('ledBookNote');
+  const myName = (CUR_USER && (CUR_USER.name || CUR_USER.username)) || '本账号';
+  const myId = String((CUR_USER||{}).id||'');
+  let bookName = myName, blocked = false;
+  if(IS_BOSS){
+    if(finBy === '') bookName = '全部人的账';
+    else if(finBy === 'me') bookName = myName;
+    else if(finBy === '0') bookName = '未标注';
+    else {
+      const u = (SIGNERS||[]).find(s => String(s.id) === String(finBy));
+      bookName = u ? finShortSign(u) : myName;
+    }
+  } else if(finBy && finBy !== 'me' && String(finBy) !== myId && String(finBy) !== '0'){
+    blocked = true;   // 别人的账本打不开：下面仍然只显示自己的账
+  }
+  curBookName = bookName;
+  if(onEl) onEl.textContent = bookName;
+  if(noteEl){
+    noteEl.textContent = blocked
+      ? '· 别人的账本打不开，下面仍是「'+bookName+'」的账'
+      : (IS_BOSS ? '· 你有最大权限：点上方「归属」可打开任何人的账本'
+                 : '· 记一笔会自动归到你的账本');
+    noteEl.style.display = noteEl.textContent ? '' : 'none';
+  }
   const mEl = document.getElementById('ledgerMonth');
   const month = mEl.value || fmtDate(new Date()).slice(0,7);
   mEl.value = month;
   if(typeof loadLabor==='function') loadLabor();
   loadChannelProgress();
-  fetchJSONRetry('/api/finance/expense-summary?month='+encodeURIComponent(month)).then(s=>{
+  const byQ = finBy ? '&by='+encodeURIComponent(finBy) : '';
+  fetchJSONRetry('/api/finance/expense-summary?month='+encodeURIComponent(month)+byQ).then(s=>{
     const d = s&&s.data || {};
     const pm = month.split('-');
     const last = new Date(+pm[0], +pm[1], 0).getDate();
