@@ -275,7 +275,7 @@
       <input type="month" id="ledgerMonth" class="range-date" onchange="loadLedger()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
       <select id="ledgerChannel" class="select-mini" onchange="loadLedger()">
         <option value="">全部渠道</option>
-        <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+        <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
       </select>
       <select id="ledgerCost" class="select-mini" onchange="loadLedger()">
         <option value="">全部</option><option value="1">仅计入成本</option><option value="0">不计入成本</option>
@@ -288,7 +288,7 @@
     <!-- 录入方式切换 -->
     <div class="range-tabs" style="margin:6px 0 8px;display:flex;flex-wrap:wrap;max-width:100%">
       <button class="range-tab active" data-lm="manual" onclick="setLedgerMode('manual')">＋ 记一笔</button>
-      <button class="range-tab" data-lm="csv" onclick="setLedgerMode('csv')">📄 导入微信账单</button>
+      <button class="range-tab" data-lm="csv" onclick="setLedgerMode('csv')">📄 导入账单(微信/支付宝)</button>
       <button class="range-tab" data-lm="text" onclick="setLedgerMode('text')">📋 粘贴账单文字识别</button>
       <button class="range-tab" data-lm="resume" onclick="setLedgerMode('resume')">🔄 对账看板</button>
     </div>
@@ -321,7 +321,7 @@
           <div class="led-field">
             <label>从哪付的（渠道）</label>
             <select id="e_channel">
-              <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+              <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
             </select>
           </div>
           <div class="led-field">
@@ -393,7 +393,13 @@
 
     <!-- 导入微信账单 CSV（真账来源：一次抓整月付款，零识别误差） -->
     <div id="ledgerCsv" style="display:none">
-      <div class="led-tip">📄 <b>把微信账单导出来传这</b>（每月一次，最准、一条不漏）：微信 → 我 → 服务 → 钱包 → <b>账单</b> → 右上角「常见问题」→ <b>下载账单</b> → 选「用于个人对账」→ 选月份 → 填邮箱收压缩包 → 用短信里的解压码解压 → 把里面的 <b>.csv</b> 传上来。<br>系统自动只取「支出」那些笔，列成「待对账」清单，你逐条补一下买了啥就完事——再也不用月底翻聊天记录一笔笔对。</div>
+      <div class="led-tip">📄 <b>把账单导出来传这</b>（每月一次，最准、一条不漏）：微信 → 我 → 服务 → 钱包 → <b>账单</b> → 右上角「常见问题」→ <b>下载账单</b> → 选「用于个人对账」→ 选月份 → 填邮箱收压缩包 → 用短信里的解压码解压 → 把里面的 <b>.csv</b> 传上来（支付宝同理：我的 → 账单 → 右上角「…」→ 开具交易流水证明）。<br>系统自动只取「支出」那些笔，列成「待对账」清单，你逐条补一下买了啥就完事——再也不用月底翻聊天记录一笔笔对。</div>
+      <div style="margin:8px 0 6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <label style="font-size:12px;color:#666">这笔账单来自：</label>
+        <select id="csvChannel" class="select-mini">
+          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
+        </select>
+      </div>
       <input type="file" id="csvFile" accept=".csv,.txt" onchange="importCsv(this)" style="font-size:13px;width:100%;max-width:100%;box-sizing:border-box">
       <div id="csvResult" style="margin-top:10px"></div>
     </div>
@@ -403,7 +409,7 @@
       <textarea id="e_text" placeholder="把微信/支付宝/淘宝/1688 的账单文字粘进来，一行一笔。系统自动拆出 日期 / 商户 / 金额，你勾选要记的即可。例：&#10;2026-09-12 12:34 美团 支出 ¥128.00 牛肉&#10;2026-09-13 京东 支出 ¥59.90 炭火" style="width:100%;height:120px;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;font-family:inherit"></textarea>
       <div style="margin:8px 0 2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="e_text_channel" class="select-mini">
-          <option>微信</option><option>支付宝</option><option>淘宝</option><option>1688</option><option>银行</option><option>现金</option><option>其他</option>
+          <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>1688</option><option>阿里</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
         </select>
         <button class="btn btn-sm btn-primary" onclick="parseText()">🔍 识别</button>
         <button class="btn btn-sm" onclick="saveStatement()">📥 识别并存入「待对账」</button>
@@ -1955,7 +1961,8 @@ function importCsv(input){
   fr.onload = function(){
     const text = _decodeBill(fr.result);
     if(!text || !text.trim()){ box.innerHTML='<div class="resume-empty">文件读不出内容，确认传的是账单 .csv</div>'; return; }
-    fetch('/api/finance/expense-statement/csv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text, channel:'微信'})})
+    const ch = (document.getElementById('csvChannel')||{}).value || '微信';
+    fetch('/api/finance/expense-statement/csv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text, channel:ch})})
       .then(r=>r.json()).then(d=>{
         if(!d.ok){ box.innerHTML='<div class="resume-empty">导入失败：'+escHtml(d.msg||'')+'</div>'; return; }
         if(!(d.lines||[]).length){ box.innerHTML='<div class="resume-empty">没读到「支出」记录，确认选的是「用于个人对账」的账单</div>'; return; }
