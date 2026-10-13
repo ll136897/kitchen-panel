@@ -160,6 +160,12 @@
   .led-owner b{color:#2f7d32}
   .led-book-note{color:#8a6d4f;font-size:11px;margin-left:4px}
   @media(max-width:600px){ .led-book-note{display:none} }
+  /* 记账三步走引导条：把"我该先干嘛"直接写在最上面 */
+  .led-steps{background:#fdf6ec;border:1px solid #f0dfc4;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12px;color:#6b4f3a;line-height:1.8}
+  .led-steps .st{display:block}
+  .led-steps b{color:#b9770e}
+  .led-step-chip{display:inline-block;background:#b9770e;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;margin-right:5px;font-weight:700}
+  @media(max-width:600px){ .led-steps .led-step-txt{display:none} .led-steps{line-height:2.1} }
   .led-autocat{font-size:11px;color:#2f7d32;margin-top:2px;min-height:14px}
   .led-autocat.empty{color:#a08c7a}
   .led-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
@@ -274,11 +280,18 @@
     </div>
   </div>
 
-  <!-- ===== 门店支出台账（2026-10-08）===== -->
+  <!-- ===== 记账 / 报销（2026-10-08）===== -->
   <div class="fin-card" id="ledgerCard">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-      <div class="sec-title" style="margin:0"><span class="dot" style="background:#9b59b6"></span>🧾 门店支出台账</div>
-      <div style="font-size:11px;color:#888">各渠道支出统一记这里 · 自动对账不丢项</div>
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#9b59b6"></span>📒 记账 · 月底交财务</div>
+      <div style="font-size:11px;color:#888">不用再手工誊一遍，导进来就行</div>
+    </div>
+
+    <!-- 三步走：把"我到底该先干嘛"直接写在最上面 -->
+    <div class="led-steps">
+      <span class="st"><span class="led-step-chip">1</span>在<b>微信 / 支付宝</b>里把账单导出来<span class="led-step-txt">（微信：我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→ 下载账单 → 选「用于个人对账」；支付宝：我的 → 账单 → 右上角「…」→ 开具交易流水证明）</span></span>
+      <span class="st"><span class="led-step-chip">2</span>点下面「① 导入账单」把文件传上来，系统自动列出<b>每一笔支出</b></span>
+      <span class="st"><span class="led-step-chip">3</span>逐条补一下<b>买了啥、什么用途</b>，最后点「导出」拿表格交财务</span>
     </div>
 
     <!-- 概览 KPI -->
@@ -291,27 +304,27 @@
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 4px">
       <input type="month" id="ledgerMonth" class="range-date" onchange="loadLedger()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
       <select id="ledgerChannel" class="select-mini" onchange="loadLedger()">
-        <option value="">全部渠道</option>
+        <option value="">全部 APP</option>
         <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
       </select>
       <select id="ledgerCost" class="select-mini" onchange="loadLedger()">
-        <option value="">全部</option><option value="1">仅计入成本</option><option value="0">不计入成本</option>
+        <option value="">全部</option><option value="1">算进成本的</option><option value="0">不算成本的</option>
       </select>
       <input type="text" id="ledgerQ" placeholder="🔍 搜索物料/商户" oninput="debounceLedger()" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;flex:1 1 120px;min-width:90px">
       <button class="btn btn-sm" onclick="exportLedger()">⬇ 导出本月 CSV</button>
       <button class="btn btn-sm" onclick="exportSales()" title="导出销售流水表（含兼职工资分摊与净到手）">⬇ 导出销售流水表</button>
     </div>
 
-    <!-- 录入方式切换 -->
+    <!-- 录入方式：按上面三步的顺序排，先做哪个就点哪个 -->
     <div class="range-tabs" style="margin:6px 0 8px;display:flex;flex-wrap:wrap;max-width:100%">
-      <button class="range-tab active" data-lm="manual" onclick="setLedgerMode('manual')">＋ 记一笔</button>
-      <button class="range-tab" data-lm="csv" onclick="setLedgerMode('csv')">📄 导入账单(微信/支付宝)</button>
-      <button class="range-tab" data-lm="text" onclick="setLedgerMode('text')">📋 粘贴账单文字识别</button>
-      <button class="range-tab" data-lm="resume" onclick="setLedgerMode('resume')">🔄 对账看板</button>
+      <button class="range-tab active" data-lm="csv" onclick="setLedgerMode('csv')">① 导入账单</button>
+      <button class="range-tab" data-lm="resume" onclick="setLedgerMode('resume')">② 补记（还没填用途的）</button>
+      <button class="range-tab" data-lm="manual" onclick="setLedgerMode('manual')">③ 手动记一笔</button>
+      <button class="range-tab" data-lm="text" onclick="setLedgerMode('text')">📋 粘贴文字识别</button>
     </div>
 
     <!-- 手动录入 -->
-    <div id="ledgerManual">
+    <div id="ledgerManual" style="display:none">
       <div class="led-tip">👇 只要 <b>3 样</b> 就能存：<b>日期（默认今天）、用途、金额</b>。渠道默认「微信」，分类/购物人等都不用管——系统会按用途自动归类，导出时再补齐成完整表格。要一次记很多笔？用上方「📋 粘贴账单文字识别」。</div>
       <div class="led-owner">📒 当前账本：<b id="ledOwnerName">本账号</b><span class="led-book-note" id="ledBookNote"></span></div>
       <div class="led-link-tip" id="ledManualTip" style="display:none"></div>
@@ -333,10 +346,10 @@
 
       <!-- 其余全部收起：绝大多数情况不用碰 -->
       <details class="led-more">
-        <summary>更多（渠道 / 供应商 / 分类 / 规格 / 购物人 … 一般不填）</summary>
+        <summary>更多（哪个 APP 付的 / 商户 / 分类 … 一般不用填）</summary>
         <div class="led-2col" style="margin-top:10px">
           <div class="led-field">
-            <label>从哪付的（渠道）</label>
+            <label>从哪个 APP 付的</label>
             <select id="e_channel">
               <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
             </select>
@@ -397,20 +410,20 @@
           <input id="e_note" placeholder="可空">
         </div>
         <div class="led-field">
-          <label>成本归类（计入成本才进利润核算）</label>
+          <label>算到哪类成本里</label>
           <select id="e_costkind">
             <option value="food">食材</option><option value="outsource">搭建/场地</option><option value="fuel">配送</option><option value="labor">人工</option><option value="consume">耗材</option><option value="other">其他</option>
           </select>
         </div>
-        <label class="led-check"><input type="checkbox" id="e_iscost" checked> 计入成本（勾上才会算进「含门店支出净利」）</label>
+        <label class="led-check"><input type="checkbox" id="e_iscost" checked> 算进成本（勾上才算进利润，不勾就只是记个账）</label>
       </details>
 
       <button class="btn btn-primary" style="margin-top:14px;width:100%;padding:12px;font-size:15px" onclick="saveExpense()">💾 保存这笔</button>
     </div>
 
     <!-- 导入微信账单 CSV（真账来源：一次抓整月付款，零识别误差） -->
-    <div id="ledgerCsv" style="display:none">
-      <div class="led-tip">📄 <b>把账单导出来传这</b>（每月一次，最准、一条不漏）：微信 → 我 → 服务 → 钱包 → <b>账单</b> → 右上角「常见问题」→ <b>下载账单</b> → 选「用于个人对账」→ 选月份 → 填邮箱收压缩包 → 用短信里的解压码解压 → 把里面的 <b>.csv</b> 传上来（支付宝同理：我的 → 账单 → 右上角「…」→ 开具交易流水证明）。<br>系统自动只取「支出」那些笔，列成「待对账」清单，你逐条补一下买了啥就完事——再也不用月底翻聊天记录一笔笔对。</div>
+    <div id="ledgerCsv">
+      <div class="led-tip">📄 <b>把账单导出来传这</b>（每月一次，最准、一条不漏）：微信 → 我 → 服务 → 钱包 → <b>账单</b> → 右上角「常见问题」→ <b>下载账单</b> → 选「用于个人对账」→ 选月份 → 填邮箱收压缩包 → 用短信里的解压码解压 → 把里面的 <b>.csv</b> 传上来（支付宝同理：我的 → 账单 → 右上角「…」→ 开具交易流水证明）。<br>系统自动只取「支出」那些笔列成清单，你逐条补一下买了啥就完事——再也不用月底翻聊天记录一笔笔对。</div>
       <div style="margin:8px 0 6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;color:#666">这笔账单来自：</label>
         <select id="csvChannel" class="select-mini">
@@ -429,8 +442,8 @@
           <option>微信</option><option>支付宝</option><option>美团</option><option>拼多多</option><option>闲鱼</option><option>淘宝</option><option>阿里巴巴</option><option>投放</option><option>配送费</option><option>银行</option><option>现金</option><option>其他</option>
         </select>
         <button class="btn btn-sm btn-primary" onclick="parseText()">🔍 识别</button>
-        <button class="btn btn-sm" onclick="saveStatement()">📥 识别并存入「待对账」</button>
-        <span class="led-tip" style="margin:0">先「识别」看效果；确认没问题再「存入待对账」，下次可「继续上次对账」接着记、绝不丢项。</span>
+        <button class="btn btn-sm" onclick="saveStatement()">📥 识别并存起来</button>
+        <span class="led-tip" style="margin:0">先「识别」看效果；确认没问题再存起来，下次接着补，绝不丢项。</span>
       </div>
       <div id="parseResult"></div>
     </div>
@@ -539,11 +552,16 @@
     </div>
   </div>
 
-  <!-- 食材成本管理（改价后全局同步） -->
+  <!-- 原数据管理：食材 / 耗材 / 工具 的单价都在这里改（改价后全局同步） -->
   <div class="fin-card" id="ingCard">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-      <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>🥩 食材单价管理</div>
-      <div style="font-size:11px;color:#888">改价后自动同步到所有菜单/订单成本</div>
+      <div class="sec-title" style="margin:0"><span class="dot" style="background:#c0392b"></span>⚙️ 原数据 · 单价管理</div>
+      <div style="font-size:11px;color:#888">改一次价，所有订单成本自动跟着变</div>
+    </div>
+    <div class="range-tabs" style="margin:8px 0 4px;display:flex;flex-wrap:wrap;max-width:100%">
+      <button class="range-tab active" data-md="ing" onclick="setMasterTab('ing')">🥩 食材</button>
+      <button class="range-tab" data-md="consume" onclick="setMasterTab('consume')">🧻 耗材</button>
+      <button class="range-tab" data-md="tool" onclick="setMasterTab('tool')">🔧 工具 / 装备</button>
     </div>
     <div style="margin:8px 0">
       <input type="text" id="costSearch" placeholder="🔍 搜索食材..." oninput="filterCostItems()" style="width:100%;max-width:240px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
@@ -1557,18 +1575,56 @@ function saveCfg(){
     });
 }
 
-// ===== 食材单价 =====
+// ===== 原数据 · 单价管理（食材 / 耗材 / 工具 三合一）=====
+// 耗材 = 包装 + 餐具（同样是 ingredients，只是 category 不同）；工具 = tools 表。
+// 三块都在这里改，省得为了改一个价要跑好几个页面。
 let allCostItems = [];
+let masterTab = 'ing';                       // ing=食材 / consume=耗材 / tool=工具装备
+const CONSUME_CATS = ['packaging','utensil'];
+const MASTER_PH = {ing:'🔍 搜索食材...', consume:'🔍 搜索耗材...', tool:'🔍 搜索工具...'};
+function setMasterTab(t){
+  masterTab = t;
+  document.querySelectorAll('.range-tab[data-md]').forEach(b=>b.classList.toggle('active', b.dataset.md===t));
+  const ph = document.getElementById('costSearch');
+  if(ph) ph.placeholder = MASTER_PH[t] || '🔍 搜索...';
+  loadCostItems();
+}
 function loadCostItems(){
+  if(masterTab === 'tool'){
+    fetchJSONRetry('/api/tools').then(d=>{
+      if(!d || !d.ok) return;
+      allCostItems = (d.data||[]).map(t=>({
+        id:t.id, name:t.name, category:'tool', unit:'个',
+        cost:t.cost||0, stock:t.stock||0,
+        avail:(t.avail!=null?t.avail:t.stock), reserved:t.reserved||0
+      }));
+      allCostItems.sort((a,b)=>a.name.localeCompare(b.name,'zh'));
+      renderCostItems(allCostItems);
+    });
+    return;
+  }
   fetchJSONRetry('/api/ingredients').then(d=>{
     if(!d || !d.ok) return;
-    allCostItems = (d.data||[]).filter(i=>i.category !== 'packaging' && i.category !== 'utensil');
-    const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
-    allCostItems.sort((a,b)=>{
-      const ia = order.indexOf(a.category), ib = order.indexOf(b.category);
-      if(ia!==ib) return ia-ib;
-      return a.name.localeCompare(b.name,'zh');
+    const wantConsume = (masterTab === 'consume');
+    allCostItems = (d.data||[]).filter(i=>{
+      const isConsume = CONSUME_CATS.indexOf(i.category) >= 0;
+      return wantConsume ? isConsume : !isConsume;
     });
+    if(wantConsume){
+      const corder = ['packaging','utensil'];
+      allCostItems.sort((a,b)=>{
+        const ia = corder.indexOf(a.category), ib = corder.indexOf(b.category);
+        if(ia!==ib) return ia-ib;
+        return a.name.localeCompare(b.name,'zh');
+      });
+    } else {
+      const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
+      allCostItems.sort((a,b)=>{
+        const ia = order.indexOf(a.category), ib = order.indexOf(b.category);
+        if(ia!==ib) return ia-ib;
+        return a.name.localeCompare(b.name,'zh');
+      });
+    }
     renderCostItems(allCostItems);
   });
 }
@@ -1611,7 +1667,25 @@ function portionCost(i){
 
 function renderCostItems(items){
   const grid = document.getElementById('costGrid');
-  if(!items.length){ grid.innerHTML = '<div class="muted" style="padding:20px">暂无食材</div>'; return; }
+  if(!grid) return;
+  const emptyTxt = masterTab==='tool' ? '还没有工具 / 装备' : (masterTab==='consume' ? '还没有耗材' : '暂无食材');
+  if(!items.length){ grid.innerHTML = '<div class="muted" style="padding:20px">'+emptyTxt+'</div>'; return; }
+  if(masterTab === 'tool'){
+    // 工具只有"一个多少钱"，没有采购单位换算，卡片做得更简单
+    grid.innerHTML = items.map(i=>`
+      <div class="cost-item" id="costItem-${i.id}">
+        <div class="nm">${escHtml(i.name)}</div>
+        <div class="cat">工具 / 装备 · 单位 个</div>
+        <div class="prow">
+          <span>¥</span>
+          <input type="number" id="pprice-${i.id}" value="${(parseFloat(i.cost||0)||0).toFixed(2)}" step="0.1" min="0"
+            onchange="saveToolPrice(${i.id}, this.value)">
+          <span style="font-size:11px;color:#8a7364;font-weight:600">/ 个</span>
+        </div>
+        <div class="ref" style="color:#8a7364">库存 ${i.stock} 个${i.reserved?(' · 订单占用 '+i.reserved):''}</div>
+      </div>`).join('');
+    return;
+  }
   grid.innerHTML = items.map(i=>{
     const f = parseFloat(i.purchase_factor||1) || 1;
     const pp = (parseFloat(i.cost||0) * f);
@@ -1684,6 +1758,16 @@ function applySpec(iid){
     body:JSON.stringify({item_type:'ingredient', purchase_unit: unit, purchase_factor: f,
                          purchase_price: keepPrice})})
     .then(r=>r.json()).then(()=>{ showRefreshToast(); loadAll(); });
+}
+// 工具/装备单价：走同一个成本接口，只是 item_type 标成 tool（后端改 tools.cost）
+function saveToolPrice(iid, val){
+  fetch(`/api/ingredients/${iid}/cost`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({item_type:'tool', cost: parseFloat(val||0)})})
+    .then(r=>r.json()).then(()=>{
+      const item = document.getElementById('costItem-'+iid);
+      if(item){ item.classList.add('saved'); setTimeout(()=>item.classList.remove('saved'), 1200); }
+      showRefreshToast(); loadAll();
+    });
 }
 function filterCostItems(){
   const kw = document.getElementById('costSearch').value.trim().toLowerCase();
@@ -1808,15 +1892,15 @@ function loadLedger(){
 function renderLedgerKpi(d, cash, net){
   d = d||{};
   document.getElementById('ledgerKpi').innerHTML =
-    '<div class="fin-kpi-item neutral"><div class="lbl">🧾 本月门店支出</div><div class="val">'+fmtY(d.total||0)+'</div><div class="sub">'+(d.count||0)+' 笔</div></div>'
-    +'<div class="fin-kpi-item negative"><div class="lbl">💸 计入成本</div><div class="val">'+fmtY(d.cost_total||0)+'</div><div class="sub">已记入利润成本</div></div>'
-    +'<div class="fin-kpi-item neutral" style="cursor:pointer" onclick="setLedgerMode(\'resume\')" title="点这里看未入账清单并补记"><div class="lbl">⏳ 待对账 · 点我补记</div><div class="val">'+fmtY(d.unmatched_amount||0)+'</div><div class="sub">'+(d.unmatched_count||0)+' 行未记 ›</div></div>'
-    +'<div class="fin-kpi-item '+(net>=0?'positive':'negative')+'"><div class="lbl">📉 含门店支出净利</div><div class="val">'+fmtY(net)+'</div><div class="sub">现金利润 '+fmtY(cash)+' − 成本支出</div></div>';
+    '<div class="fin-kpi-item neutral"><div class="lbl">🧾 本月支出</div><div class="val">'+fmtY(d.total||0)+'</div><div class="sub">'+(d.count||0)+' 笔</div></div>'
+    +'<div class="fin-kpi-item negative"><div class="lbl">💸 算进成本的</div><div class="val">'+fmtY(d.cost_total||0)+'</div><div class="sub">会算进利润里</div></div>'
+    +'<div class="fin-kpi-item neutral" style="cursor:pointer" onclick="setLedgerMode(\'resume\')" title="点这里看还没填用途的支出，逐条补"><div class="lbl">⏳ 还没填用途 · 点我补</div><div class="val">'+fmtY(d.unmatched_amount||0)+'</div><div class="sub">'+(d.unmatched_count||0)+' 笔待补 ›</div></div>'
+    +'<div class="fin-kpi-item '+(net>=0?'positive':'negative')+'"><div class="lbl">📉 扣掉支出后利润</div><div class="val">'+fmtY(net)+'</div><div class="sub">现金利润 '+fmtY(cash)+' − 成本支出</div></div>';
 }
 
 function renderLedgerList(rows){
   const tb = document.querySelector('#ledgerTable tbody');
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:18px">这个月还没有门店支出记录</td></tr>'; return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:18px">这个月还没记过账 · 点上面「① 导入账单」把微信 / 支付宝账单传上来</td></tr>'; return; }
   tb.innerHTML = rows.map(r=>{
     const cost = r.is_cost ? '<span class="badge badge-cost">计入</span>' : '<span class="badge badge-nocost">不计入</span>';
     const cat = [r.cat1, r.cat2].filter(Boolean).join('/');
@@ -1929,7 +2013,7 @@ function renderParseRows(container, lines, opts){
   }).join('');
   const foot = '<div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<button class="btn btn-sm btn-primary" onclick="saveParseRows(\''+container.id+'\','+(opts.link?1:0)+')">'+ (opts.saveLabel||'保存勾选为支出') +'</button>'
-    +'<span class="led-tip" style="margin:0">只保存勾选的行；没勾的留在「待对账」，下次继续。</span></div>';
+    +'<span class="led-tip" style="margin:0">只保存勾选的行；没勾的留着，下次继续。</span></div>';
   container.innerHTML = head+rows+foot;
 }
 
@@ -1955,8 +2039,8 @@ function saveParseRows(cid, link){
   fetch('/api/finance/expense/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items, link_statement:!!link})})
     .then(r=>r.json()).then(d=>{
       if(d.ok){ showRefreshToast(); loadLedger();
-        if(cid==='parseResult') document.getElementById('parseResult').innerHTML='<div class="resume-empty">已保存 '+d.saved+' 笔。还有要记的，再粘一段或去「对账看板」。</div>';
-        if(cid==='csvResult') document.getElementById('csvResult').innerHTML='<div class="resume-empty">已从账单记入 '+d.saved+' 笔。没记的还留在「对账看板」里，随时补。</div>';
+        if(cid==='parseResult') document.getElementById('parseResult').innerHTML='<div class="resume-empty">已保存 '+d.saved+' 笔。还有要记的，再粘一段或去「② 补记」。</div>';
+        if(cid==='csvResult') document.getElementById('csvResult').innerHTML='<div class="resume-empty">已从账单记入 '+d.saved+' 笔。没记的还留在「② 补记」里，随时补。</div>';
       } else alert(d.msg||'保存失败');
     });
 }
@@ -1981,10 +2065,10 @@ function loadResume(){
     box.innerHTML = html;
     fetchJSONRetry('/api/finance/expense-statement').then(d=>{
       const sarr = (d&&d.data)||[];
-      if(!sarr.length){ box.insertAdjacentHTML('beforeend','<div class="resume-empty">还没导入过账单。去「📄 导入微信账单」传一份，或「📋 粘贴账单文字识别」。</div>'); return; }
+      if(!sarr.length){ box.insertAdjacentHTML('beforeend','<div class="resume-empty">还没导入过账单。去「① 导入账单」传一份，或用「粘贴文字识别」。</div>'); return; }
       box.insertAdjacentHTML('beforeend', sarr.map(s=>{
         const dt = (s.created_at||'').slice(0,16).replace('T',' ');
-        return '<div class="resume-item"><div class="meta"><b>'+escHtml(s.channel)+'</b> · '+dt+' · 共 '+s.line_count+' 行 · 待对账 <b>'+s.unmatched+'</b> 行</div>'
+        return '<div class="resume-item"><div class="meta"><b>'+escHtml(s.channel)+'</b> · '+dt+' · 共 '+s.line_count+' 笔 · 还没填用途 <b>'+s.unmatched+'</b> 笔</div>'
           +'<button class="btn btn-sm" onclick="resumeStatement('+s.id+')">继续('+s.unmatched+')</button></div>';
       }).join(''));
     });
