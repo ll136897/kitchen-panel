@@ -118,6 +118,61 @@ def outsource_units(people, pkg_qty, per_unit=10):
     return max(1, by_people, pkg_qty)
 
 
+# 半包（不搭建）判定里的租赁关键词
+_RENT_KW = ("桌椅", "卡式炉", "气罐", "烤盘", "租赁", "出租", "租用")
+
+
+def _order_setup(db, o, cfg):
+    """搭建判定（0/1）：手工 setup_flag 优先；否则按价格推导。
+    规则与 app._guess_setup_and_fee 一致——半包(金额≈正价−搭建费)即不搭建。
+    无正价信息时保守返回 0（不搭建），避免误收搭建费。"""
+    sf = o.get("setup_flag")
+    if sf is not None:
+        return 1 if sf == 1 else 0
+    address = (o.get("address") or "")
+    amount = float(o.get("amount") or 0)
+    note = (o.get("note") or "")
+    row = db.execute(
+        """SELECT COALESCE(SUM(COALESCE(op.price, p.price) * op.quantity), 0) AS pt,
+                  COALESCE(SUM(op.quantity), 0) AS qty
+           FROM order_packages op LEFT JOIN packages p ON p.id = op.package_id
+           WHERE op.order_id = ?""", (o.get("id"),)).fetchone()
+    total = float(row["pt"] or 0)
+    qty = int(row["qty"] or 1) or 1
+    if total <= 0:
+        return 0
+    place = match_place(address, cfg)
+    unit = float((place or {}).get("outsource") if place else cfg.get("default_outsource", 100) or 0)
+    half = total - unit * qty
+    if amount >= total - 0.5:
+        return 1
+    if amount <= half + 0.5:
+        return 0
+    for kw in _RENT_KW:
+        if kw in note:
+            return 0
+    return 1 if abs(amount - total) <= abs(amount - half) else 0
+
+
+def _delivery_cost(o, setup):
+    """不搭建单的配送费（搭建单的配送已含在搭建费里，返回0）：
+      · 自提/老板送/顺带/自己送 → 0
+      · 平台配送(滴滴/闪送/货拉拉…) → 用记录的 delivery_fee；没记录则暂计0
+      · 空（未标注配送方式）→ 暂计0，提示补录
+    注：青龙湖起步的滴滴/闪送费若未逐笔录入，这里会低估，属已知缺口。"""
+    if setup == 1:
+        return 0.0, "搭建单：配送含在搭建费内"
+    dp = (o.get("delivery_person") or "").strip()
+    if any(k in dp for k in ("自提", "自送", "老板", "顺带", "自己", "门店", "自取")):
+        return 0.0, "自提/老板送：配送费0"
+    df = o.get("delivery_fee")
+    if df is not None:
+        return float(df), "配送费 ¥%g（%s）" % (float(df), dp or "未标配送人")
+    if dp:
+        return 0.0, "平台配送（%s）：未记录配送费，暂计0" % dp
+    return 0.0, "不搭建：未标注配送方式，暂计0（平台配送请补录配送费）"
+
+
 # ---------- 成本明细 ----------
 def _food_cost(db, oid):
     """食材成本 = 套餐配量×份数×单价 + 单点加菜 + 备注加菜（含 set 覆盖 / add 增量）"""
@@ -189,11 +244,14 @@ def _overrides(db, oid):
     return fixed, extras
 
 
-def _auto_items(db, oid, cfg):
-    """自动算出的成本项（未手工覆盖前的默认值）"""
+def _auto_items(db, oid, cfg, setup=None):
+    """自动算出的成本项（未手工覆盖前的默认值）。
+    搭建费：仅搭建(全包)单征收；不搭建(半包/自送)一律不计。
+    配送费：仅不搭建单、且为平台配送时计（自提/老板送=0）。"""
     cur = db.cursor()
-    o = cur.execute("SELECT address FROM orders WHERE id=?", (oid,)).fetchone()
-    address = (o["address"] if o else "") or ""
+    o = cur.execute("SELECT address, setup_flag, delivery_person, delivery_fee FROM orders WHERE id=?", (oid,)).fetchone()
+    o = dict(o) if o else {}
+    address = (o.get("address") or "") or ""
     r = cur.execute("""
         SELECT COALESCE(SUM(op.quantity),0) AS qty, COALESCE(SUM(op.people),0) AS people
         FROM order_packages op WHERE op.order_id=?
@@ -201,6 +259,8 @@ def _auto_items(db, oid, cfg):
     place = match_place(address, cfg)
     out_price = float((place or {}).get("outsource") if place else cfg.get("default_outsource", 100) or 0)
     units = outsource_units(r["people"], r["qty"], cfg.get("people_per_unit", 10))
+    if setup is None:
+        setup = _order_setup(db, o, cfg)
     d = cfg.get("defaults", {})
     # 打包切配人工：首单 + 每多一个"单"（单价更低，单越大越省）
     l_first = float(cfg.get("labor_first", 40) or 0)
@@ -208,11 +268,20 @@ def _auto_items(db, oid, cfg):
     extra = max(0, units - 1)
     labor_auto = round(l_first + l_per * extra, 2)
     labor_detail = ("首单 ¥%g" % l_first) if extra == 0 else ("首单 ¥%g + %d 个多单 × ¥%g" % (l_first, extra, l_per))
+    # —— 搭建费：仅搭建(全包)单；不搭建(半包/自送)不计 ——
+    if setup == 1:
+        outsource_amount = round(units * out_price, 2)
+        outsource_detail = "%d单 × ¥%g（%s）" % (units, out_price, (place or {}).get("name") or "默认价")
+    else:
+        outsource_amount = 0.0
+        outsource_detail = "不搭建（半包/自送）：无搭建费"
+    # —— 配送费：仅不搭建单、且为平台配送；自提/老板送=0 ——
+    fuel_amount, fuel_detail = _delivery_cost(o, setup)
     return {
         "food": {"amount": _food_cost(db, oid)},
-        "outsource": {"amount": round(units * out_price, 2), "qty": units, "unit_price": out_price,
-                      "detail": "%d单 × ¥%g（%s）" % (units, out_price, (place or {}).get("name") or "默认价")},
-        "fuel": {"amount": float((place or {}).get("fuel") if place and (place or {}).get("fuel") else d.get("fuel", 0) or 0)},
+        "outsource": {"amount": outsource_amount, "qty": units, "unit_price": out_price,
+                      "detail": outsource_detail},
+        "fuel": {"amount": fuel_amount, "detail": fuel_detail},
         "labor": {"amount": labor_auto, "detail": labor_detail},
         "consume": {"amount": float(d.get("consume", 0) or 0)},
     }
@@ -227,7 +296,8 @@ def order_profit(db, oid, cfg=None):
         return None
     o = dict(o)
     revenue = float(o.get("amount") or 0)
-    auto = _auto_items(db, oid, cfg)
+    setup = _order_setup(db, o, cfg)
+    auto = _auto_items(db, oid, cfg, setup=setup)
     fixed, extras = _overrides(db, oid)
 
     items, cost_total = [], 0.0
