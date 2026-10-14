@@ -78,6 +78,17 @@
   .pf-row input{width:76px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:13px;text-align:right;font-weight:700;box-sizing:border-box}
   .pf-row input.name{width:96px;text-align:left;font-weight:600}
   .pf-row .eq{font-size:12px;color:#8a7364}
+  /* 统一「金额列」：收入/各项成本/成本合计 都靠右对齐到同一列 */
+  .pf-val{font-size:15px;font-weight:800;white-space:nowrap}
+  .pf-val.out{color:#c0392b}              /* 流出（成本）：红 */
+  .pf-total .pf-val.in{color:#1b7a43}     /* 流入（收入）：绿 */
+  .pf-total.big .pf-val{font-size:17px}  /* 合计更大更重 */
+  .pf-row .pf-val{margin-left:auto}
+  .pf-row .pf-ctl{display:inline-flex;align-items:center;gap:5px;flex:0 1 auto}
+  .pf-cost-h{font-weight:700;font-size:13px;margin:10px 0 2px;padding-top:8px;border-top:1px dashed #e8e0d4;color:#7a5a44}
+  .pf-food-btn{font-size:11px;padding:2px 8px}
+  .pf-food-flash{animation:pfFlash 1.2s ease-out}
+  @keyframes pfFlash{0%{background:#fff3cd;box-shadow:0 0 0 3px #ffe08a}100%{background:transparent;box-shadow:0 0 0 0 transparent}}
   .pf-total{display:flex;justify-content:space-between;padding:7px 0;font-size:13px}
   .pf-total.big{font-size:16px;font-weight:800;border-top:2px solid #3a2416;margin-top:6px;padding-top:9px}
   /* ===== 点数字看明细（财务软件式下钻）===== */
@@ -1470,42 +1481,35 @@ function renderPf(p){
 
   let html = renderOrderInfo(p.order);
   html += `<div class="pf-total big" style="border-top:none;padding-top:0">
-      <span>💵 收入（实收货款）</span><span>${fmtY(p.revenue)}</span></div>`;
-  html += `<div style="font-weight:700;font-size:13px;margin:6px 0 2px">💸 这单花在哪</div>`;
+      <span>💵 收入（实收货款）</span><span class="pf-val in">${fmtY(p.revenue)}</span></div>`;
+  html += `<div class="pf-cost-h">💸 这单花在哪（都从收入里扣）</div>`;
 
   p.items.forEach(it=>{
     if(it.kind === 'food'){
       html += `<div class="pf-row">
         <span class="nm">🥩 ${it.name}</span>
-        <b style="color:#c0392b">${fmtY(it.amount)}</b>
-        <button class="btn btn-sm" onclick="toggleFood()" style="font-size:11px;padding:3px 8px">看明细</button>
-        <div class="hint">${it.hint}</div>
+        <span class="pf-val out">${fmtY(it.amount)}</span>
+        <div class="hint">${it.hint} <button id="pfFoodBtn" class="btn btn-sm pf-food-btn" onclick="toggleFood()">看明细 ▾</button></div>
       </div>`;
     } else if(it.kind === 'outsource'){
       html += `<div class="pf-row">
         <span class="nm">🏕️ ${it.name} ${it.overridden?'<span class="pf-tag pf-warn">手改</span>':'<span class="pf-tag pf-ok">自动</span>'}</span>
-        <input type="number" step="1" id="pfQty" value="${it.qty!=null?it.qty:''}" title="单数"
-          onchange="pfSaveOut()">
-        <span class="eq">单 ×</span>
-        <input type="number" step="1" id="pfUp" value="${it.unit_price!=null?it.unit_price:''}" title="单价"
-          onchange="pfSaveOut()">
-        <span class="eq">＝ <b style="color:#c0392b">${fmtY(it.amount)}</b></span>
-        ${it.overridden?`<button class="btn btn-sm" onclick="pfClear('outsource')" style="font-size:11px;padding:3px 8px">恢复自动</button>`:''}
-        <div class="hint">${it.detail||it.hint}</div>
+        <span class="pf-ctl"><input type="number" step="1" id="pfQty" value="${it.qty!=null?it.qty:''}" title="单数" onchange="pfSaveOut()"> <span class="eq">单 ×</span>
+        <input type="number" step="1" id="pfUp" value="${it.unit_price!=null?it.unit_price:''}" title="单价" onchange="pfSaveOut()"></span>
+        <span class="pf-val out">＝ ${fmtY(it.amount)}</span>
+        <div class="hint">${it.detail||it.hint}${it.overridden?` <button class="btn btn-sm" onclick="pfClear('outsource')" style="font-size:10px;padding:1px 6px">恢复自动</button>`:''}</div>
       </div>`;
     } else if(it.kind === 'other'){
       html += `<div class="pf-row">
         <span class="nm">📌 ${it.name}</span>
-        <input type="number" step="1" value="${it.amount}" onchange="pfSave('other',{id:${it.id},name:'${(it.name||'').replace(/'/g,'')}',amount:this.value})">
-        <button class="btn btn-sm" onclick="pfClear('other',${it.id})" style="font-size:11px;padding:3px 8px">删除</button>
-        <div class="hint">${it.detail||it.hint}</div>
+        <input type="number" step="1" value="${it.amount}" style="margin-left:auto" onchange="pfSave('other',{id:${it.id},name:'${(it.name||'').replace(/'/g,'')}',amount:this.value})">
+        <div class="hint">${it.detail||it.hint} <button class="btn btn-sm" onclick="pfClear('other',${it.id})" style="font-size:10px;padding:1px 6px">删除</button></div>
       </div>`;
     } else {
       html += `<div class="pf-row">
         <span class="nm">${it.kind==='fuel'?'🚚':(it.kind==='labor'?'👷':'🔥')} ${it.name} ${it.overridden?'<span class="pf-tag pf-warn">手改</span>':'<span class="pf-tag pf-ok">自动</span>'}</span>
-        <input type="number" step="1" value="${it.amount}" onchange="pfSave('${it.kind}',{amount:this.value})">
-        ${it.overridden?`<button class="btn btn-sm" onclick="pfClear('${it.kind}')" style="font-size:11px;padding:3px 8px">恢复默认</button>`:''}
-        <div class="hint">${it.hint}</div>
+        <input type="number" step="1" value="${it.amount}" style="margin-left:auto" onchange="pfSave('${it.kind}',{amount:this.value})">
+        <div class="hint">${it.hint}${it.overridden?` <button class="btn btn-sm" onclick="pfClear('${it.kind}')" style="font-size:10px;padding:1px 6px">恢复默认</button>`:''}</div>
       </div>`;
     }
   });
@@ -1514,7 +1518,7 @@ function renderPf(p){
       <button class="btn btn-sm" onclick="addOther()">＋ 再加一项开销</button>
       <span class="hint" style="font-size:11px;color:#999">（临时帮工、罚款、加买的东西）</span>
     </div>`;
-  html += `<div class="pf-total big"><span>成本合计</span><span style="color:#c0392b">${fmtY(p.cost_total)}</span></div>`;
+  html += `<div class="pf-total big"><span>成本合计</span><span class="pf-val out">${fmtY(p.cost_total)}</span></div>`;
   html += `<div class="pf-total big"><span>现金利润</span><span class="v-${p.alert==='loss'?'loss':(p.alert==='warn'?'warn':'ok')}">${fmtY(p.cash_profit)}　<span class="pf-tag ${pfTagCls(p.alert)}">毛利率 ${p.margin}% · ${pfTxt(p.alert)}</span></span></div>`;
   if(p.fixed_alloc > 0){
     html += `<div class="pf-total"><span>固定开销摊销（每单）</span><span>-${fmtY(p.fixed_alloc)}</span></div>`;
@@ -1535,7 +1539,15 @@ function renderPf(p){
 
 function toggleFood(){
   const b = document.getElementById('pfFoodBox');
-  b.style.display = (b.style.display === 'none') ? 'block' : 'none';
+  const willOpen = (b.style.display === 'none');
+  b.style.display = willOpen ? 'block' : 'none';
+  const btn = document.getElementById('pfFoodBtn');
+  if(btn) btn.textContent = willOpen ? '收起明细 ▴' : '看明细 ▾';
+  if(willOpen){
+    // 明细在弹窗底部：滚到可见 + 高亮闪一下，避免「点了没反应」
+    b.scrollIntoView({behavior:'smooth', block:'nearest'});
+    b.classList.remove('pf-food-flash'); void b.offsetWidth; b.classList.add('pf-food-flash');
+  }
 }
 function loadPfFood(oid){
   fetch(`/api/finance/order/${oid}/cost-detail`).then(r=>r.json()).then(d=>{
