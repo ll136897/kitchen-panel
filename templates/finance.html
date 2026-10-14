@@ -322,6 +322,7 @@
         <option value="">全部</option><option value="刘">刘</option><option value="孙">孙</option>
       </select>
       <button class="btn btn-sm" onclick="exportSales()" title="导出销售流水表（含兼职工资分摊与净到手）">⬇ 导出销售流水表</button>
+      <button class="btn btn-sm" onclick="exportAllOrders()" title="导出全部订单完整明细（含搭建/不搭建、配送人、归属、状态、备注等），可按归属筛选">⬇ 导出所有订单</button>
     </div>
 
     <!-- 录入方式：按上面三步的顺序排，先做哪个就点哪个 -->
@@ -2224,6 +2225,11 @@ function exportSales(){
   if(month) q.push('month='+encodeURIComponent(month));
   if(by) q.push('by='+encodeURIComponent(by));
   window.location = '/api/orders/export/sales'+(q.length?('?'+q.join('&')):'');
+}
+// 导出所有订单（完整明细，可按归属筛选）
+function exportAllOrders(){
+  const by = document.getElementById('salesBy').value;
+  window.location = '/api/orders/export/all'+(by?('?by='+encodeURIComponent(by)):'');
 }
 function saveLabor(){
   const date = (document.getElementById('laborDate')||{}).value || '';

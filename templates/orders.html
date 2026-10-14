@@ -98,6 +98,24 @@
   .dm-months{display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-bottom:4px;padding-bottom:8px;border-bottom:1px dashed var(--border)}
   .dm-months .lbl{font-size:12px;color:#9a3412;align-self:center;margin-right:2px}
   .dm-days{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px 4px}
+  /* 搭建 / 不搭建 徽标：订单卡片头部一眼区分，青龙湖搭建单基本都归陈卓团队 */
+  .st-badge{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;line-height:1;white-space:nowrap}
+  .st-badge.setup{background:#e7f6ec;color:#1b7a43;border:1px solid #b7e3c6}
+  .st-badge.nosetup{background:#f3f1ee;color:#7a7066;border:1px solid #e3ded7}
+  .st-badge.unknown{display:none}
+  /* 移动端：一屏最多信息量规则（状态用点+短字、长文案隐藏、信息网格更紧凑） */
+  @media(max-width:600px){
+    .order-head .muted{font-size:12px}
+    .preview-grid{gap:7px;margin:6px 0 !important}
+    .preview-grid .cell{padding:6px 8px}
+    .preview-grid .cell .k{font-size:10px}
+    .preview-grid .cell .v{font-size:13px}
+    .note-box{display:none}            /* 解释性长文案只在电脑端显示 */
+    .btn-row{gap:6px;margin-top:8px}
+    .btn-row .btn{padding:7px 9px;font-size:12px}
+    .tag-lg{font-size:11px;padding:4px 11px}
+    .order-card .chips{margin:6px 0 2px}
+  }
 </style>
 </head>
 <body>
@@ -240,6 +258,13 @@ function statusLabel(s){
     cancelled: ['❌ 已取消',  'tag-gray'],
   };
   return map[s] || ['未知','tag-gray'];
+}
+// 搭建 / 不搭建 徽标：手工填过 setup_flag 的优先，否则用列表接口已推导好的值（与导出同口径）
+function setupBadge(o){
+  const f = o.setup_flag;
+  if(f === 1) return `<span class="st-badge setup" title="搭建单：含搭建+配送+回收全程人工（一般归陈卓团队）">🏕️ 搭建</span>`;
+  if(f === 0) return `<span class="st-badge nosetup" title="不搭建：无搭建费，仅平台配送（闪送/滴滴）或自提/老板送">🚫 不搭建</span>`;
+  return `<span class="st-badge unknown"></span>`;
 }
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
 
@@ -600,6 +625,7 @@ function buildCard(o, isAnchor){
         <span class="muted" style="margin-left:8px">${o.booking_date||''}</span>
         <span class="muted" style="margin-left:6px;font-size:11px;opacity:.55">#${o.id}</span>${anchorFlag}
       </div>
+      ${setupBadge(o)}
       <span class="tag ${stCls} tag-lg">${stText}</span>
     </div>
 

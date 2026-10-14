@@ -1374,6 +1374,12 @@ def order_detail(oid):
         WHERE op.order_id = ?
     """, (oid,))
     o["packages"] = [dict(x) for x in cur.fetchall()]
+    # 搭建：手工填过 setup_flag 的优先；库里为空（多为批量导入）时按价格推导（与导出/列表同口径），仅用于展示
+    if o.get("setup_flag") is None:
+        _pt = sum((p.get("price") or p.get("std_price") or 0) * (p.get("quantity") or 0) for p in o["packages"])
+        _pq = sum((p.get("quantity") or 0) for p in o["packages"])
+        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"), o.get("note"))
+        o["setup_flag"] = _gs
     # 备餐需求
     from calculator import calc_order_requirements, calc_prep_urgency
     req = calc_order_requirements(oid)
@@ -1603,6 +1609,7 @@ def list_orders():
         cur.execute("""
             SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
                    o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at, o.deleted_at,
+                   o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
@@ -1615,6 +1622,7 @@ def list_orders():
         cur.execute("""
             SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
                    o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at,
+                   o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
@@ -1625,15 +1633,22 @@ def list_orders():
     # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
     for o in orders:
         o["address_key"] = canonical_address(o.get("address"))
-    # 加套餐明细
+    # 加套餐明细；同时按"价格"推导 搭建（手工填过 setup_flag 的优先，否则用和销售流水表一致的规则）
     for o in orders:
         cur.execute("""
-            SELECT op.people, op.quantity, p.name
+            SELECT op.people, op.quantity, p.name, COALESCE(op.price, p.price) AS price
             FROM order_packages op
             LEFT JOIN packages p ON op.package_id = p.id
             WHERE op.order_id = ?
         """, (o["id"],))
-        o["packages"] = [dict(r) for r in cur.fetchall()]
+        pkgs = cur.fetchall()
+        o["packages"] = [dict(r) for r in pkgs]
+        if o.get("setup_flag") is None:
+            price_total = sum((r["price"] or 0) * (r["quantity"] or 0) for r in pkgs)
+            pkg_qty = sum((r["quantity"] or 0) for r in pkgs)
+            g_setup, _g_fee, _why = _guess_setup_and_fee(
+                db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"))
+            o["setup_flag"] = g_setup  # 仅用于前端展示；不写库（库里的原始值仍为 NULL，等你逐单确认）
     deleted_count = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL").fetchone()[0]
     return jsonify({"ok": True, "data": orders, "deleted_count": deleted_count})
@@ -2063,6 +2078,87 @@ def export_sales_ledger():
     resp = Response(bio.getvalue(),
                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     resp.headers["Content-Disposition"] = "attachment; filename=\"sales.xlsx\"; filename*=UTF-8''" + _q(fname)
+    return resp
+
+
+@app.route("/api/orders/export/all")
+def export_all_orders():
+    """导出「所有订单」完整明细（一单一行，字段最全）：含搭建/不搭建、配送人、配送费、归属、状态、备注等。
+    支持 by=全部/刘/孙 按归属筛选、month 按月份筛选。搭建/配送按"手工优先、否则规则推导"同销售流水表。"""
+    from flask import Response
+    from urllib.parse import quote as _q
+    import io, datetime as _dt
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except Exception:
+        return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
+    month = request.args.get("month")
+    by = request.args.get("by")  # 全部 / 刘 / 孙
+    db = g.db
+    where = ["o.deleted_at IS NULL"]
+    params = []
+    if month:
+        where.append("o.booking_date LIKE ?"); params.append(month + "%")
+    if by in ("刘", "孙"):
+        where.append("o.created_by = ?"); params.append(1 if by == "刘" else 2)
+    rows = db.execute("""
+        SELECT o.id, o.booking_date, o.booking_time, o.contact_name, o.contact_phone, o.address,
+               o.amount, o.discount, o.deposit, o.setup_flag, o.delivery_person, o.delivery_fee,
+               o.source, o.status, o.note, o.created_at, o.menu_name,
+               COALESCE(u.name, o.created_by_name) AS created_by_name,
+               (SELECT GROUP_CONCAT(p.name, '、') FROM order_packages op JOIN packages p ON p.id=op.package_id
+                 WHERE op.order_id=o.id) AS pkgnames,
+               (SELECT SUM(op.people) FROM order_packages op WHERE op.order_id=o.id) AS people,
+               (SELECT SUM(COALESCE(op.price, p.price)*op.quantity) FROM order_packages op JOIN packages p ON p.id=op.package_id
+                 WHERE op.order_id=o.id) AS price_total,
+               (SELECT SUM(op.quantity) FROM order_packages op WHERE op.order_id=o.id) AS pkg_qty
+        FROM orders o LEFT JOIN users u ON o.created_by = u.id
+        WHERE """ + " AND ".join(where) + " ORDER BY o.booking_date ASC, o.id ASC", params).fetchall()
+
+    wb = Workbook(); ws = wb.active; ws.title = "所有订单"
+    thin = Side(style="thin", color="999999"); border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    head_fill = PatternFill("solid", fgColor="EFE6DA"); head_font = Font(bold=True, size=11)
+    center = Alignment(horizontal="center", vertical="center")
+    headers = ["订单号", "预约日期", "预约时间", "联系人", "电话", "地址", "套餐", "人数", "金额",
+               "优惠", "押金", "搭建", "配送人", "配送费", "客户来源", "状态", "归属", "录入时间", "备注"]
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(1, c, h); cell.font = head_font; cell.fill = head_fill; cell.alignment = center; cell.border = border
+
+    def status_label(s):
+        return {"pending": "待备", "preparing": "备餐中", "done": "已完成", "cancelled": "已取消"}.get(s, s or "")
+    r_idx = 2
+    for r in rows:
+        g_setup, _g_fee, _why = _guess_setup_and_fee(
+            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"])
+        setup_flag = r["setup_flag"] if r["setup_flag"] is not None else g_setup
+        setup = "搭建" if setup_flag == 1 else ("不搭建" if setup_flag == 0 else "")
+        dp = r["delivery_person"] or _derive_delivery_person(setup_flag)
+        vals = [
+            r["id"], r["booking_date"] or "", r["booking_time"] or "", r["contact_name"] or "",
+            r["contact_phone"] or "", r["address"] or "", r["menu_name"] or r["pkgnames"] or "",
+            r["people"] or "", float(r["amount"] or 0), float(r["discount"] or 0), float(r["deposit"] or 0),
+            setup, dp, (float(r["delivery_fee"]) if r["delivery_fee"] is not None else ""),
+            r["source"] or "", status_label(r["status"]), r["created_by_name"] or "",
+            (r["created_at"] or "")[:16], r["note"] or "",
+        ]
+        for c, v in enumerate(vals, 1):
+            cell = ws.cell(r_idx, c, v); cell.border = border
+            if c in (12, 13, 16):
+                cell.alignment = center
+        r_idx += 1
+
+    for i, w in enumerate([8, 12, 10, 10, 12, 22, 18, 6, 9, 8, 8, 8, 12, 9, 10, 8, 8, 16, 24], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+
+    bio = io.BytesIO(); wb.save(bio); bio.seek(0)
+    _now = _dt.datetime.now()
+    fname = "所有订单%s-%d-%d.xlsx" % (("（%s）" % by) if by else "", _now.month, _now.day)
+    resp = Response(bio.getvalue(),
+                    mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    resp.headers["Content-Disposition"] = "attachment; filename=\"orders.xlsx\"; filename*=UTF-8''" + _q(fname)
     return resp
 
 
