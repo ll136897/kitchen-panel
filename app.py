@@ -1919,6 +1919,19 @@ def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note):
     return 0, 0.0, "半包（金额接近半包价）"
 
 
+def _derive_delivery_person(setup_flag):
+    """按老板核对口径推导配送方（仅当订单没手工填配送人时作兜底，绝不瞎填'陈卓'）：
+      · 搭建(setup=1)  → 陈卓团队承揽（老板原话：搭建在青龙湖大部分是陈卓团队）
+      · 不搭建(setup=0) → 闪送/滴滴（平台配送；原话：不搭建只送餐的不一定是陈卓，大部分是闪送或滴滴）
+      · 搭建未知(None) → 空串（不臆造）
+    手工在订单详情填过的 delivery_person 永远优先于这个推导。"""
+    if setup_flag == 1:
+        return "陈卓团队"
+    if setup_flag == 0:
+        return "闪送/滴滴"
+    return ""
+
+
 @app.route("/api/orders/export/sales")
 def export_sales_ledger():
     """导出「销售流水表」（复刻原表格式）：每单一行 + 月份合并单元格 + 右侧月度汇总块。
@@ -1933,11 +1946,14 @@ def export_sales_ledger():
     except Exception:
         return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
     month = request.args.get("month")
+    by = request.args.get("by")  # 全部 / 刘 / 孙：按归属(created_by)筛选销售流水
     db = g.db
     where = ["o.deleted_at IS NULL"]
     params = []
     if month:
         where.append("o.booking_date LIKE ?"); params.append(month + "%")
+    if by in ("刘", "孙"):
+        where.append("o.created_by = ?"); params.append(1 if by == "刘" else 2)
     rows = db.execute("""
         SELECT o.id, o.booking_date, o.menu_name, o.setup_flag, o.delivery_fee, o.amount,
                o.delivery_person, o.address, o.source, o.note,
@@ -1997,7 +2013,9 @@ def export_sales_ledger():
         net = amt - labor
         pkg = r["menu_name"] or r["pkgnames"] or ""
         setup = "是" if setup_flag == 1 else ("否" if setup_flag == 0 else "")
-        vals = [mon, d, pkg, setup, price, fee, amt, r["delivery_person"] or DEFAULT_DELIVERY_PERSON, r["address"] or "",
+        # 配送人：手工填过的优先；没填的按规则推导（搭建→陈卓团队 / 不搭建→闪送·滴滴），绝不盲填"陈卓"
+        _dp = r["delivery_person"] or _derive_delivery_person(setup_flag)
+        vals = [mon, d, pkg, setup, price, fee, amt, _dp, r["address"] or "",
                 r["source"] or "", r["note"] or "", round(labor, 2) if labor else None, round(net, 2)]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r_idx, c, v); cell.border = border
