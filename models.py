@@ -588,6 +588,7 @@ def init_db():
 
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
+        backfill_contact_in_address(cur)      # 补回被吞进地址里的联系人
 
         conn.commit()
     print(f"[OK] 数据库已初始化: {DB_PATH}")
@@ -617,6 +618,46 @@ def backfill_purchase(cur):
         )
         WHERE unit='g' AND (portion_grams IS NULL OR portion_grams<=0)
     """)
+
+
+def backfill_contact_in_address(cur):
+    """补回"被吞进地址里的联系人"（幂等，只补联系人是空的那批）。
+
+    背景：早期批量导入时，有些文本的换行符被压成了一个字母 n，
+    于是「预约地址:青龙湖二期n客户姓名，董永波先生」整段被当成地址存下来，
+    客户姓名既没进 contact_name，还混在地址里（10.7 董永波那单就是这么坏的）。
+    这里把名字从地址里摘出来补回 contact_name，地址只留真正的地址部分。
+    """
+    import re as _re
+    try:
+        rows = cur.execute(
+            "SELECT id, address FROM orders "
+            "WHERE (contact_name IS NULL OR TRIM(contact_name)='') "
+            "  AND address IS NOT NULL AND address<>'' "
+            "  AND (address LIKE '%客户姓名%' OR address LIKE '%联系人%')").fetchall()
+    except Exception:
+        return
+    n = 0
+    for r in rows:
+        addr = r["address"] or ""
+        m = _re.search(r"(客户姓名|联系人)\s*[：:，,]?\s*(.+)", addr)
+        if not m:
+            continue
+        name = (m.group(2) or "").strip().strip('"').strip()
+        if not name:
+            continue
+        newaddr = addr[:m.start()].strip().rstrip("，,：:").strip()
+        cur.execute("UPDATE orders SET contact_name=?, address=? WHERE id=?",
+                    (name, newaddr, r["id"]))
+        n += 1
+    if n:
+        print("[migrate] 补回 %d 单被吞进地址里的联系人" % n)
+    # 同一批导入还带来备注里多余的引号（"备注:无"""）→ 一并擦掉（幂等）
+    try:
+        cur.execute("UPDATE orders SET note = TRIM(REPLACE(note, '\"', '')) "
+                    "WHERE note IS NOT NULL AND note LIKE '%\"%'")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -100,6 +100,30 @@ def _build_time(hhmm_h, hhmm_m, h_only, h_only_m, pm_h):
     return ""
 
 
+def _normalize_order_text(raw_text):
+    """把导入文本先修一遍再解析（2026-10-14）。
+
+    真实场景里文本常被"二次转义"搞坏，最常见三种：
+      · 整段被引号包住（从表格/CSV/聊天记录复制带来）→ 去掉外层引号
+      · 换行符的反斜杠丢了，只剩一个字母 n
+        （"预约地址:青龙湖二期n客户姓名，董永波先生"）→ 还原成真正的换行
+      · 字段名用逗号而不是冒号（"客户姓名，董永波先生"）→ 统一成冒号
+    不修的话，"客户姓名"会整段被吞进地址里，联系人永远是空的（10.7 董永波那单）。
+    """
+    text = (raw_text or "").replace("\r\n", "\n").strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        text = text[1:-1]
+    # "…二期n客户姓名…" → "…二期\n客户姓名…"
+    # 只在「中文/数字 + n + 字段名」时才动手，避免误伤正常的英文单词
+    text = re.sub(
+        r"(?<=[\u4e00-\u9fa5\d])[nN](?=(?:预约时间|预约项目|预约地址|客户姓名|联系人|"
+        r"联系电话|金额|押金|用餐时间|收餐时间|备注)\s*[:：，,])",
+        "\n", text)
+    # "客户姓名，XXX" / "联系人,XXX" → "客户姓名：XXX"
+    text = re.sub(r"(客户姓名|联系人)\s*[，,]\s*", r"\1：", text)
+    return text
+
+
 def parse_order_text(raw_text):
     """
     解析微信确认文本。
@@ -132,7 +156,7 @@ def parse_order_text(raw_text):
         "extra_tools": {},     # 从备注解析出的额外工具需求
     }
 
-    text = raw_text.replace("\r\n", "\n")
+    text = _normalize_order_text(raw_text)
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
 
     current_key = None
@@ -143,7 +167,8 @@ def parse_order_text(raw_text):
         # 匹配 "字段:值" 或 "字段：值"
         # 容忍字段名前有少量多余前缀（例如"对吧预约时间:9.25 17.00"），
         # 前缀不含冒号、最多 6 个字符，避免误吞其它内容。
-        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|联系人|联系电话|金额|押金|用餐时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
+        # 「客户姓名」是「联系人」的同义写法（微信确认文本里两种都有）
+        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|客户姓名|联系人|联系电话|金额|押金|用餐时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
         if m:
             # 保存上一个字段
             if current_key is not None:
@@ -157,7 +182,8 @@ def parse_order_text(raw_text):
         sections.append((current_key, buffer))
 
     for key, value_lines in sections:
-        value = " ".join(v for v in value_lines if v).strip()
+        # 末尾常有复制带来的多余引号（"备注:无"""），一并去掉
+        value = " ".join(v for v in value_lines if v).strip().strip('"').strip()
         if key == "预约时间":
             # 容忍多种格式：9.11 12.00 / 9月11日12点 / 9.11号 12:00 / 9月11号下午
             # 用组合正则一次性提取日期+时间，避免日期剥离误吃时间（"9.11"与"12.00"模式相同）
@@ -186,7 +212,7 @@ def parse_order_text(raw_text):
             result["package_lines"] = value_lines
         elif key == "预约地址":
             result["address"] = value
-        elif key == "联系人":
+        elif key in ("联系人", "客户姓名"):
             result["contact_name"] = value
         elif key == "联系电话":
             result["contact_phone"] = re.sub(r"[^\d\-\+\s]", "", value)

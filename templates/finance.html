@@ -166,6 +166,12 @@
   .led-steps b{color:#b9770e}
   .led-step-chip{display:inline-block;background:#b9770e;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;margin-right:5px;font-weight:700}
   @media(max-width:600px){ .led-steps .led-step-txt{display:none} .led-steps{line-height:2.1} }
+  /* 成本明细弹窗里的"这单录入信息"：改成本时对着核对，别改错单 */
+  .pf-order{background:#f4f8fc;border:1px solid #d9e6f2;border-radius:8px;padding:8px 10px;margin-bottom:8px}
+  .pf-ord-t{font-weight:700;font-size:12px;color:#2c3e50;margin-bottom:5px}
+  .pf-ord-grid{display:grid;grid-template-columns:auto 1fr;gap:3px 9px;font-size:12px;align-items:baseline}
+  .pf-ord-grid .k{color:#7f8c8d;white-space:nowrap}
+  .pf-ord-grid .v{color:#2c3e50;word-break:break-all}
   .led-autocat{font-size:11px;color:#2f7d32;margin-top:2px;min-height:14px}
   .led-autocat.empty{color:#a08c7a}
   .led-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px}
@@ -604,7 +610,55 @@
 <script>
 const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
-const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他'};
+const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他',tool:'工具'};
+
+// ===== 统一排序口径：全站都跟菜单页一致（2026-10-14）=====
+// 以前财务页有自己的一套分类顺序（主食位置就不一样），造成"菜单页一种顺序、
+// 财务页另一种"，对照起来很累。现在分类顺序、分类内固定顺序都直接对齐菜单页
+// （templates/menu.html 的 CAT_ORDER / FIXED_ORDER），两处必须保持一致。
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
+const FIXED_ORDER = [
+  ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
+  ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
+  ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],['chicken','掌中宝'],['chicken','鸡脚筋'],
+  ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
+  ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
+  ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
+  ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
+  ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],
+  ['packaging','金色打包盒'],['packaging','圆形透明打包盒'],['packaging','生菜水果打包盒'],['packaging','烤肉盒子'],['packaging','绑带'],
+  ['packaging','杂物保温袋'],['packaging','餐具打包袋'],['packaging','一次性油壶'],
+];
+function getFixedIdx(name, cat){
+  for(let i=0;i<FIXED_ORDER.length;i++){
+    if(FIXED_ORDER[i][0]===cat && (name||'').includes(FIXED_ORDER[i][1])) return i;
+  }
+  return 999;
+}
+// 细分 meat → beef/pork/chicken（与菜单页、calculator 一致）
+function subcategorize(name, cat){
+  const n = name || '';
+  if(/馒头/.test(n)) return 'vegetable';
+  if(cat !== 'meat') return cat;
+  if(/小肠/.test(n)) return 'beef';
+  if(/牛|肥牛|牛肋|牛骰|安格斯/.test(n)) return 'beef';
+  if(/鸡|鸡翅|鸡腿|郡肝|掌中宝|脚筋/.test(n)) return 'chicken';
+  if(/猪|五花|香猪|松板|梅花|风味肠|肠/.test(n)) return 'pork';
+  return 'beef';
+}
+// 统一排序：先按菜单页分类顺序 → 同类里按固定顺序 → 都不在列表的按名称
+function sortByMenuOrder(arr, catOf, nameOf){
+  return (arr||[]).slice().sort((x,y)=>{
+    const cx = subcategorize(nameOf(x), catOf(x));
+    const cy = subcategorize(nameOf(y), catOf(y));
+    const ix = CAT_ORDER.indexOf(cx), iy = CAT_ORDER.indexOf(cy);
+    const mx = ix<0?900:ix, my = iy<0?900:iy;
+    if(mx!==my) return mx-my;
+    const fx = getFixedIdx(nameOf(x), cx), fy = getFixedIdx(nameOf(y), cy);
+    if(fx!==fy) return fx-fy;
+    return String(nameOf(x)).localeCompare(String(nameOf(y)), 'zh');
+  });
+}
 
 // ===== 归属筛选（这单算谁的）：全部 / 刘 / 孙（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
@@ -1360,12 +1414,43 @@ function loadPf(oid){
   });
 }
 
+// 成本明细顶部：把这一单"当初是怎么录的"原样摆出来，改成本时可以逐项对照，
+// 免得看着一堆数字改错单（用户 2026-10-14 要求）
+function renderOrderInfo(od){
+  if(!od) return '';
+  const rows = [];
+  const put = (k, v)=>{ if(v!==undefined && v!==null && v!=='') rows.push([k, String(v)]); };
+  const pkg = (od.packages||[]).map(x=>{
+    const n = x.name || (x.people ? (x.people + '人餐') : '');
+    return n ? (n + (x.quantity && x.quantity > 1 ? (' ×' + x.quantity) : '')) : '';
+  }).filter(Boolean).join(' + ');
+  put('👤 联系人', od.contact_name);
+  put('📞 电话', od.contact_phone);
+  put('📍 地址', od.address);
+  put('🍱 套餐', pkg || od.menu_name);
+  put('📅 预约', (od.booking_date||'') + (od.booking_time ? (' ' + od.booking_time) : ''));
+  put('🕐 用餐', od.meal_time);
+  put('💵 金额', od.amount ? fmtY(od.amount) : '');
+  put('🔐 押金', od.deposit ? fmtY(od.deposit) : '');
+  put('🚚 配送', od.delivery_fee
+      ? (fmtY(od.delivery_fee) + (od.delivery_person ? (' · ' + od.delivery_person) : '')) : '');
+  put('📝 备注', od.note);
+  if(!rows.length) return '';
+  return '<div class="pf-order">'
+    + '<div class="pf-ord-t">📋 这单的录入信息（对着核对，别改错单）</div>'
+    + '<div class="pf-ord-grid">'
+    + rows.map(kv => '<span class="k">' + kv[0] + '</span><span class="v">' + escHtml(kv[1]) + '</span>').join('')
+    + '</div>'
+    + '<a class="btn btn-sm" href="/orders/' + (pfOid || od.order_id || '') + '" target="_blank" rel="noopener"'
+    + ' style="margin-top:7px">打开订单详情 ›</a></div>';
+}
+
 function renderPf(p){
   document.getElementById('pfHead').innerHTML =
-    `${p.booking_date||''} · ${p.address||'（没填地址）'} · ${p.contact_name||''}`
-    + (p.deposit ? ` · 押金${fmtY(p.deposit)}（离场退还，不算收入）` : '');
+    `${p.booking_date||''} · ${p.address||'（没填地址）'} · ${p.contact_name||''}`;
 
-  let html = `<div class="pf-total big" style="border-top:none;padding-top:0">
+  let html = renderOrderInfo(p.order);
+  html += `<div class="pf-total big" style="border-top:none;padding-top:0">
       <span>💵 收入（实收货款）</span><span>${fmtY(p.revenue)}</span></div>`;
   html += `<div style="font-weight:700;font-size:13px;margin:6px 0 2px">💸 这单花在哪</div>`;
 
@@ -1435,7 +1520,8 @@ function toggleFood(){
 }
 function loadPfFood(oid){
   fetch(`/api/finance/order/${oid}/cost-detail`).then(r=>r.json()).then(d=>{
-    const items = d.data||[];
+    // 排序跟菜单页一致（接口只按 category,name 排，和菜单页的固定顺序对不上）
+    const items = sortByMenuOrder(d.data||[], i=>i.category, i=>i.name);
     let total = 0;
     document.getElementById('pfFoodTbody').innerHTML = items.map(i=>{
       total += i.total_cost;
@@ -1610,21 +1696,8 @@ function loadCostItems(){
       const isConsume = CONSUME_CATS.indexOf(i.category) >= 0;
       return wantConsume ? isConsume : !isConsume;
     });
-    if(wantConsume){
-      const corder = ['packaging','utensil'];
-      allCostItems.sort((a,b)=>{
-        const ia = corder.indexOf(a.category), ib = corder.indexOf(b.category);
-        if(ia!==ib) return ia-ib;
-        return a.name.localeCompare(b.name,'zh');
-      });
-    } else {
-      const order = ['beef','pork','chicken','staple','vegetable','side','sauce','drink','other'];
-      allCostItems.sort((a,b)=>{
-        const ia = order.indexOf(a.category), ib = order.indexOf(b.category);
-        if(ia!==ib) return ia-ib;
-        return a.name.localeCompare(b.name,'zh');
-      });
-    }
+    // 排序口径与菜单页完全一致（不再用财务页自己的分类顺序）
+    allCostItems = sortByMenuOrder(allCostItems, i=>i.category, i=>i.name);
     renderCostItems(allCostItems);
   });
 }

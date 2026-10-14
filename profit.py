@@ -298,7 +298,37 @@ def order_profit(db, oid, cfg=None):
     else:
         level = "ok"
 
+    # 这单**原始录入信息**：财务页改成本时要能对着看，免得改错单（2026-10-14）
+    _pkgs = cur.execute("""
+        SELECT op.quantity, op.people, op.price, p.name AS pkg_name
+        FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
+        WHERE op.order_id = ? ORDER BY op.id
+    """, (oid,)).fetchall()
+    order_info = {
+        "order_id": oid,
+        "contact_name": o.get("contact_name") or "",
+        "contact_phone": o.get("contact_phone") or "",
+        "address": o.get("address") or "",
+        "booking_date": o.get("booking_date") or "",
+        "booking_time": o.get("booking_time") or "",
+        "meal_time": o.get("meal_time") or "",
+        "note": o.get("note") or "",
+        "amount": round(revenue, 2),
+        "deposit": round(float(o.get("deposit") or 0), 2),
+        "discount": round(float(o.get("discount") or 0), 2),
+        "menu_name": o.get("menu_name") or "",
+        "setup_flag": o.get("setup_flag"),
+        "delivery_fee": o.get("delivery_fee"),
+        "delivery_person": o.get("delivery_person") or "",
+        "source": o.get("source") or "",
+        "packages": [{"name": (dict(_p).get("pkg_name") or ""),
+                      "people": dict(_p).get("people"),
+                      "quantity": dict(_p).get("quantity"),
+                      "price": dict(_p).get("price")} for _p in _pkgs],
+    }
+
     return {
+        "order": order_info,
         "order_id": oid,
         "revenue": round(revenue, 2),
         "deposit": round(float(o.get("deposit") or 0), 2),
