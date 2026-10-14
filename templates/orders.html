@@ -73,8 +73,9 @@
   .sort-chip:hover{filter:brightness(.97)}
   .sort-chip.active{background:var(--primary);color:#fff;border-color:var(--primary)}
   .sort-hint{display:none}
-  /* 订单归属：谁归属的（我=蓝、别人=灰、未标注=淡） */
-  .chip.who{font-weight:700}
+  /* 订单归属：谁归属的（我=蓝、别人=灰、未标注=淡）；与搭建徽标同高度、同点击反馈 */
+  .chip.who{font-weight:700;padding:4px 10px;line-height:1;border-radius:999px}
+  .chip.who.active{box-shadow:0 0 0 2px var(--primary);font-weight:800}
   .chip.who-me{background:#fdeede;color:#c8651a;border:1px solid #f3c79a}
   .chip.who-other{background:#f3efe9;color:#6b5b4b;border:1px solid var(--border)}
   .chip.who-none{background:#f6f6f6;color:#999;border:1px solid #e5e5e5}
@@ -684,12 +685,19 @@ function buildCard(o, isAnchor){
 
 // 卡片上的"谁归属的"标签（归属=主色，我=蓝色，别人=灰色）
 // 归属的和实际录入的不是同一个人时（代录），在 title 里说明，不占卡片位置
+function isOwnerActive(o){
+  if(!filterOwner) return false;
+  const cur = (filterOwner==='me') ? String((CUR_USER && CUR_USER.id) || '') : filterOwner;
+  return cur === (ownerKey(o) || '0');
+}
 function ownerChip(o){
   const label = creatorLabel(o);
   const cls = label==='未标注' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
+  const active = isOwnerActive(o);
   const proxy = (o && o.entered_by && o.created_by && o.entered_by !== o.created_by)
     ? ('（' + prettyName(o.entered_by_name) + '代录）') : '';
-  return `<span class="chip who ${cls} clickable" title="归属：${label}${proxy}｜点击筛出归属为「${label}」的订单" onclick="clickOwnerChip(${o.id})">👤 ${label}${proxy}</span>`;
+  const title = active ? `✓ 已筛归属「${label}」的单 · 点击取消` : `归属：${label}${proxy}｜点击筛出归属为「${label}」的订单`;
+  return `<span class="chip who ${cls} clickable${active?' active':''}" title="${title}" onclick="clickOwnerChip(${o.id})">👤 ${label}${proxy}</span>`;
 }
 // 点卡片上的归属（刘/孙/未标注）→ 按归属筛选，走的是顶部同一个筛选口径；再点一次 = 取消
 function clickOwnerChip(oid){

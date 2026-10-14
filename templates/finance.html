@@ -729,6 +729,21 @@ let laborMode = 'estimate';   // 利润里"人工"口径：estimate=配置估算
 function fmtDate(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
+// 短日期：一屏最大信息量——近期→今天/昨天/周X，今年内→M/D，跨年→YY/M/D（财务页卡片/明细用）
+function fmtShortDate(ds){
+  if(!ds) return '';
+  const d = new Date(ds.replace(/-/g,'/'));
+  if(isNaN(d)) return ds.slice(5);
+  const now = new Date();
+  const sameDay = (a,b)=> a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  if(sameDay(d, now)) return '今天';
+  const y = new Date(now); y.setDate(now.getDate()-1);
+  if(sameDay(d, y)) return '昨天';
+  const diff = Math.floor((now - d)/86400000);
+  if(diff>0 && diff<=7){ return ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; }
+  if(d.getFullYear()===now.getFullYear()) return (d.getMonth()+1)+'/'+d.getDate();
+  return String(d.getFullYear()).slice(2)+'/'+(d.getMonth()+1)+'/'+d.getDate();
+}
 function getRangeDates(){
   if(currentRange === 'all') return {from:'', to:''};
   const picked = document.getElementById('rangeDate').value;
@@ -1316,7 +1331,7 @@ function renderProfitOrders(orders){
     return `<div class="pf-card">
       <div class="top">
         <span class="who">${o.contact_name||'（无联系人）'}</span>
-        <span class="when">${o.booking_date||''}</span>
+        <span class="when">${fmtShortDate(o.booking_date)}</span>
       </div>
       <div class="line"><span>收入 ${fmtY(o.revenue)}${zeroNote}</span><span>成本 ${fmtY(o.cost_total)}</span></div>
       <div class="line">
@@ -2144,7 +2159,8 @@ function loadResume(){
       const sarr = (d&&d.data)||[];
       if(!sarr.length){ box.insertAdjacentHTML('beforeend','<div class="resume-empty">还没导入过账单。去「① 导入账单」传一份，或用「粘贴文字识别」。</div>'); return; }
       box.insertAdjacentHTML('beforeend', sarr.map(s=>{
-        const dt = (s.created_at||'').slice(0,16).replace('T',' ');
+        let dt = (s.created_at||'').slice(0,16).replace('T',' ');
+        if(dt.length>=10) dt = dt.slice(5); // 只留 M/D HH:MM，省去年份（对账都是近期）
         return '<div class="resume-item"><div class="meta"><b>'+escHtml(s.channel)+'</b> · '+dt+' · 共 '+s.line_count+' 笔 · 还没填用途 <b>'+s.unmatched+'</b> 笔</div>'
           +'<button class="btn btn-sm" onclick="resumeStatement('+s.id+')">继续('+s.unmatched+')</button></div>';
       }).join(''));
