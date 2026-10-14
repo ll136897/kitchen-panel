@@ -103,6 +103,11 @@
   .st-badge.setup{background:#e7f6ec;color:#1b7a43;border:1px solid #b7e3c6}
   .st-badge.nosetup{background:#f3f1ee;color:#7a7066;border:1px solid #e3ded7}
   .st-badge.unknown{display:none}
+  /* 卡片头部右侧：搭建/不搭建徽标 + 归属 + 状态 同一行，空间不够才换行 */
+  .oh-right{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .st-badge.clickable{cursor:pointer}
+  .st-badge.clickable:hover{filter:brightness(.97)}
+  .st-badge.active{box-shadow:0 0 0 2px var(--primary);font-weight:800}
   /* 移动端：一屏最多信息量规则（状态用点+短字、长文案隐藏、信息网格更紧凑） */
   @media(max-width:600px){
     .order-head .muted{font-size:12px}
@@ -114,7 +119,7 @@
     .btn-row{gap:6px;margin-top:8px}
     .btn-row .btn{padding:7px 9px;font-size:12px}
     .tag-lg{font-size:11px;padding:4px 11px}
-    .order-card .chips{margin:6px 0 2px}
+    .order-head .oh-right{gap:5px}
   }
 </style>
 </head>
@@ -262,10 +267,22 @@ function statusLabel(s){
 // 搭建 / 不搭建 徽标：手工填过 setup_flag 的优先，否则用列表接口已推导好的值（与导出同口径）
 function setupBadge(o){
   const f = o.setup_flag;
-  if(f === 1) return `<span class="st-badge setup" title="搭建单：含搭建+配送+回收全程人工（一般归陈卓团队）">🏕️ 搭建</span>`;
-  if(f === 0) return `<span class="st-badge nosetup" title="不搭建：无搭建费，仅平台配送（闪送/滴滴）或自提/老板送">🚫 不搭建</span>`;
-  return `<span class="st-badge unknown"></span>`;
+  if(f !== 1 && f !== 0) return `<span class="st-badge unknown"></span>`;  // 未知：不显示、不可点
+  const isSetup = (f === 1);
+  const t = isSetup ? '搭建' : '不搭建';
+  const active = (String(filterSetup) === String(f));
+  const title = active ? `✓ 已筛「${t}」单 · 点击取消` : `点击筛出所有「${t}」单`;
+  return `<span class="st-badge ${isSetup?'setup':'nosetup'} clickable${active?' active':''}" title="${title}" onclick="clickSetupChip(${o.id})">${isSetup?'🏕️ 搭建':'🚫 不搭建'}</span>`;
 }
+// 点卡片上的搭建/不搭建徽标 → 按该类型筛选；再点一次 = 取消（与归属标签同口径）
+function setupKey(o){ const f = o.setup_flag; return (f===1||f===0) ? f : null; }
+function clickSetupChip(oid){
+  const o = allOrders.find(x=>x.id===oid) || {};
+  const k = setupKey(o);
+  if(k===null) return;
+  setOrderSetup(String(filterSetup) === String(k) ? '' : k);
+}
+function setOrderSetup(v){ filterSetup = v; renderOrders(); }
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
 
 let showDeleted = false;
@@ -281,6 +298,7 @@ let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
 let filterMonth = '';      // 按月份筛选（''=全部月份）；选某天后会自动带上它所在的月
 let filterOwner = '';      // 按"归属"筛选（''=全部 | 'me'=我归属的 | 用户id数字=某人归属的）
+let filterSetup = '';      // 按"搭建/不搭建"筛选（''=全部 | 1=搭建 | 0=不搭建）
 let sortMode = 'date';     // 排序方式：'date'=出餐日期（早→晚） | 'join'=加入顺序（最新在上）
 let monthMode = true;             // 是否按月分组显示（默认开）
 let collapsedMonths = new Set();  // 手动收起的月份（'YYYY-MM'）
@@ -625,8 +643,11 @@ function buildCard(o, isAnchor){
         <span class="muted" style="margin-left:8px">${o.booking_date||''}</span>
         <span class="muted" style="margin-left:6px;font-size:11px;opacity:.55">#${o.id}</span>${anchorFlag}
       </div>
-      ${setupBadge(o)}
-      <span class="tag ${stCls} tag-lg">${stText}</span>
+      <div class="oh-right">
+        ${setupBadge(o)}
+        ${ownerChip(o)}
+        <span class="tag ${stCls} tag-lg">${stText}</span>
+      </div>
     </div>
 
     <div class="preview-grid" style="margin:8px 0">
@@ -637,7 +658,6 @@ function buildCard(o, isAnchor){
       <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
     </div>
 
-    <div class="chips">${ownerChip(o)}</div>
     ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
 
     <div class="btn-row">
@@ -692,6 +712,9 @@ function renderOrders(){
     else if(filterOwner==='0') scope = scope.filter(o=> ownerKey(o) === '');
     else scope = scope.filter(o=> ownerKey(o) === filterOwner);
   }
+  if(filterSetup !== ''){
+    scope = scope.filter(o=> String(setupKey(o)) === String(filterSetup));
+  }
   if(filterText){
     const q = filterText.toLowerCase();
     scope = scope.filter(o=> [o.contact_name,o.contact_phone,o.address,o.booking_date,o.note,String(o.id)]
@@ -701,7 +724,7 @@ function renderOrders(){
   let totalAmt = 0;
   scope.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
   const scName = filterOwner ? '筛选订单' : (filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单')));
-  const anyFilter = !!(filterDate||filterMonth||filterText||filterOwner);
+  const anyFilter = !!(filterDate||filterMonth||filterText||filterOwner||(filterSetup!==''));
   const scNote = anyFilter ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)} · ${ownerBreakdown(allOrders)}`;
   if(kpis) kpis.innerHTML = [
     {cls:'kpi-dark',icon:'📋',num:scope.length,lbl:scName,sub:scNote},
@@ -719,7 +742,8 @@ function renderOrders(){
       hint.style.display='block';
       const ownerTxt = filterOwner==='me' ? ownerSign(CUR_USER.name)
         : (filterOwner ? ownerSign((allOrders.find(o=>ownerKey(o)===filterOwner)||{}).created_by_name) : '');
-      const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:'', ownerTxt].filter(Boolean).join(' · ');
+      const setupTxt = (filterSetup==='1')?'搭建':(filterSetup==='0'?'不搭建':'');
+      const scopeTxt = [filterMonth?orderMonthLabel(filterMonth):'', filterDate?filterDate:'', setupTxt, ownerTxt].filter(Boolean).join(' · ');
       hint.textContent = `🔎 ${list.length} 条（共 ${allOrders.length} 条）${scopeTxt?' · '+scopeTxt:''}${filterText?(' · 含“'+filterText+'”'):''} · 合计 ¥${money(totalAmt)}`;
     } else hint.style.display='none';
   }

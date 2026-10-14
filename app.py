@@ -1374,11 +1374,11 @@ def order_detail(oid):
         WHERE op.order_id = ?
     """, (oid,))
     o["packages"] = [dict(x) for x in cur.fetchall()]
-    # 搭建：手工填过 setup_flag 的优先；库里为空（多为批量导入）时按价格推导（与导出/列表同口径），仅用于展示
+    # 搭建：手工填过 setup_flag 的优先；库里为空时先读 raw_text 里的「搭建/不搭建」字样，都没有才按价格推导（与导出/列表同口径），仅用于展示
     if o.get("setup_flag") is None:
         _pt = sum((p.get("price") or p.get("std_price") or 0) * (p.get("quantity") or 0) for p in o["packages"])
         _pq = sum((p.get("quantity") or 0) for p in o["packages"])
-        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"), o.get("note"))
+        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
         o["setup_flag"] = _gs
     # 备餐需求
     from calculator import calc_order_requirements, calc_prep_urgency
@@ -1608,7 +1608,7 @@ def list_orders():
     if show_deleted:
         cur.execute("""
             SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
-                   o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at, o.deleted_at,
+                   o.contact_phone, o.amount, o.deposit, o.note, o.raw_text, o.status, o.created_at, o.deleted_at,
                    o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
@@ -1621,7 +1621,7 @@ def list_orders():
         #    全在前端做，必须拿全量，所以放宽到 5000（够用多年，仍留个上限防跑飞）。
         cur.execute("""
             SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
-                   o.contact_phone, o.amount, o.deposit, o.note, o.status, o.created_at,
+                   o.contact_phone, o.amount, o.deposit, o.note, o.raw_text, o.status, o.created_at,
                    o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
@@ -1647,8 +1647,8 @@ def list_orders():
             price_total = sum((r["price"] or 0) * (r["quantity"] or 0) for r in pkgs)
             pkg_qty = sum((r["quantity"] or 0) for r in pkgs)
             g_setup, _g_fee, _why = _guess_setup_and_fee(
-                db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"))
-            o["setup_flag"] = g_setup  # 仅用于前端展示；不写库（库里的原始值仍为 NULL，等你逐单确认）
+                db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
+            o["setup_flag"] = g_setup  # 仅用于前端展示；库里 setup_flag 已由原始文字(搭建/不搭建)回填，这里只读不写
     deleted_count = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL").fetchone()[0]
     return jsonify({"ok": True, "data": orders, "deleted_count": deleted_count})
@@ -1906,14 +1906,31 @@ def _place_delivery_fee(db, address):
     return float(cfg.get("default_outsource") or 100)
 
 
-def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note):
+def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_text=""):
     """推导 (搭建 1/0, 配送费, 依据)。
+    优先级：① 手工填过的 setup_flag（调用方已处理）；② 原始文字 raw_text 里明确写了（搭建）/（不搭建）；
+    ③ 以上都没有才按价格推导。
     正价合计 = Σ(套餐正价 × 份数)；半包价 = 正价合计 − 配送搭建费 × 份数
       · 金额 ≥ 正价合计 → 全包：搭建=是，配送费=按地址
       · 金额 ≤ 半包价   → 半包：搭建=否，配送费=0
       · 中间地带（半包加租赁 / 全包被砍价）：
           备注出现租赁物（桌椅/卡式炉/气罐/烤盘…）→ 判半包；否则看金额更靠近哪一边
     """
+    # ② 原始文字明确标注了 搭建/不搭建（用户每单都写了），高于价格推导
+    try:
+        from profit import _setup_from_text as _sft
+    except Exception:
+        _sft = None
+    if _sft is not None:
+        _t = _sft((raw_text or "") + " " + (note or ""))
+        if _t is not None:
+            total = float(price_total or 0)
+            qty = int(pkg_qty or 1) or 1
+            unit = _place_delivery_fee(db, address)
+            fee_full = unit * qty
+            if _t == 1:
+                return 1, fee_full, "原始文字标注（搭建）"
+            return 0, 0.0, "原始文字标注（不搭建）"
     total = float(price_total or 0)
     qty = int(pkg_qty or 1) or 1
     amt = float(amount or 0)
@@ -1971,7 +1988,7 @@ def export_sales_ledger():
         where.append("o.created_by = ?"); params.append(1 if by == "刘" else 2)
     rows = db.execute("""
         SELECT o.id, o.booking_date, o.menu_name, o.setup_flag, o.delivery_fee, o.amount,
-               o.delivery_person, o.address, o.source, o.note,
+               o.delivery_person, o.address, o.source, o.note, o.raw_text,
                (SELECT GROUP_CONCAT(p.name, '、') FROM order_packages op JOIN packages p ON p.id=op.package_id
                  WHERE op.order_id=o.id) AS pkgnames,
                (SELECT SUM(COALESCE(op.price, p.price)*op.quantity) FROM order_packages op JOIN packages p ON p.id=op.package_id
@@ -2019,7 +2036,7 @@ def export_sales_ledger():
         mon = ("%d月" % int(d[5:7])) if (len(d) >= 7 and d[5:7].isdigit()) else ""
         # 手工填过的优先；没填的按规则自动推导（搭建 / 配送费），配送人默认陈卓
         g_setup, g_fee, _why = _guess_setup_and_fee(
-            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"])
+            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"], r["raw_text"])
         setup_flag = r["setup_flag"] if r["setup_flag"] is not None else g_setup
         fee = float(r["delivery_fee"]) if r["delivery_fee"] is not None else g_fee
         price = float(r["amount"] or 0)              # 客户实际付的钱（含要转给配送员的那部分）
@@ -2106,7 +2123,7 @@ def export_all_orders():
     rows = db.execute("""
         SELECT o.id, o.booking_date, o.booking_time, o.contact_name, o.contact_phone, o.address,
                o.amount, o.discount, o.deposit, o.setup_flag, o.delivery_person, o.delivery_fee,
-               o.source, o.status, o.note, o.created_at, o.menu_name,
+               o.source, o.status, o.note, o.raw_text, o.created_at, o.menu_name,
                COALESCE(u.name, o.created_by_name) AS created_by_name,
                (SELECT GROUP_CONCAT(p.name, '、') FROM order_packages op JOIN packages p ON p.id=op.package_id
                  WHERE op.order_id=o.id) AS pkgnames,
@@ -2131,7 +2148,7 @@ def export_all_orders():
     r_idx = 2
     for r in rows:
         g_setup, _g_fee, _why = _guess_setup_and_fee(
-            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"])
+            db, r["price_total"], r["pkg_qty"], r["amount"], r["address"], r["note"], r["raw_text"])
         setup_flag = r["setup_flag"] if r["setup_flag"] is not None else g_setup
         setup = "搭建" if setup_flag == 1 else ("不搭建" if setup_flag == 0 else "")
         dp = r["delivery_person"] or _derive_delivery_person(setup_flag)

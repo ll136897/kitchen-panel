@@ -122,6 +122,17 @@ def outsource_units(people, pkg_qty, per_unit=10):
 _RENT_KW = ("桌椅", "卡式炉", "气罐", "烤盘", "租赁", "出租", "租用")
 
 
+def _setup_from_text(text):
+    """从订单原始文字(配合备注)提取搭建标记：含'不搭建'→0（不搭建），含'搭建'→1（搭建），都没有→None。
+    用户每单都在「预约项目」里明确写了（搭建）/（不搭建），应优先于价格推导使用。"""
+    t = text or ""
+    if "不搭建" in t:
+        return 0
+    if "搭建" in t:
+        return 1
+    return None
+
+
 def _order_setup(db, o, cfg):
     """搭建判定（0/1）：手工 setup_flag 优先；否则按价格推导。
     规则与 app._guess_setup_and_fee 一致——半包(金额≈正价−搭建费)即不搭建。
@@ -129,6 +140,16 @@ def _order_setup(db, o, cfg):
     sf = o.get("setup_flag")
     if sf is not None:
         return 1 if sf == 1 else 0
+    # 优先读原始文字（用户每单都标注了 搭建/不搭建）；取不到就从库里补查
+    rt = o.get("raw_text")
+    nt = o.get("note")
+    if rt is None and o.get("id") is not None:
+        _rr = db.execute("SELECT raw_text, note FROM orders WHERE id=?", (o.get("id"),)).fetchone()
+        if _rr:
+            rt = _rr["raw_text"]; nt = _rr["note"]
+    _t = _setup_from_text((rt or "") + " " + (nt or ""))
+    if _t is not None:
+        return _t
     address = (o.get("address") or "")
     amount = float(o.get("amount") or 0)
     note = (o.get("note") or "")
