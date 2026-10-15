@@ -36,3 +36,35 @@ window.autoSync = function(fn, ms){
   }, ms || 60000);
 };
 </script>
+
+{# ===== 通用输入规则（2026-10-15 用户定，所有页面生效）=====
+   改数字时点开输入框：里面是 0 就先清空（不用手动删那个 0）；
+   如果没输入任何内容就点到框外，自动恢复成 0（不会留下空值把账算坏）。
+   只作用于 type=text/number 且当前值严格等于 0（含 0.0 / 0.00）的输入框；
+   JS 后渲染出来的输入框同样生效；个别不想套用这规则的可加 data-noclr="1"。 #}
+<script>
+(function(){
+  function isZero(v){ return /^0(\.0+)?$/.test(String(v == null ? '' : v).trim()); }
+  function editable(el){
+    if(!el || el.tagName !== 'INPUT') return false;
+    if(el.type !== 'text' && el.type !== 'number') return false;
+    if(el.readOnly || el.disabled) return false;
+    if(el.getAttribute('data-noclr')) return false;
+    return true;
+  }
+  // focusin / focusout 会冒泡，挂 document 就能覆盖后渲染出来的输入框
+  document.addEventListener('focusin', function(e){
+    var el = e.target;
+    if(!editable(el)) return;
+    if(isZero(el.value)){ el.setAttribute('data-zerobak', el.value); el.value = ''; }
+  });
+  document.addEventListener('focusout', function(e){
+    var el = e.target;
+    if(!el || el.tagName !== 'INPUT') return;
+    var bak = el.getAttribute('data-zerobak');
+    if(bak == null) return;
+    el.removeAttribute('data-zerobak');
+    if(String(el.value || '').trim() === '') el.value = bak;   // 没输入 → 恢复成 0
+  });
+})();
+</script>
