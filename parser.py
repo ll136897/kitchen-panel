@@ -1101,3 +1101,48 @@ def split_orders(raw):
         else:
             out.append((b, reason))
     return out
+
+
+def own_raw_block(raw, contact_name="", contact_phone="", amount=None, address=""):
+    """从"一次粘贴好几单"的整段原文里，挑出**属于这一单**的那一段。
+
+    背景（2026-10-15 用户报"廖雪女士的原始订单信息错误"）：批量录入时整段原文
+    被原样存进了每一单的 raw_text，于是看单条订单时读到的是别人的信息——
+    套餐名、搭建不搭建、联系人全都会串。例：订单 112（廖雪女士·6人餐·搭建）
+    的 raw_text 里混着 9 单，解析出的套餐名是别人的"4人餐"。
+
+    做法：用 split_orders 切段后按 电话>联系人>金额>地址 打分取最高。
+    **单段原文（绝大多数情况）原样返回，零副作用**；全都匹配不上时也返回原文。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        chunks = [c for c, _ in split_orders(text)]
+    except Exception:
+        chunks = []
+    if len(chunks) <= 1:
+        return text
+
+    def _score(b):
+        s = 0
+        if contact_phone and str(contact_phone) in b:
+            s += 10
+        if contact_name and str(contact_name) in b:
+            s += 5
+        if amount:
+            try:
+                amt = int(float(amount))
+            except (TypeError, ValueError):
+                amt = None
+            if amt:
+                for m in re.findall(r"金额\s*[:：]?\s*(\d+)", b):
+                    if int(m) == amt:
+                        s += 3
+                        break
+        if address and str(address) in b:
+            s += 2
+        return s
+
+    best = max(chunks, key=_score)
+    return best if _score(best) > 0 else text

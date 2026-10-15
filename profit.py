@@ -19,6 +19,7 @@
 import json
 import math
 import re as _re
+from parser import own_raw_block      # 批量录入时从整段原文里切出「本单那一段」
 
 KINDS = ("food", "outsource", "fuel", "labor", "consume", "other")
 
@@ -182,7 +183,10 @@ def _order_setup(db, o, cfg):
         _rr = db.execute("SELECT raw_text, note FROM orders WHERE id=?", (o.get("id"),)).fetchone()
         if _rr:
             rt = _rr["raw_text"]; nt = _rr["note"]
-    _t = _setup_from_text((rt or "") + " " + (nt or ""))
+    # 批量录入时 raw_text 里混着好几单（别人的"不搭建"会串进来），先切出本单那一段再判
+    _own = own_raw_block(rt, o.get("contact_name"), o.get("contact_phone"),
+                         o.get("amount"), o.get("address"))
+    _t = _setup_from_text((_own or "") + " " + (nt or ""))
     if _t is not None:
         return _t
     address = (o.get("address") or "")
@@ -444,6 +448,7 @@ def order_profit(db, oid, cfg=None):
         "discount": round(float(o.get("discount") or 0), 2),
         "menu_name": o.get("menu_name") or "",
         "setup_flag": o.get("setup_flag"),
+        "setup": setup,                 # 判定后的搭建（1=搭建 / 0=不搭建），供明细弹窗"录入信息"显示
         "delivery_fee": o.get("delivery_fee"),
         "delivery_person": o.get("delivery_person") or "",
         "source": o.get("source") or "",
@@ -478,7 +483,11 @@ def order_profit(db, oid, cfg=None):
         "alert": level,
         "margin_alert": alert_pct,
         # 录入时的套餐名（如「20人餐」），不拆分；成本仍按拆后的档位套餐算
-        "package_label": _extract_package_label(o.get("raw_text"), order_info.get("packages", [])),
+        # 批量录入时 raw_text 混着好几单，先切出本单那段，否则套餐名会显示成别人的
+        "package_label": _extract_package_label(
+            own_raw_block(o.get("raw_text"), o.get("contact_name"), o.get("contact_phone"),
+                          o.get("amount"), o.get("address")),
+            order_info.get("packages", [])),
     }
 
 

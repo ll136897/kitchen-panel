@@ -1378,8 +1378,19 @@ def order_detail(oid):
     if o.get("setup_flag") is None:
         _pt = sum((p.get("price") or p.get("std_price") or 0) * (p.get("quantity") or 0) for p in o["packages"])
         _pq = sum((p.get("quantity") or 0) for p in o["packages"])
-        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
+        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"),
+                                             o.get("note"), o.get("raw_text"),
+                                             contact_name=o.get("contact_name"),
+                                             contact_phone=o.get("contact_phone"))
         o["setup_flag"] = _gs
+    # 同时给出"只属于这一单"的原文片段——批量录入时整段原文会混进别人的单，
+    # 前端「原始订单记录」浮层用它，才不会显示成别人的信息
+    try:
+        from parser import own_raw_block as _orb2
+        o["own_raw_text"] = _orb2(o.get("raw_text"), o.get("contact_name"),
+                                  o.get("contact_phone"), o.get("amount"), o.get("address"))
+    except Exception:
+        o["own_raw_text"] = o.get("raw_text") or ""
     # 备餐需求
     from calculator import calc_order_requirements, calc_prep_urgency
     req = calc_order_requirements(oid)
@@ -1906,7 +1917,8 @@ def _place_delivery_fee(db, address):
     return float(cfg.get("default_outsource") or 100)
 
 
-def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_text=""):
+def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_text="",
+                         contact_name="", contact_phone=""):
     """推导 (搭建 1/0, 配送费, 依据)。
     优先级：① 手工填过的 setup_flag（调用方已处理）；② 原始文字 raw_text 里明确写了（搭建）/（不搭建）；
     ③ 以上都没有才按价格推导。
@@ -1917,12 +1929,18 @@ def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_te
           备注出现租赁物（桌椅/卡式炉/气罐/烤盘…）→ 判半包；否则看金额更靠近哪一边
     """
     # ② 原始文字明确标注了 搭建/不搭建（用户每单都写了），高于价格推导
+    #    批量录入时 raw_text 里混着好几单，先切出本单那一段，否则会读成别人的搭建状态
     try:
         from profit import _setup_from_text as _sft
+        from parser import own_raw_block as _orb
     except Exception:
         _sft = None
+        _orb = None
     if _sft is not None:
-        _t = _sft((raw_text or "") + " " + (note or ""))
+        _rt = raw_text or ""
+        if _orb is not None:
+            _rt = _orb(_rt, contact_name, contact_phone, amount, address) or _rt
+        _t = _sft((_rt or "") + " " + (note or ""))
         if _t is not None:
             total = float(price_total or 0)
             qty = int(pkg_qty or 1) or 1

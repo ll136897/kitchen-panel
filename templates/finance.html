@@ -1129,7 +1129,10 @@ function toggleRawPop(oid, ev){
   if(rawPopCache[oid]){ done(); return; }
   fetch('/api/orders/'+oid+'/detail').then(function(r){ return r.json(); }).then(function(d){
     const o = (d && d.ok && d.data) ? d.data : {};
-    rawPopCache[oid] = {raw_text: o.raw_text || '', setup_flag: (o.setup_flag===0||o.setup_flag===1) ? o.setup_flag : null};
+    // 优先用「只属于这一单」的原文片段：批量录入时整段原文混着别人的单，直接显示会是错的
+    rawPopCache[oid] = {raw_text: o.own_raw_text || o.raw_text || '',
+                        setup_flag: (o.setup_flag===0||o.setup_flag===1) ? o.setup_flag
+                                   : ((o.setup===0||o.setup===1) ? o.setup : null)};
     done();
   }).catch(function(){
     rawPopCache[oid] = {raw_text: '(读取失败，请重试)', setup_flag: null};
@@ -1634,6 +1637,10 @@ function renderOrderInfo(od){
   put('📞 电话', od.contact_phone);
   put('📍 地址', od.address);
   put('🍱 套餐', pkg || od.menu_name);
+  // 搭建与否：这是成本大头（搭建才收搭建费），必须摆在录入信息里对着核对
+  const _st = (od.setup === 1 || od.setup === 0) ? od.setup
+            : ((od.setup_flag === 1 || od.setup_flag === 0) ? od.setup_flag : null);
+  if(_st !== null) put('🏗️ 搭建', _st === 1 ? '搭建（全包）' : '不搭建（半包）');
   put('📅 预约', (od.booking_date||'') + (od.booking_time ? (' ' + od.booking_time) : ''));
   put('🕐 用餐', od.meal_time);
   put('💵 金额', od.amount ? fmtY(od.amount) : '');
