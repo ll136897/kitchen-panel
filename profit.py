@@ -18,6 +18,7 @@
 """
 import json
 import math
+import re as _re
 
 KINDS = ("food", "outsource", "fuel", "labor", "consume", "other")
 
@@ -37,6 +38,35 @@ KIND_HINT = {
     "consume": "炭、气罐这类；一次性餐具已含在食材里，这里别重复算",
     "other": "临时多出来的开销",
 }
+
+
+# ---------- 套餐情况（录入时口径，不拆分） ----------
+# 录入时用户写的是「20人餐」「18人餐」这类整单描述；系统为算成本拆成多个档位套餐
+# （如 20人餐 → 两个 9-10人餐）。毛利率表里要展示的是「录入时的套餐名」，不是拆分后的。
+def _extract_package_label(raw_text, packages=None):
+    """从订单原始文字的「预约项目」取录入时的套餐名（如 '20人餐'），不做拆分。
+    取不到时回退到 order_packages 按名称合并（如 '9-10人餐×2'）。"""
+    rt = (raw_text or "").strip()
+    label = ""
+    if rt:
+        m = _re.search(
+            r"预约项目[:：]?\s*(.*?)(?=预约地址|用餐时间|联系人|联系电话|金额|押金|备注|预约时间|\Z)",
+            rt, _re.S)
+        seg = (m.group(1) if m else rt).strip()
+        # 去掉每行的（搭建）/（不搭建）/（半包）等后缀，只留套餐名
+        seg = _re.sub(r"[（(][^）)]*搭建[^）)]*[）)]", " ", seg)
+        seg = _re.sub(r"[（(]不搭建[）)]", " ", seg)
+        seg = _re.sub(r"[（(]半包[）)]", " ", seg)
+        seg = _re.sub(r"\s+", " ", seg).strip(" ·、/｜|")
+        label = seg
+    if not label and packages:
+        agg = {}
+        for pk in packages:
+            nm = (pk.get("name") or "套餐").strip()
+            agg[nm] = agg.get(nm, 0) + int(pk.get("quantity") or 1)
+        label = "、".join(("%s×%d" % (nm, q)) if q > 1 else nm
+                          for nm, q in agg.items())
+    return label
 
 DEFAULT_CONFIG = {
     # 场地单价表：outsource=搭建回收每单单价，fuel=配送费默认值
@@ -442,6 +472,8 @@ def order_profit(db, oid, cfg=None):
         "net_profit": net_profit,
         "alert": level,
         "margin_alert": alert_pct,
+        # 录入时的套餐名（如「20人餐」），不拆分；成本仍按拆后的档位套餐算
+        "package_label": _extract_package_label(o.get("raw_text"), order_info.get("packages", [])),
     }
 
 
@@ -508,6 +540,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
             "address": p["address"], "revenue": p["revenue"], "food": food, "other": other,
             "cost_total": p["cost_total"], "profit": p["cash_profit"], "margin": p["margin"],
             "net_profit": p["net_profit"], "alert": p["alert"],
+            "package_label": p.get("package_label", ""),
             "payment_status": p["payment_status"],
             "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"],
@@ -663,6 +696,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
             "address": p["address"], "revenue": p["revenue"], "food": food, "other": round(cost_total - food, 2),
             "cost_total": cost_total, "profit": cash_profit, "margin": margin,
             "net_profit": net_profit, "alert": level,
+            "package_label": p.get("package_label", ""),
             "payment_status": p["payment_status"], "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"], "fixed_alloc": fixed_alloc, "by_kind": bk,
         })
