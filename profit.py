@@ -264,9 +264,16 @@ def _food_cost(db, oid):
     # 备注加菜（备注解析出来的额外食材）：按 set 覆盖 / add 增量 并进成本
     try:
         from parser import parse_order_text, match_extra_ingredients_to_db
-        r = cur.execute("SELECT raw_text FROM orders WHERE id=?", (oid,)).fetchone()
+        r = cur.execute(
+            "SELECT raw_text, contact_name, contact_phone, amount, address FROM orders WHERE id=?",
+            (oid,)).fetchone()
         raw = (r["raw_text"] if r else "") or ""
         if raw:
+            # 批量录入时整段原文混着好几单，先切出本单那段——否则会把别人的加菜算到这单头上
+            raw = own_raw_block(raw, (r["contact_name"] if r else ""),
+                                (r["contact_phone"] if r else ""),
+                                (r["amount"] if r else None),
+                                (r["address"] if r else "")) or raw
             parsed = parse_order_text(raw)
             for ei in (match_extra_ingredients_to_db(parsed.get("extra_ingredients", []) or []) or []):
                 iid = ei.get("matched_id")

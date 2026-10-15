@@ -494,6 +494,10 @@ def _parse_extra_ingredients(note):
     segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
 
     for seg in segments:
+        # 「X换Y」是换菜（dish_swaps 已经在管），不是加菜——别把它当加菜算进成本。
+        # 例："五香料换川香料，加一个薄荷牛肉" 前半句是换口味，只有后半句才是加菜。
+        if re.search(r".+换.+", seg):
+            continue
         mode = _detect_mode(seg)
         # 匹配 "加一份XX" / "加2份XX" / "多加一份XX" / "一份XX"
         m = re.search(r"(?:多加|加|再加)?\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*[份盘份盘]?\s*(.+)", seg)
@@ -513,8 +517,10 @@ def _parse_extra_ingredients(note):
         name = m.group(2).strip()
         # 去掉尾部"一份""两份"等残留
         name = re.sub(r"(一份|两份|二份|三份|四份|五份|六份|七份|八份|九份|十份|1份|2份)$", "", name).strip()
-        # 去掉前缀动词
-        name = re.sub(r"^(新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|南美|沙葱|安格斯|谷饲|好|的|个|份|盘)$", "", name).strip()
+        # 去掉前缀的动词/量词（"个薄荷牛肉"→"薄荷牛肉"、"奶香牛骰子"→"牛骰子"）。
+        # ⚠️ 原来是 `^(...)$`（整名等于才去掉），导致"加一个薄荷牛肉"里的"个"去不掉，
+        # 名字变成"个薄荷牛肉"，匹配不到库里的"薄荷拌牛肉"，加菜成本就被漏掉了。
+        name = re.sub(r"^(多加|加|再加|配|带|拿|新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|南美|沙葱|安格斯|谷饲|好|的|个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", name).strip()
         # 排除工具类（卡式炉/烤盘/桌子/椅子等已由 _parse_extra_tools 处理）
         tool_keywords = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "盘", "夹", "刷", "剪", "燃气", "气罐"]
         if any(kw in name for kw in tool_keywords):
@@ -621,6 +627,17 @@ def match_extra_ingredients_to_db(extra_ings):
                 if name in ing["name"] or ing["name"] in name:
                     matched = ing
                     break
+        # 3. 去连接字后再比：库里叫"薄荷拌牛肉"、备注写"薄荷牛肉"，中间多个"拌"就匹配不上，
+        #    导致加菜成本直接漏掉（肖先森那单就是这样）
+        if not matched:
+            _strip = lambda s: re.sub(r"[拌的\s]", "", s or "")
+            n2 = _strip(name)
+            if n2:
+                for ing in all_ings:
+                    i2 = _strip(ing["name"])
+                    if n2 == i2 or (n2 and i2 and (n2 in i2 or i2 in n2)):
+                        matched = ing
+                        break
         if matched:
             # 每份克数：优先用套餐里的典型 per_package，否则默认 150g（肉类）/200g（蔬菜）
             per_pkg = typical_per_pkg.get(matched["id"])

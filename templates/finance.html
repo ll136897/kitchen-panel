@@ -167,14 +167,17 @@
   .st-ic.setup{background:#e7f6ec;border:1px solid #b7e3c6}
   .st-ic.nosetup{background:#f3f1ee;border:1px solid #e3ded7}
   .st-ic.unknown{display:none}
+  /* 显示时 JS 设 display:flex；整块最高不超过一屏，超出的正文自己在里面滚 */
   .raw-pop{position:fixed;z-index:9999;display:none;width:max-content;max-width:min(92vw,440px);
+    max-height:calc(100vh - 16px);flex-direction:column;
     background:#fff;border:1px solid var(--border);border-radius:10px;
     box-shadow:0 10px 28px rgba(0,0,0,.16);padding:10px 12px}
   .raw-pop .rp-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;
     font-weight:800;color:#5b4a3a;font-size:12px;margin-bottom:6px}
   .raw-pop .rp-x{cursor:pointer;color:#aaa;font-weight:400;font-size:13px}
   .raw-pop .rp-x:hover{color:#c0392b}
-  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-word;max-height:44vh;overflow:auto;
+  /* min-height:0 关键：flex 子项要能滚动必须加它，否则内容会把浮层撑出屏幕 */
+  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-word;flex:1 1 auto;min-height:0;overflow:auto;
     color:#3a2f26;background:#fbf8f4;border:1px dashed #efe6d9;border-radius:6px;padding:8px;font-size:12px;line-height:1.55}
   .raw-pop .rp-tip{color:#9c8f80;font-size:11px;margin-top:6px}
   .raw-pop .rp-chk{margin-top:8px;font-size:12px;border-radius:6px;padding:5px 8px;line-height:1.4}
@@ -1196,6 +1199,7 @@ function setupIcon(o){
 // ===== 原始订单记录下拉浮层（点客户名 / 点任意空白处关闭） =====
 let rawPopCache = {};      // oid -> {raw_text, setup_flag}
 let rawPopOid = null;
+let rawPopAnchor = null;   // 记住是从哪个客户名点开的，内容加载完要按它重新定位
 function ensureRawPop(){
   let el = document.getElementById('rawPop');
   if(el) return el;
@@ -1221,11 +1225,12 @@ function toggleRawPop(oid, ev){
   if(ev){ ev.stopPropagation(); }
   const el = ensureRawPop();
   const anchor = ev && ev.currentTarget;
-  if(rawPopOid === oid && el.style.display === 'block'){ closeRawPop(); return; }
+  if(rawPopOid === oid && el.style.display !== 'none'){ closeRawPop(); return; }
   rawPopOid = oid;
+  rawPopAnchor = anchor || null;
   el.innerHTML = '<div class="rp-hd">📄 原始订单记录<span class="rp-x">✕</span></div>'
                + '<div class="rp-tip">读取中…</div>';
-  el.style.display = 'block';
+  el.style.display = 'flex';
   placeRawPop(anchor);
   const xp = el.querySelector('.rp-x');
   if(xp) xp.onclick = function(e){ e.stopPropagation(); closeRawPop(); };
@@ -1244,6 +1249,11 @@ function toggleRawPop(oid, ev){
   });
 }
 function renderRawPop(oid){
+  const el = ensureRawPop();
+  renderRawPopHtml(oid);
+  placeRawPop(rawPopAnchor);   // 内容填充后高度变了，必须重新定位，否则会顶出屏幕
+}
+function renderRawPopHtml(oid){
   const el = ensureRawPop();
   const c = rawPopCache[oid] || {raw_text:'', setup_flag:null};
   const raw = (c.raw_text || '').trim();
@@ -1269,23 +1279,27 @@ function renderRawPop(oid){
 function placeRawPop(anchor){
   const el = ensureRawPop();
   const pad = 8;
+  const vw = window.innerWidth, vh = window.innerHeight;
   let top = 0, left = 0;
   if(anchor && anchor.getBoundingClientRect){
     const r = anchor.getBoundingClientRect();
-    left = Math.min(r.left, window.innerWidth - el.offsetWidth - pad);
+    left = Math.min(r.left, vw - el.offsetWidth - pad);
     left = Math.max(pad, left);
     top = r.bottom + 4;
-    if(top + el.offsetHeight > window.innerHeight - pad){
-      top = Math.max(pad, r.top - el.offsetHeight - 4);   // 下方放不下就翻到上方
+    if(top + el.offsetHeight > vh - pad){
+      top = r.top - el.offsetHeight - 4;                  // 下方放不下就翻到上方
     }
   }
+  // 上下都放不下（原文很长）时，夹在视口内：宁可遮住一点，也不让内容跑出屏幕
+  const maxT = Math.max(pad, vh - el.offsetHeight - pad);
+  top = Math.min(Math.max(pad, top), maxT);
   el.style.left = left + 'px';
   el.style.top  = top + 'px';
 }
 // 点任意地方关闭（浮层内部、客户名本身除外）+ Esc 关闭
 document.addEventListener('click', function(e){
   const el = document.getElementById('rawPop');
-  if(!el || el.style.display !== 'block') return;
+  if(!el || el.style.display === 'none') return;
   if(el.contains(e.target)) return;
   if(e.target && e.target.closest && e.target.closest('.cust-pop')) return;  // 交给 toggle 处理
   closeRawPop();
