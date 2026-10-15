@@ -336,7 +336,7 @@ function toggleEdit(show){
     return;
   }
   c.style.display = willShow ? 'block' : 'none';
-  if(willShow){ loadPkgs(fillEdit); loadOwners(); }
+  if(willShow){ _feeTouched = false; loadPkgs(fillEdit); loadOwners(); }
 }
 // 能改这一单的人就能改"归属"（谁归属的单谁就能改，服务端同样判定）
 // 候选人来自 /api/signers（刘/孙/自己）——不能用 /api/users（那是账号管理专属）
@@ -446,6 +446,7 @@ function fillEdit(){
 
 // ===== 记账信息（下拉 + 默认最常用；少手填）=====
 let _ledgerOpts = null;
+let _feeTouched = false;   // 配送费是否被用户手改过（手改后不再被"搭建"联动覆盖）
 function _optHtml(arr, cur, addEmpty){
   let list = (arr||[]).map(String);
   const c = (cur==null?'':String(cur));
@@ -476,10 +477,27 @@ function fillLedgerFields(o){
     if(setup) setup.value = (o.setup_flag === 1) ? '1' : (o.setup_flag === 0 ? '0' : '');
     const fee = document.getElementById('edDeliveryFee');
     if(fee){
-      const curFee = (o.delivery_fee != null) ? String(o.delivery_fee) : String(L.default_fee != null ? L.default_fee : '');
+      // 已手填过就用它的值；否则按「和财务页同一套逻辑」的建议值：搭建→场地单价×份数，不搭建→0
+      const curFee = (o.delivery_fee != null)
+        ? String(o.delivery_fee)
+        : String((o.suggested_delivery_fee != null) ? o.suggested_delivery_fee : 0);
       fee.innerHTML = _optHtml(L.delivery_fees, curFee, true);
       fee.value = curFee;
     }
+    // 切换「是否搭建」时，配送费跟着变（用户仍可手改；手改过就不再自动覆盖）
+    const setupEl = document.getElementById('edSetup');
+    if(setupEl){
+      setupEl.addEventListener('change', function(){
+        const f = document.getElementById('edDeliveryFee');
+        if(!f || _feeTouched) return;                 // 用户手改过 → 尊重手改
+        const v = (setupEl.value === '0') ? 0
+                : ((o.delivery_fee_if_setup != null) ? o.delivery_fee_if_setup : 0);
+        f.innerHTML = _optHtml(L.delivery_fees, String(v), true);
+        f.value = String(v);
+      });
+    }
+    const feeEl2 = document.getElementById('edDeliveryFee');
+    if(feeEl2) feeEl2.addEventListener('change', function(){ _feeTouched = true; });
     const dp = document.getElementById('edDeliveryPerson');
     const dpl = document.getElementById('edDeliveryPersonList');
     if(dp){
@@ -493,8 +511,9 @@ function fillLedgerFields(o){
     }
     const src = document.getElementById('edSource');
     if(src){
+      // 默认"无"（空值）—不猜来源；要归类时再选。空选项文案用「无」而不是「未填」
       const curSrc = o.source || L.default_source || '';
-      src.innerHTML = _optHtml(L.sources, curSrc, true);
+      src.innerHTML = '<option value="">无</option>' + _optHtml(L.sources, curSrc, false);
       src.value = curSrc;
     }
   });

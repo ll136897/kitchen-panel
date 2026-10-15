@@ -1375,14 +1375,22 @@ def order_detail(oid):
     """, (oid,))
     o["packages"] = [dict(x) for x in cur.fetchall()]
     # 搭建：手工填过 setup_flag 的优先；库里为空时先读 raw_text 里的「搭建/不搭建」字样，都没有才按价格推导（与导出/列表同口径），仅用于展示
+    _pt = sum((p.get("price") or p.get("std_price") or 0) * (p.get("quantity") or 0) for p in o["packages"])
+    _pq = sum((p.get("quantity") or 0) for p in o["packages"])
+    _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"),
+                                         o.get("note"), o.get("raw_text"),
+                                         contact_name=o.get("contact_name"),
+                                         contact_phone=o.get("contact_phone"))
     if o.get("setup_flag") is None:
-        _pt = sum((p.get("price") or p.get("std_price") or 0) * (p.get("quantity") or 0) for p in o["packages"])
-        _pq = sum((p.get("quantity") or 0) for p in o["packages"])
-        _gs, _gf, _w = _guess_setup_and_fee(db, _pt, _pq, o.get("amount"), o.get("address"),
-                                             o.get("note"), o.get("raw_text"),
-                                             contact_name=o.get("contact_name"),
-                                             contact_phone=o.get("contact_phone"))
         o["setup_flag"] = _gs
+    # 配送费建议值：**和财务页订单明细用同一套逻辑**（_guess_setup_and_fee）——
+    # 搭建 → 场地单价 × 份数；不搭建（半包/自提）→ 0。订单详情页用它做默认值，用户仍可手改。
+    o["suggested_delivery_fee"] = round(float(_gf or 0), 2)
+    try:
+        o["delivery_fee_if_setup"] = round(
+            float(_place_delivery_fee(db, o.get("address"))) * max(1, int(_pq or 1)), 2)
+    except Exception:
+        o["delivery_fee_if_setup"] = o["suggested_delivery_fee"]
     # 同时给出"只属于这一单"的原文片段——批量录入时整段原文会混进别人的单，
     # 前端「原始订单记录」浮层用它，才不会显示成别人的信息
     try:
@@ -1845,7 +1853,8 @@ def order_ledger_options():
         "default_fee": fees[0] if fees else 100,
         "menu_names": menu_names,
         "sources": ["私人关系", "美团", "抖音", "小红书", "朋友介绍", "其他"],
-        "default_source": "私人关系",
+        # 默认"无"（用户 2026-10-15 要求）：不猜来源，空着最干净；要归类时再选
+        "default_source": "",
     }})
 
 
