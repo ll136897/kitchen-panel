@@ -495,7 +495,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
     if extra_clause:
         clause += " " + extra_clause
         params.extend(extra_params)
-    rows = cur.execute("SELECT o.id, o.created_by FROM orders o WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
+    rows = cur.execute("SELECT o.id, o.created_by, u.name AS created_by_name FROM orders o LEFT JOIN users u ON u.id=o.created_by WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
@@ -536,6 +536,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
             tot["warn"] += 1
         orders.append({
             "id": p["order_id"], "created_by": r["created_by"],
+            "created_by_name": r["created_by_name"] or "",
             "booking_date": p["booking_date"], "contact_name": p["contact_name"],
             "address": p["address"], "revenue": p["revenue"], "food": food, "other": other,
             "cost_total": p["cost_total"], "profit": p["cash_profit"], "margin": p["margin"],
@@ -615,7 +616,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
         clause += " " + extra_clause
         params.extend(extra_params)
     rows = cur.execute(
-        "SELECT o.id, o.created_by, o.booking_date FROM orders o WHERE %s ORDER BY o.booking_date ASC, o.id ASC" % clause,
+        "SELECT o.id, o.created_by, o.booking_date, u.name AS created_by_name FROM orders o LEFT JOIN users u ON u.id=o.created_by WHERE %s ORDER BY o.booking_date ASC, o.id ASC" % clause,
         params).fetchall()
 
     labor_by_date = real_labor_by_date(db, date_from, date_to)
@@ -692,6 +693,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
             by_kind[k] = round(by_kind.get(k, 0.0) + v, 2)
         orders.append({
             "id": p["order_id"], "created_by": r["created_by"],
+            "created_by_name": r["created_by_name"] or "",
             "booking_date": date, "contact_name": p["contact_name"],
             "address": p["address"], "revenue": p["revenue"], "food": food, "other": round(cost_total - food, 2),
             "cost_total": cost_total, "profit": cash_profit, "margin": margin,
