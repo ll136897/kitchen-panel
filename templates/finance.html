@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <style>
   .fin-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:16px;margin:10px 0}
-  .fin-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .fin-kpi{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:12px}
   .fin-kpi-item{background:linear-gradient(135deg,#f9f5ed,#f3ebe0);border-radius:10px;padding:10px;text-align:center}
   .fin-kpi-item .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
   .fin-kpi-item .val{font-size:18px;font-weight:800}
@@ -40,6 +40,18 @@
   /* 日期范围合并为一排：日/周/月/全部 + 原生日期 + 快捷，整体可换行；内部 quick-chips 不再单独占一行 */
   .date-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
   .date-toolbar .quick-chips{margin:0;flex:1 1 auto;min-width:0}
+  .rti{font-style:normal}
+  /* 手机：日期区压成一行——tab 去掉图标省宽、快捷 chip 横滑不换行；省下的纵向空间留给数据 */
+  @media(max-width:600px){
+    .rti{display:none}
+    .date-toolbar{flex-wrap:nowrap;gap:6px;margin:0 0 8px;overflow:hidden}
+    .date-toolbar .range-tabs{flex:0 0 auto;gap:1px;padding:2px}
+    .range-tab{padding:5px 9px;font-size:12px}
+    .date-toolbar .quick-chips{flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto;
+      -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+    .date-toolbar .quick-chips::-webkit-scrollbar{display:none}
+    .qchip{padding:4px 10px;font-size:12px;flex:0 0 auto}
+  }
   .qchip{padding:6px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#6b4f3a;font-weight:600;transition:all .15s}
   /* 各渠道录入进度（记住每渠道上次录到哪） */
   .ch-prog{background:#f7f2ea;border:1px solid #ead9c4;border-radius:10px;padding:8px 10px}
@@ -110,7 +122,7 @@
   .bd-day .n{font-size:10px;font-weight:600;opacity:.75}
   .bd-days{margin:0 0 10px 8px;display:flex;gap:6px;flex-wrap:wrap}
   /* 明细抽屉 */
-  .kpi-sheet{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+  .kpi-sheet{background:#fff;border-radius:14px;max-width:min(880px,96vw);width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
   .kpi-sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border-l);background:#fdfaf6}
   .kpi-sheet-head .ttl{font-weight:800;font-size:15px;color:#3a2416}
   .kpi-sheet-head .sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
@@ -186,14 +198,20 @@
   .pf-card .line b{font-size:14px}
   .pf-card .acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
   @media(max-width:600px){
-    .fin-kpi{grid-template-columns:repeat(2,1fr)}
-    .fin-kpi-item .val{font-size:16px}
+    /* 一屏多看：利润/货款格子手机排 3 列、更紧凑（合并成一张卡后不至于变长） */
+    .fin-kpi{grid-template-columns:repeat(3,1fr);gap:7px}
+    .fin-kpi-item{padding:8px 6px}
+    .fin-kpi-item .val{font-size:15px}
+    .fin-kpi-item .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .fin-tbl{font-size:11px}
     .fin-tbl th,.fin-tbl td{padding:5px 3px}
     .cost-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
     .tbl-profit{display:none}
     .pf-cards{display:block}
     .pf-row input{width:66px}
+    /* KPI 弹窗表格：手机端允许换行、不再横向溢出——加了「归属」列也照样一屏看完，不用左右拖 */
+    .kpi-tbl td,.kpi-tbl th{white-space:normal}
+    .kpi-tbl-wrap{overflow-x:visible}
     /* 手机端隐藏原生日期选择器：它会盖住大半屏；常用日期由上方快捷chip(今天/昨天/本周/本月/上月)+区间tab覆盖 */
     #rangeDate{display:none}
   }
@@ -263,13 +281,13 @@
     <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
   </div>
 
-  <!-- 日期范围：日/周/月/全部 + 原生日期 + 快捷(今天/昨天/本周/本月/上月) 合并为一排；下方再放每月日期（有账日期条） -->
+  <!-- 日期范围：日/周/月/全部 + 原生日期 + 快捷(今天/昨天/本周/本月/上月) 压成一排；手机端 tab 省份图标、快捷 chip 横滑不换行 -->
   <div class="date-toolbar" id="dateToolbar">
     <div class="range-tabs">
-      <button class="range-tab active" data-range="day" onclick="setRange('day')">📅 日</button>
-      <button class="range-tab" data-range="week" onclick="setRange('week')">🗓️ 周</button>
-      <button class="range-tab" data-range="month" onclick="setRange('month')">📊 月</button>
-      <button class="range-tab" data-range="all" onclick="setRange('all')">🗂️ 全部</button>
+      <button class="range-tab active" data-range="day" onclick="setRange('day')"><i class="rti">📅</i>日</button>
+      <button class="range-tab" data-range="week" onclick="setRange('week')"><i class="rti">🗓️</i>周</button>
+      <button class="range-tab" data-range="month" onclick="setRange('month')"><i class="rti">📊</i>月</button>
+      <button class="range-tab" data-range="all" onclick="setRange('all')"><i class="rti">🗂️</i>全部</button>
     </div>
     <input type="date" id="rangeDate" class="range-date" onchange="onDateChange()">
     <div class="quick-chips" id="quickChips">
@@ -287,14 +305,10 @@
   <!-- 有账日期条：点一天直接看那天的账（不用再开原生日期选择器、点"完成"） -->
   <div id="billDates" style="margin-bottom:12px"></div>
 
-  <!-- 利润总览 -->
+  <!-- 利润总览 + 货款押金：合并成同一个框（少一张卡＝少一次往下拖，相关数据一屏看完） -->
   <div class="fin-card">
     <div class="fin-kpi" id="kpiBox"></div>
-  </div>
-
-  <!-- 货款 + 押金 -->
-  <div class="fin-card">
-    <div class="fin-kpi" id="payBox"></div>
+    <div class="fin-kpi" id="payBox" style="margin-bottom:0"></div>
   </div>
 
   <!-- 每单利润（默认收起为缩略框，点标题展开，省版面/少翻页） -->
