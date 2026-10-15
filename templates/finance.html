@@ -127,6 +127,27 @@
   .who-tag.who-me{background:#fdeede;color:#c8651a}
   .who-tag.who-other{background:#f3efe9;color:#6b5b4b}
   .who-tag.who-none{background:#f6f6f6;color:#999}
+  /* 客户名点开「原始订单记录」浮层 */
+  .cust-pop{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;text-decoration-color:#cbb9a3}
+  .cust-pop:hover{color:var(--primary);text-decoration-color:var(--primary)}
+  .raw-pop{position:fixed;z-index:9999;display:none;width:max-content;max-width:min(92vw,440px);
+    background:#fff;border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 10px 28px rgba(0,0,0,.16);padding:10px 12px}
+  .raw-pop .rp-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    font-weight:800;color:#5b4a3a;font-size:12px;margin-bottom:6px}
+  .raw-pop .rp-x{cursor:pointer;color:#aaa;font-weight:400;font-size:13px}
+  .raw-pop .rp-x:hover{color:#c0392b}
+  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-word;max-height:44vh;overflow:auto;
+    color:#3a2f26;background:#fbf8f4;border:1px dashed #efe6d9;border-radius:6px;padding:8px;font-size:12px;line-height:1.55}
+  .raw-pop .rp-tip{color:#9c8f80;font-size:11px;margin-top:6px}
+  .raw-pop .rp-chk{margin-top:8px;font-size:12px;border-radius:6px;padding:5px 8px;line-height:1.4}
+  .raw-pop .rp-chk.ok{background:#eaf6ec;color:#2f7d32}
+  .raw-pop .rp-chk.no{background:#fdecea;color:#c0392b}
+  /* 表头排序：点一下换升降序，不占额外版面 */
+  .kpi-tbl th.srt{cursor:pointer;user-select:none;white-space:nowrap}
+  .kpi-tbl th.srt:hover{color:var(--primary)}
+  .kpi-tbl th.srt.on{color:var(--primary);font-weight:800}
+  .srt-ar{font-style:normal;margin-left:2px;font-size:10px;opacity:.85}
   .pf-card .who{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .kpi-tbl td.r,.kpi-tbl th.r{text-align:right}
   .kpi-tbl tr.sub td{background:#fbf8f4;color:#7a6a5c;font-size:11px}
@@ -1068,11 +1089,112 @@ function depSelect(o){
     <option value="forfeited" ${cur==='forfeited'?'selected':''}>扣留</option>
   </select>`;
 }
+// 操作列：财务页不跳备餐/订单页（备餐是后厨的事、订单在"明细"里看），只留一个「明细」
 function orderLinks(o){
-  return `<a class="kpi-lk" href="/prep?focus=${o.id}" target="_blank">备餐</a>
-          <a class="kpi-lk" href="/orders" target="_blank">订单</a>
-          <button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="kpiEditCost(${o.id})">改</button>`;
+  return `<button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="kpiEditCost(${o.id})">明细</button>`;
 }
+// 客户名：点一下弹出原始订单记录（下拉浮层），用作全表统一的入口
+function custNameHtml(o){
+  return `<span class="cust-pop" onclick="toggleRawPop(${o.id}, event)" title="点一下看原始订单记录">${kpiEsc(o.contact_name||'-')}</span>`;
+}
+
+// ===== 原始订单记录下拉浮层（点客户名 / 点任意空白处关闭） =====
+let rawPopCache = {};      // oid -> {raw_text, setup_flag}
+let rawPopOid = null;
+function ensureRawPop(){
+  let el = document.getElementById('rawPop');
+  if(el) return el;
+  el = document.createElement('div');
+  el.id = 'rawPop';
+  el.className = 'raw-pop';
+  el.onclick = function(e){ e.stopPropagation(); };
+  document.body.appendChild(el);
+  return el;
+}
+function rawSetupFromText(t){
+  if(!t) return null;
+  if(/不搭建/.test(t)) return 0;      // 先判"不搭建"，否则会被"搭建"吃掉
+  if(/搭建/.test(t)) return 1;
+  return null;
+}
+function closeRawPop(){
+  const el = document.getElementById('rawPop');
+  if(el) el.style.display = 'none';
+  rawPopOid = null;
+}
+function toggleRawPop(oid, ev){
+  if(ev){ ev.stopPropagation(); }
+  const el = ensureRawPop();
+  const anchor = ev && ev.currentTarget;
+  if(rawPopOid === oid && el.style.display === 'block'){ closeRawPop(); return; }
+  rawPopOid = oid;
+  el.innerHTML = '<div class="rp-hd">📄 原始订单记录<span class="rp-x">✕</span></div>'
+               + '<div class="rp-tip">读取中…</div>';
+  el.style.display = 'block';
+  placeRawPop(anchor);
+  const xp = el.querySelector('.rp-x');
+  if(xp) xp.onclick = function(e){ e.stopPropagation(); closeRawPop(); };
+  const done = ()=>{ if(rawPopOid===oid) renderRawPop(oid); };
+  if(rawPopCache[oid]){ done(); return; }
+  fetch('/api/orders/'+oid+'/detail').then(function(r){ return r.json(); }).then(function(d){
+    const o = (d && d.ok && d.data) ? d.data : {};
+    rawPopCache[oid] = {raw_text: o.raw_text || '', setup_flag: (o.setup_flag===0||o.setup_flag===1) ? o.setup_flag : null};
+    done();
+  }).catch(function(){
+    rawPopCache[oid] = {raw_text: '(读取失败，请重试)', setup_flag: null};
+    done();
+  });
+}
+function renderRawPop(oid){
+  const el = ensureRawPop();
+  const c = rawPopCache[oid] || {raw_text:'', setup_flag:null};
+  const raw = (c.raw_text || '').trim();
+  const fromText = rawSetupFromText(raw);
+  let chk = '';
+  if(fromText !== null){
+    const sys = c.setup_flag;
+    if(sys === null || sys === undefined){
+      chk = `<div class="rp-chk">⚠️ 系统没判定出搭建状态，建议核对</div>`;
+    }else if(fromText === sys){
+      chk = `<div class="rp-chk ok">✅ 原单与系统一致：${fromText ? '搭建' : '不搭建'}</div>`;
+    }else{
+      chk = `<div class="rp-chk no">⚠️ 不一致：原单写「${fromText ? '搭建' : '不搭建'}」，系统判定「${sys ? '搭建' : '不搭建'}」，请核对</div>`;
+    }
+  }
+  el.innerHTML = '<div class="rp-hd">📄 原始订单记录<span class="rp-x">✕</span></div>'
+    + (raw ? `<div class="rp-body">${kpiEsc(raw)}</div>` : '<div class="rp-tip">这单没有留存原始录入文字</div>')
+    + chk
+    + '<div class="rp-tip">点别处可关闭</div>';
+  const xp = el.querySelector('.rp-x');
+  if(xp) xp.onclick = function(e){ e.stopPropagation(); closeRawPop(); };
+}
+function placeRawPop(anchor){
+  const el = ensureRawPop();
+  const pad = 8;
+  let top = 0, left = 0;
+  if(anchor && anchor.getBoundingClientRect){
+    const r = anchor.getBoundingClientRect();
+    left = Math.min(r.left, window.innerWidth - el.offsetWidth - pad);
+    left = Math.max(pad, left);
+    top = r.bottom + 4;
+    if(top + el.offsetHeight > window.innerHeight - pad){
+      top = Math.max(pad, r.top - el.offsetHeight - 4);   // 下方放不下就翻到上方
+    }
+  }
+  el.style.left = left + 'px';
+  el.style.top  = top + 'px';
+}
+// 点任意地方关闭（浮层内部、客户名本身除外）+ Esc 关闭
+document.addEventListener('click', function(e){
+  const el = document.getElementById('rawPop');
+  if(!el || el.style.display !== 'block') return;
+  if(el.contains(e.target)) return;
+  if(e.target && e.target.closest && e.target.closest('.cust-pop')) return;  // 交给 toggle 处理
+  closeRawPop();
+});
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeRawPop(); });
+window.addEventListener('resize', closeRawPop);
+window.addEventListener('scroll', closeRawPop, true);
 
 function openKpi(key){
   kpiOpenKey = key; kpiOpenKind = null;
@@ -1117,7 +1239,7 @@ function kpiRevenue(){
   const rest = os.filter(o=>o.payment_status!=='paid');
   const rows = os.map(o=>`<tr>
       <td>${kpiEsc((o.booking_date||'').slice(5))}<div style="font-size:10px;color:#999">${kpiEsc(o.address||'')}</div></td>
-      <td>${kpiEsc(o.contact_name||'-')}</td>
+      <td>${custNameHtml(o)}</td>
       <td class="r">${fmtY(o.revenue)}</td>
       <td>${paySelect(o)}</td>
       <td class="r k-lite">${fmtY(o.cost_total)}</td>
@@ -1149,9 +1271,9 @@ function kpiCost(){
     const open = kpiOpenKind === k;
     const sub = open ? `<tr class="sub"><td colspan="4">${
       who.map(o=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 0">
-          <span>${kpiEsc(o.contact_name||'-')} <span style="color:#aaa">${kpiEsc((o.booking_date||'').slice(5))}</span></span>
+          <span>${custNameHtml(o)} <span style="color:#aaa">${kpiEsc((o.booking_date||'').slice(5))}</span></span>
           <span style="display:flex;align-items:center;gap:6px">${fmtY((o.by_kind||{})[k])}
-            <button class="btn btn-sm" style="font-size:10px;padding:1px 6px" onclick="kpiEditCost(${o.id})">改</button></span>
+            <button class="btn btn-sm" style="font-size:10px;padding:1px 6px" onclick="kpiEditCost(${o.id})">明细</button></span>
         </div>`).join('') || '<div class="muted">无</div>'
     }</td></tr>` : '';
     return `<tr>
@@ -1196,7 +1318,7 @@ function kpiProfit(){
     <div class="kpi-sec">最不赚钱的几单</div>
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">操作</th></tr></thead>
       <tbody>${worst.map(o=>`<tr>
-        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}${ownerTagOf(o)}</td>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}${ownerTagOf(o)}</td>
         <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
         <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#27ae60'}">${fmtY(o.profit)}</td>
         <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
@@ -1225,22 +1347,54 @@ function kpiNet(){
 }
 
 // —— 毛利率：逐单 ——
+// —— 逐单真实毛利率：表头点一下换排序（利润 / 毛利率 / 日期 / 归属），不增加版面 ——
+let mgSort = {key:'margin', dir:1};          // 默认：毛利率升序（低的在前）
+const MG_SORT_LABEL = {date:'日期', profit:'利润', margin:'毛利率', owner:'归属'};
+function sortTh(key, label, cls){
+  const on = mgSort.key === key;
+  const ar = on ? (mgSort.dir > 0 ? '↑' : '↓') : '';
+  return `<th class="${cls||''} srt${on?' on':''}" onclick="setMgSort('${key}')"`
+       + ` title="点一下按${MG_SORT_LABEL[key]}排序（再点一下反过来）">${label}`
+       + (ar ? `<i class="srt-ar">${ar}</i>` : '') + `</th>`;
+}
+function setMgSort(key){
+  if(mgSort.key === key) mgSort.dir = -mgSort.dir;   // 同列再点 = 升降序互换
+  else mgSort = {key:key, dir:1};                    // 换列 = 从升序开始
+  renderKpiBody();
+}
+function mgSorted(list){
+  const k = mgSort.key, d = mgSort.dir;
+  const val = (o)=>{
+    if(k === 'profit') return Number(o.profit || 0);
+    if(k === 'margin') return Number(o.margin || 0);
+    if(k === 'owner')  return ownerSignOf(o) || '未标注';
+    return String(o.booking_date || '');
+  };
+  return list.slice().sort((a, b)=>{
+    const va = val(a), vb = val(b);
+    let r = (typeof va === 'number') ? (va - vb) : String(va).localeCompare(String(vb), 'zh-Hans-CN');
+    if(r !== 0) return r * d;
+    return String(b.booking_date || '').localeCompare(String(a.booking_date || ''));  // 同值时按日期倒序兜底
+  });
+}
 function kpiMargin(){
   const os = ordersOf(), t = totOf();
   if(!os.length) return kpiEmpty('这个区间没有订单');
   const alert = t.margin_alert || 40;
-  const list = os.slice().sort((a,b)=> (a.margin||0) - (b.margin||0));
+  const list = mgSorted(os);
+  const dirTxt = mgSort.dir > 0 ? '升序 ↑' : '降序 ↓';
   return `
-    <div class="kpi-sec">逐单真实毛利率（低的在前）<span class="mini">警戒线 ${alert}%</span></div>
-    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th>套餐</th><th class="r">利润</th><th class="r">毛利率</th><th class="r">操作</th></tr></thead>
+    <div class="kpi-sec">逐单真实毛利率<span class="mini">按${MG_SORT_LABEL[mgSort.key]}${dirTxt} · 点表头换排序 · 警戒线 ${alert}%</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr>${sortTh('date','日期')}<th>客户</th>${sortTh('owner','归属','r')}<th>套餐</th>${sortTh('profit','利润','r')}${sortTh('margin','毛利率','r')}<th class="r">明细</th></tr></thead>
       <tbody>${list.map(o=>`<tr>
-        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}${ownerTagOf(o)}</td>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}</td>
+        <td class="r">${ownerTagOf(o)}</td>
         <td class="pkg-cell">${kpiEsc(o.package_label||'-')}</td>
         <td class="r">${fmtY(o.profit)}</td>
         <td class="r"><span class="pf-tag ${pfTagCls(o.alert)}">${o.margin}%</span></td>
         <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
     <div class="kpi-line total"><span>平均毛利率</span><span>${t.avg_margin||0}%</span></div>
-    <div class="kpi-note">💡 毛利率分母扣掉了代收代付的配送搭建费，比"利润÷收入"更贴近真实。低于 ${alert}% 标黄、亏本标红。</div>
+    <div class="kpi-note">💡 毛利率分母扣掉了代收代付的配送搭建费，比"利润÷收入"更贴近真实。低于 ${alert}% 标黄、亏本标红。点客户名可看原始订单记录。</div>
   `;
 }
 
@@ -1254,7 +1408,7 @@ function kpiAlert(){
     <div class="kpi-sec">${title}（${arr.length} 单）</div>
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th>套餐</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">毛利率</th><th class="r">操作</th></tr></thead>
       <tbody>${arr.map(o=>`<tr>
-        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}${ownerTagOf(o)}</td>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}${ownerTagOf(o)}</td>
         <td class="pkg-cell">${kpiEsc(o.package_label||'-')}</td>
         <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
         <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#b95c00'}">${fmtY(o.profit)}</td>
@@ -1274,7 +1428,7 @@ function kpiPayList(st){
     <div class="kpi-sec">${title}（${os.length} 单）<span class="mini">下拉可直接改</span></div>
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">金额</th><th>收款</th><th class="r">操作</th></tr></thead>
       <tbody>${os.map(o=>`<tr>
-        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}</td>
         <td class="r">${fmtY(o.revenue)}</td><td>${paySelect(o)}</td><td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
     <div class="kpi-line total"><span>合计（${os.length} 单）</span><span>${fmtY(sum)}</span></div>
     ${st==='unpaid' ? '<div class="kpi-note">💡 这是应收账款——单子做了但钱还没到。催收后在这里把状态改成「已收」，财务数字会同步更新。</div>' : ''}
@@ -1292,7 +1446,7 @@ function kpiDepList(st){
     <div class="kpi-sec">${title}（${os.length} 单）</div>
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">押金</th><th>状态</th><th class="r">操作</th></tr></thead>
       <tbody>${os.map(o=>`<tr>
-        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td>${kpiEsc(o.contact_name||'-')}</td>
+        <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}</td>
         <td class="r">${fmtY(o.deposit)}</td><td>${depSelect(o)}</td><td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
     <div class="kpi-line total"><span>合计（${os.length} 单）</span><span>${fmtY(sum)}</span></div>
     <div class="kpi-note">💡 押金不属于收入（要退给客户）；只有「扣留」那部分才算补偿收入。餐具回收后记得把状态改成「已退」。</div>
