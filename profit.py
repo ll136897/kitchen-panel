@@ -488,6 +488,7 @@ def order_profit(db, oid, cfg=None):
             own_raw_block(o.get("raw_text"), o.get("contact_name"), o.get("contact_phone"),
                           o.get("amount"), o.get("address")),
             order_info.get("packages", [])),
+        "setup": setup,          # 1=搭建 / 0=不搭建（供财务页逐单表显示搭建图标）
     }
 
 
@@ -556,6 +557,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
             "cost_total": p["cost_total"], "profit": p["cash_profit"], "margin": p["margin"],
             "net_profit": p["net_profit"], "alert": p["alert"],
             "package_label": p.get("package_label", ""),
+            "setup": p.get("setup"),
             "payment_status": p["payment_status"],
             "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"],
@@ -713,6 +715,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
             "cost_total": cost_total, "profit": cash_profit, "margin": margin,
             "net_profit": net_profit, "alert": level,
             "package_label": p.get("package_label", ""),
+            "setup": p.get("setup"),
             "payment_status": p["payment_status"], "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"], "fixed_alloc": fixed_alloc, "by_kind": bk,
         })
