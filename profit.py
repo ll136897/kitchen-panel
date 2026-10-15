@@ -66,6 +66,11 @@ def _extract_package_label(raw_text, packages=None):
             agg[nm] = agg.get(nm, 0) + int(pk.get("quantity") or 1)
         label = "、".join(("%s×%d" % (nm, q)) if q > 1 else nm
                           for nm, q in agg.items())
+    # 套餐名统一：区间档位一律取「人数上限」——2-3人餐→3人餐、3-4人餐→4人餐、
+    # 5-6人餐→6人餐、7-8人餐→8人餐、9-10人餐→10人餐。
+    # 理由：档位是按最多能坐多少人定的（也是计价依据），下限只是起步人数，
+    # 所以"3人餐"就是 2-3 人这一档，两种写法指同一个东西，不该同时出现。
+    label = _re.sub(r"(\d+)\s*[-~—]\s*(\d+)\s*人餐", r"\2人餐", label)
     return label
 
 DEFAULT_CONFIG = {

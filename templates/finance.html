@@ -134,6 +134,9 @@
   .kpi-tbl td{padding:6px 4px;border-bottom:1px dashed #f0e9df;white-space:nowrap}
   .kpi-tbl td.pkg-cell{color:#5b4a3a;font-weight:600;white-space:nowrap}
   .tbl-profit td.pkg-cell{color:#5b4a3a;font-weight:600}
+  /* 套餐：单套餐（含同套餐多份，如「10人餐×2」）必须一行，不占多余版面；
+     只有「两个不同套餐」这种极少数（如 10人餐×1 6人餐×1）才折成两排 */
+  .kpi-tbl td.pkg-cell.pkg-2,.tbl-profit td.pkg-cell.pkg-2{white-space:normal;max-width:88px;line-height:1.25}
   /* 归属人：客户名旁的小标签（不新增列，不增加版面） */
   .who-tag{display:inline-block;font-size:11px;font-weight:700;line-height:1;padding:2px 6px;border-radius:999px;margin-left:4px;vertical-align:middle}
   .who-tag.who-me{background:#fdeede;color:#c8651a}
@@ -209,9 +212,10 @@
     .tbl-profit{display:none}
     .pf-cards{display:block}
     .pf-row input{width:66px}
-    /* KPI 弹窗表格：手机端允许换行、不再横向溢出——加了「归属」列也照样一屏看完，不用左右拖 */
-    .kpi-tbl td,.kpi-tbl th{white-space:normal}
-    .kpi-tbl-wrap{overflow-x:visible}
+    /* 手机端：日期 / 客户 / 单套餐都必须一行；只有「两个套餐」那极少数才折成两排 */
+    .kpi-tbl{font-size:11px}
+    .kpi-tbl td,.kpi-tbl th{padding:5px 3px;white-space:nowrap}
+    .kpi-tbl td.pkg-cell.pkg-2{white-space:normal;max-width:88px;line-height:1.25}
     /* 手机端隐藏原生日期选择器：它会盖住大半屏；常用日期由上方快捷chip(今天/昨天/本周/本月/上月)+区间tab覆盖 */
     #rangeDate{display:none}
   }
@@ -305,10 +309,9 @@
   <!-- 有账日期条：点一天直接看那天的账（不用再开原生日期选择器、点"完成"） -->
   <div id="billDates" style="margin-bottom:12px"></div>
 
-  <!-- 利润总览 + 货款押金：合并成同一个框（少一张卡＝少一次往下拖，相关数据一屏看完） -->
+  <!-- 利润总览（货款/押金板块已按用户要求移除；每单的货款、押金仍可在下方「每单赚多少」里直接改） -->
   <div class="fin-card">
-    <div class="fin-kpi" id="kpiBox"></div>
-    <div class="fin-kpi" id="payBox" style="margin-bottom:0"></div>
+    <div class="fin-kpi" id="kpiBox" style="margin-bottom:0"></div>
   </div>
 
   <!-- 每单利润（默认收起为缩略框，点标题展开，省版面/少翻页） -->
@@ -971,11 +974,13 @@ function loadAll(){
       return;
     }
     pfData = pfRes.data || {};
-    renderProfitKpi(pfData.totals||{});
+    // 货款/押金板块已按用户要求从财务页移除（每单的货款、押金仍在「每单赚多少」表里直接改）；
+    // 这份数据仍要留着——「库存占用资金」和归属角标都还用它
+    payData = sumRes ? (sumRes.data || {}) : {};
+    renderProfitKpi(pfData.totals||{}, payData);
     renderProfitOrders(pfData.orders||[]);
     renderRealProfitNote(pfData.totals||{});
     renderLaborToggle();
-    if(sumRes){ payData = sumRes.data || {}; renderPayKpi(payData); }
     signerCounts = scRes ? (scRes.data || {}) : {};
     signerTotal = scRes ? (scRes.total || 0) : 0;
     renderFinSignBar();   // 归属筛选条按当前区间更新计数
@@ -994,7 +999,8 @@ function fmtY(n){
 function pfTagCls(alert){ return alert==='loss' ? 'pf-loss' : (alert==='warn' ? 'pf-warn' : 'pf-ok'); }
 function pfTxt(alert){ return alert==='loss' ? '亏本' : (alert==='warn' ? '偏低' : '正常'); }
 
-function renderProfitKpi(t){
+function renderProfitKpi(t, s){
+  s = s || (typeof payData !== 'undefined' ? (payData || {}) : {});
   const rev = t.revenue||0, cost = t.cost||0, profit = t.profit||0;
   const alertCnt = (t.loss||0) + (t.warn||0);
   document.getElementById('kpiBox').innerHTML = `
@@ -1022,41 +1028,6 @@ function renderProfitKpi(t){
       <div class="lbl">📊 平均真实毛利率</div>
       <div class="val">${t.avg_margin||0}%</div>
       <div class="sub">警戒线 ${t.margin_alert||40}%</div>
-    </div>
-    <div class="fin-kpi-item ${alertCnt?'negative':'positive'} clickable" onclick="openKpi('alert')" title="点开：要留意的单">
-      <div class="lbl">⚠️ 需要留意</div>
-      <div class="val">${alertCnt} 单</div>
-      <div class="sub">亏本 ${t.loss||0} · 偏低 ${t.warn||0}</div>
-    </div>
-  `;
-}
-
-function renderPayKpi(s){
-  document.getElementById('payBox').innerHTML = `
-    <div class="fin-kpi-item positive clickable" onclick="openKpi('pay_paid')" title="点开：已收货款是哪些单">
-      <div class="lbl">✅ 已收货款</div>
-      <div class="val">${fmtY(s.paid_amount)}</div>
-    </div>
-    <div class="fin-kpi-item negative clickable" onclick="openKpi('pay_unpaid')" title="点开：还没收的单">
-      <div class="lbl">❌ 未收货款</div>
-      <div class="val">${fmtY(s.unpaid_amount)}</div>
-      <div class="sub">应收账款</div>
-    </div>
-    <div class="fin-kpi-item neutral clickable" onclick="openKpi('pay_partial')" title="点开：部分收款的单">
-      <div class="lbl">⏳ 部分收款</div>
-      <div class="val">${fmtY(s.partial_amount)}</div>
-    </div>
-    <div class="fin-kpi-item negative clickable" onclick="openKpi('dep_pending')" title="点开：押金还没退的单">
-      <div class="lbl">🔒 待退押金</div>
-      <div class="val">${fmtY(s.deposit_pending)}</div>
-    </div>
-    <div class="fin-kpi-item positive clickable" onclick="openKpi('dep_returned')" title="点开：已退押金的单">
-      <div class="lbl">✅ 已退押金</div>
-      <div class="val">${fmtY(s.deposit_returned)}</div>
-    </div>
-    <div class="fin-kpi-item neutral clickable" onclick="openKpi('dep_forfeited')" title="点开：扣留押金的单">
-      <div class="lbl">⛔ 扣留押金</div>
-      <div class="val">${fmtY(s.deposit_forfeited)}</div>
     </div>
     <div class="fin-kpi-item neutral clickable" onclick="openKpi('stock')" title="点开：库存占用明细">
       <div class="lbl">📦 库存占用资金</div>
@@ -1106,6 +1077,12 @@ function depSelect(o){
 // 操作列：财务页不跳备餐/订单页（备餐是后厨的事、订单在"明细"里看），只留一个「明细」
 function orderLinks(o){
   return `<button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="kpiEditCost(${o.id})">明细</button>`;
+}
+// 多套餐：出现 2 次及以上「人餐」（如 10人餐×1 6人餐×1）才算；「10人餐×2」是同套餐多份，仍算单套餐
+function isMultiPkg(o){ return ((o.package_label||'').match(/人餐/g) || []).length > 1; }
+// 套餐单元格：单套餐保持一行；只有多套餐才加 pkg-2 允许折成两排（极少数，不影响整体排版）
+function pkgCellHtml(o){
+  return `<td class="pkg-cell${isMultiPkg(o)?' pkg-2':''}">${kpiEsc(o.package_label||'-')}</td>`;
 }
 // 客户名：点一下弹出原始订单记录（下拉浮层），用作全表统一的入口
 function custNameHtml(o){
@@ -1403,7 +1380,7 @@ function kpiMargin(){
       <tbody>${list.map(o=>`<tr>
         <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}</td>
         <td class="r">${ownerTagOf(o)}</td>
-        <td class="pkg-cell">${kpiEsc(o.package_label||'-')}</td>
+        ${pkgCellHtml(o)}
         <td class="r">${fmtY(o.profit)}</td>
         <td class="r"><span class="pf-tag ${pfTagCls(o.alert)}">${o.margin}%</span></td>
         <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
@@ -1423,7 +1400,7 @@ function kpiAlert(){
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th>套餐</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">毛利率</th><th class="r">操作</th></tr></thead>
       <tbody>${arr.map(o=>`<tr>
         <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td style="text-align:left">${custNameHtml(o)}${ownerTagOf(o)}</td>
-        <td class="pkg-cell">${kpiEsc(o.package_label||'-')}</td>
+        ${pkgCellHtml(o)}
         <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
         <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#b95c00'}">${fmtY(o.profit)}</td>
         <td class="r">${o.margin}%</td>
@@ -1517,7 +1494,7 @@ function renderProfitOrders(orders){
     return `<tr>
       <td>${(o.booking_date||'').slice(5)}</td>
       <td style="text-align:left">${o.contact_name||'-'}${ownerTagOf(o)}</td>
-      <td class="pkg-cell">${o.package_label||'-'}</td>
+      <td class="pkg-cell${isMultiPkg(o)?' pkg-2':''}">${o.package_label||'-'}</td>
       <td>${fmtY(o.revenue)}</td>
       <td class="c-opt">${fmtY(o.cost_total)}</td>
       <td class="v-${o.alert==='loss'?'loss':(o.alert==='warn'?'warn':'ok')}" style="font-weight:700">${fmtY(o.profit)}</td>
