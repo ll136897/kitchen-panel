@@ -147,6 +147,59 @@ def _wsgi_with_report(environ, start_response):
 
 app.wsgi_app = _wsgi_with_report
 
+
+def _fix_missing_packages():
+    """补回「一行写了多个套餐」时被漏掉的套餐（如「10人餐+8人餐」只存了 10 人餐）。
+
+    只补不删：重新解析原文，若人数比库里多，就按新结果重建 order_packages（保留原有单价）。
+    幂等——补完之后新解析人数 == 库里人数，再跑也不会动。
+    返回被修复的订单 id 列表。
+    """
+    from parser import parse_order_text, match_packages_in_db, own_raw_block
+    db = get_db()
+    fixed = []
+    rows = db.execute(
+        "SELECT id, contact_name, contact_phone, amount, address, raw_text FROM orders "
+        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> ''"
+    ).fetchall()
+    for r in rows:
+        oid = r["id"]
+        cur_p = db.execute(
+            "SELECT COALESCE(SUM(people*quantity),0) AS p FROM order_packages WHERE order_id=?",
+            (oid,)).fetchone()["p"]
+        own = own_raw_block(r["raw_text"], r["contact_name"], r["contact_phone"],
+                            r["amount"], r["address"])
+        try:
+            parsed = parse_order_text(own).get("packages") or []
+        except Exception:
+            continue
+        new_p = sum((x.get("max_people") or x.get("min_people") or 0) * (x.get("quantity") or 1)
+                    for x in parsed)
+        if not parsed or new_p <= cur_p:
+            continue                       # 没漏，或解析不出东西 → 不动，避免改坏
+        old_price = {x["package_id"]: x["price"] for x in db.execute(
+            "SELECT package_id, price FROM order_packages WHERE order_id=?", (oid,)).fetchall()}
+        agg = {}
+        for m in (match_packages_in_db(parsed) or []):
+            pid = m.get("package_id")
+            if not pid:
+                continue
+            if pid not in agg:
+                agg[pid] = {"people": m.get("people") or 0, "qty": 0}
+            agg[pid]["qty"] += (m.get("quantity") or 1)
+        if not agg:
+            continue
+        db.execute("DELETE FROM order_packages WHERE order_id=?", (oid,))
+        for pid, v in agg.items():
+            db.execute(
+                "INSERT INTO order_packages (order_id, package_id, people, quantity, price) "
+                "VALUES (?,?,?,?,?)", (oid, pid, v["people"], v["qty"], old_price.get(pid)))
+        fixed.append("%s(%d→%d人)" % (oid, cur_p, new_p))
+    if fixed:
+        db.commit()
+    db.close()
+    return fixed
+
 # 模块加载时初始化数据库（保证 gunicorn 多 worker 也能跑）
 init_db()
 
@@ -181,6 +234,18 @@ try:
     _db0.close()
 except Exception as _e:
     print(f"[init] backfill after seed skipped: {_e}")
+
+# ===== 一次性数据修复：补回被漏掉的套餐 =====
+# 背景：解析器曾把「10人餐+8人餐」只当成 10 人餐（只取了第一个数字），第二个套餐被整个丢掉。
+# 后果：18 人的单只按 10 人入库 → 食材/搭建费/人工全都少算（搭建费 200 只收了 100）。
+# 解析器已修，但**历史订单里已经漏了**，所以启动时补一次。
+# 幂等：只在"重新解析出的人数 > 库里现有"时才补，补完再跑也不会重复加。
+try:
+    _fixed = _fix_missing_packages()
+    if _fixed:
+        print("[init] 已补回漏录的套餐：%s" % _fixed)
+except Exception as _e:
+    print(f"[init] fix_missing_packages skipped: {_e}")
 
 # 启动定时备份（10分钟）
 try:

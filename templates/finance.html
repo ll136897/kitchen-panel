@@ -1064,7 +1064,12 @@ document.addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeRangeMenu(); });
 window.addEventListener('resize', closeRangeMenu);
-window.addEventListener('scroll', closeRangeMenu, true);
+// ⚠️ 滚动关闭必须排除"下拉自己内部在滚"——捕获模式(true)会收到内部元素的滚动，
+//    若不排除，手指在下拉里往下滑（找更早的日期）会立刻被关掉，表现就是"划不到下面"。
+window.addEventListener('scroll', function(e){
+  if(_rangeMenuEl && e.target && _rangeMenuEl.contains(e.target)) return;
+  closeRangeMenu();
+}, true);
 
 function loadBillDates(by){
   fetchJSONRetry('/api/finance/dates' + (by ? ('?'+by) : '')).then(res=>{
@@ -1359,7 +1364,12 @@ document.addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeRawPop(); });
 window.addEventListener('resize', closeRawPop);
-window.addEventListener('scroll', closeRawPop, true);
+// 同上：浮层内部（看长原文）滚动时不要关，否则根本滑不动
+window.addEventListener('scroll', function(e){
+  const el = document.getElementById('rawPop');
+  if(el && el.style.display !== 'none' && e.target && el.contains(e.target)) return;
+  closeRawPop();
+}, true);
 
 function openKpi(key){
   kpiOpenKey = key; kpiOpenKind = null;

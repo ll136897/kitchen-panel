@@ -230,10 +230,14 @@ def parse_order_text(raw_text):
     # 匹配套餐行（超过10人餐自动拆分：20→10+10, 18→10+8, 16→10+6 等）
     result["packages"] = []
     for line in result["package_lines"]:
-        info = _match_package_line(line)
-        if info:
-            for split_info in _split_large_package(info):
-                result["packages"].append(split_info)
+        # 一行里写了多个套餐（如「10人餐+8人餐」）→ 先拆开再逐个解析。
+        # 不拆的话 _match_package_line 只会取第一个数字，第二个套餐被整个丢掉
+        # （后果：18 人的单只按 10 人算，搭建费少收一半——10.7 陈女士那单就是这样）
+        for seg in _split_pkg_segments(line):
+            info = _match_package_line(seg)
+            if info:
+                for split_info in _split_large_package(info):
+                    result["packages"].append(split_info)
 
     # 从备注解析额外工具需求
     result["extra_tools"] = _parse_extra_tools(result["note"])
@@ -245,6 +249,37 @@ def parse_order_text(raw_text):
     result["dish_swaps"] = _parse_dish_swaps(result["note"])
 
     return result
+
+
+def _split_pkg_segments(line):
+    """把一行里的多个套餐拆开：「10人餐+8人餐 （搭建）」→ ['10人餐 （搭建）', '8人餐 （搭建）']
+
+    ⚠️ 只按「真正的并列分隔符」拆，绝不能拆：
+       - '10人餐×2'      （× 后面是份数，不是第二个套餐）
+       - '3-4人餐'       （- 是人数区间）
+    拆之前先把「（搭建）/（不搭建）」这类服务标记摘出来，拆完再给每段补回去，
+    否则后半段会丢掉搭建信息。
+    """
+    s = (line or "").strip()
+    if not s:
+        return []
+    m = re.search(r"[（(]\s*(搭建|不搭建|自提|外送|不自理)\s*[）)]", s)
+    tag = ("（%s）" % m.group(1)) if m else ""
+    body = (s[:m.start()] if m else s)
+    parts = [p.strip() for p in re.split(r"[+＋，,、]+", body) if p and p.strip()]
+    if len(parts) <= 1:
+        # 再试空格分隔（数据里有「10人餐 6人餐」「10人餐×1 6人餐×1」）。
+        # 但必须「每一段都像套餐」才拆，否则会把「10人餐 x2」的份数段拆坏。
+        sp = [p.strip() for p in re.split(r"\s+", body) if p and p.strip()]
+        if len(sp) > 1 and all(re.search(r"\d+\s*人", x) for x in sp):
+            parts = sp
+    if len(parts) <= 1:
+        return [s]
+    out = []
+    for p in parts:
+        # 只有带「N人」的段才是套餐；其余（如"加菜"）原样留着，_match_package_line 会返回 None
+        out.append((p + (" " + tag if tag else "")) if re.search(r"\d+\s*人", p) else p)
+    return out
 
 
 def _match_package_line(line):
