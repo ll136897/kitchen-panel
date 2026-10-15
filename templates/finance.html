@@ -37,6 +37,9 @@
   .ltab.active{background:#3a2416;color:#fff;box-shadow:0 2px 4px rgba(0,0,0,.15)}
   .range-date{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff}
   .quick-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+  /* 日期范围合并为一排：日/周/月/全部 + 原生日期 + 快捷，整体可换行；内部 quick-chips 不再单独占一行 */
+  .date-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+  .date-toolbar .quick-chips{margin:0;flex:1 1 auto;min-width:0}
   .qchip{padding:6px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;font-size:13px;cursor:pointer;color:#6b4f3a;font-weight:600;transition:all .15s}
   /* 各渠道录入进度（记住每渠道上次录到哪） */
   .ch-prog{background:#f7f2ea;border:1px solid #ead9c4;border-radius:10px;padding:8px 10px}
@@ -225,30 +228,30 @@
 <body>
 {% include 'topbar.html' %}
 <div class="container">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 16px;flex-wrap:wrap;gap:8px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px;flex-wrap:wrap;gap:8px">
     <div>
       <div class="title">📈 成本利润</div>
       <div class="sub page-sub">一单收多少、花在哪、到底赚多少</div>
     </div>
-    <div class="toolbar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <div class="range-tabs">
-        <button class="range-tab active" data-range="day" onclick="setRange('day')">📅 日</button>
-        <button class="range-tab" data-range="week" onclick="setRange('week')">🗓️ 周</button>
-        <button class="range-tab" data-range="month" onclick="setRange('month')">📊 月</button>
-        <button class="range-tab" data-range="all" onclick="setRange('all')">🗂️ 全部</button>
-      </div>
-      <input type="date" id="rangeDate" class="range-date" onchange="onDateChange()">
-      <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
-    </div>
+    <button class="btn btn-primary btn-sm btn-refresh" onclick="refreshWithFx(loadAll)"><span class="btn-icon" title="同步最新数据（页面每60秒会自动同步一次）">🔄</span></button>
   </div>
 
-  <!-- 快捷日期：一键切换，尽量不用打开原生日期选择器（手机上原生选择器会盖住大半屏内容） -->
-  <div class="quick-chips" id="quickChips">
-    <button class="qchip" data-q="today">今天</button>
-    <button class="qchip" data-q="yest">昨天</button>
-    <button class="qchip" data-q="week">本周</button>
-    <button class="qchip" data-q="month">本月</button>
-    <button class="qchip" data-q="lastmonth">上月</button>
+  <!-- 日期范围：日/周/月/全部 + 原生日期 + 快捷(今天/昨天/本周/本月/上月) 合并为一排；下方再放每月日期（有账日期条） -->
+  <div class="date-toolbar" id="dateToolbar">
+    <div class="range-tabs">
+      <button class="range-tab active" data-range="day" onclick="setRange('day')">📅 日</button>
+      <button class="range-tab" data-range="week" onclick="setRange('week')">🗓️ 周</button>
+      <button class="range-tab" data-range="month" onclick="setRange('month')">📊 月</button>
+      <button class="range-tab" data-range="all" onclick="setRange('all')">🗂️ 全部</button>
+    </div>
+    <input type="date" id="rangeDate" class="range-date" onchange="onDateChange()">
+    <div class="quick-chips" id="quickChips">
+      <button class="qchip" data-q="today">今天</button>
+      <button class="qchip" data-q="yest">昨天</button>
+      <button class="qchip" data-q="week">本周</button>
+      <button class="qchip" data-q="month">本月</button>
+      <button class="qchip" data-q="lastmonth">上月</button>
+    </div>
   </div>
 
   <!-- 归属筛选：默认全部，可按"我归属的 / 某人归属的"分开看（两人都计入，但能区分） -->

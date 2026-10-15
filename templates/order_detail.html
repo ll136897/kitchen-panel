@@ -24,6 +24,19 @@
 .edit-hint{font-size:12px;color:var(--muted);margin-top:4px}
 .lock-note{font-size:12px;color:#9a8f83;background:#f7f4ef;border:1px dashed var(--border);border-radius:8px;padding:6px 10px}
 @media(max-width:600px){.detail-grid{grid-template-columns:1fr}.req-tbl{font-size:12px}.req-tbl th,.req-tbl td{padding:4px 3px}.edit-grid{grid-template-columns:1fr 1fr}}
+/* 原单对照弹窗：点击📄原单图标弹出，对照系统解析结果与原录入信息是否一致 */
+.raw-btn{font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;border:1px solid #f3d9b8;background:#fff7ed;color:#b45309;cursor:pointer;white-space:nowrap;line-height:1.4}
+.raw-btn:hover{filter:brightness(.97)}
+.raw-modal{position:fixed;inset:0;background:rgba(40,28,18,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
+.raw-modal.show{display:flex}
+.raw-box{background:#fff;border-radius:14px;max-width:520px;width:100%;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+.raw-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #efe7da;font-weight:700;color:#3a2416;font-size:15px}
+.raw-close{border:none;background:#f0ece4;color:#6b5b4b;width:28px;height:28px;border-radius:8px;font-size:14px;cursor:pointer;flex:0 0 auto}
+.raw-close:hover{background:#e6e0d6}
+.raw-text{margin:0;padding:14px;white-space:pre-wrap;word-break:break-word;overflow:auto;font-size:13px;line-height:1.65;color:#3a2416;font-family:inherit}
+.raw-diff{margin:0;padding:10px 14px;font-size:12px;border-top:1px solid #efe7da;line-height:1.5}
+.raw-diff.ok{color:#0f7b3f;background:#eefaf1}
+.raw-diff.warn{color:#b42318;background:#fdecea;font-weight:600}
 </style>
 </head>
 <body>
@@ -100,7 +113,10 @@
 
   <!-- 基本信息 -->
   <div class="detail-card">
-    <h3 style="margin:0 0 10px">📝 订单信息</h3>
+    <h3 style="margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>📝 订单信息</span>
+      <button class="raw-btn" onclick="showRawOrder()" title="对照系统解析结果与原录入信息（例如原单写了搭建、但解析没显示）">📄 原单</button>
+    </h3>
     <div class="detail-grid" id="infoGrid"></div>
   </div>
 
@@ -120,6 +136,15 @@
       <thead><tr><th>工具</th><th>借出</th><th>归还</th><th>丢失</th><th>状态</th></tr></thead>
       <tbody></tbody>
     </table>
+  </div>
+</div>
+
+<!-- 原单对照弹窗：点击📄原单图标弹出，显示录入时的原始订单信息，便于对照系统解析是否对得上 -->
+<div class="raw-modal" id="rawModal" onclick="if(event.target===this)hideRawOrder()">
+  <div class="raw-box">
+    <div class="raw-head"><span>📄 录入时的原订单信息</span><button class="raw-close" onclick="hideRawOrder()" aria-label="关闭">✕</button></div>
+    <pre class="raw-text" id="rawText"></pre>
+    <div class="raw-diff" id="rawDiff" style="display:none"></div>
   </div>
 </div>
 <script>
@@ -159,6 +184,38 @@ function applyPermUI(o){
     note.textContent = ok ? '' : ('🔒 这单是「' + (o.created_by_name || '别人') + '」归属的，你只能查看（备餐/出餐单照常可用）');
   }
   if(!ok && typeof toggleEdit === 'function') toggleEdit(false);
+}
+// 原单对照弹窗：展示录入时原始文本，并做「搭建/不搭建」一致性提示
+function showRawOrder(){
+  const o = curOrder || {};
+  const t = ((o.raw_text || '') + '').trim();
+  document.getElementById('rawText').textContent = t || '（该订单没有保留原始录入文本）';
+  const diff = document.getElementById('rawDiff');
+  // 原单里的搭建字样：先判「不搭建」，否则判「搭建」
+  const rawSetup = /不搭建/.test(t) ? 0 : (/搭建/.test(t) ? 1 : null);
+  const parsed = o.setup_flag;
+  if(rawSetup !== null){
+    const rawLabel = rawSetup === 1 ? '搭建' : '不搭建';
+    const parsedLabel = parsed === 1 ? '搭建' : (parsed === 0 ? '不搭建' : '未判定');
+    if(String(rawSetup) !== String(parsed)){
+      diff.className = 'raw-diff warn';
+      diff.style.display = 'block';
+      diff.textContent = '⚠️ 不一致：原单写了「' + rawLabel + '」，但系统解析为「' + parsedLabel + '」，请核对。';
+    } else {
+      diff.className = 'raw-diff ok';
+      diff.style.display = 'block';
+      diff.textContent = '✅ 搭建/不搭建 已对齐：' + parsedLabel;
+    }
+  } else {
+    diff.style.display = 'none';
+  }
+  document.getElementById('rawModal').classList.add('show');
+  document.addEventListener('keydown', _rawEsc);
+}
+function _rawEsc(e){ if(e && e.key === 'Escape') hideRawOrder(); }
+function hideRawOrder(){
+  document.getElementById('rawModal').classList.remove('show');
+  document.removeEventListener('keydown', _rawEsc);
 }
 function loadDetail(){
   const oid = {{ oid }};
