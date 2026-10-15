@@ -167,8 +167,11 @@
   .st-ic.setup{background:#e7f6ec;border:1px solid #b7e3c6}
   .st-ic.nosetup{background:#f3f1ee;border:1px solid #e3ded7}
   .st-ic.unknown{display:none}
-  /* 显示时 JS 设 display:flex；整块最高不超过一屏，超出的正文自己在里面滚 */
-  .raw-pop{position:fixed;z-index:9999;display:none;width:max-content;max-width:min(92vw,440px);
+  /* 显示时 JS 设 display:flex。
+     ⚠️ 宽度必须**钉死**为 min(92vw,440px)，不许用 width:max-content / 自适应——
+     钉死后浮层宽度在数学上不可能超过视口；内容超宽由 rp-body 内部滚动兜底。
+     （width:max-content 会让浮层按"最长一行"撑开：超长地址一行 400px+ 直接顶穿右边框） */
+  .raw-pop{position:fixed;z-index:9999;display:none;width:min(92vw,440px);
     max-height:calc(100vh - 16px);flex-direction:column;
     background:#fff;border:1px solid var(--border);border-radius:10px;
     box-shadow:0 10px 28px rgba(0,0,0,.16);padding:10px 12px}
@@ -176,8 +179,13 @@
     font-weight:800;color:#5b4a3a;font-size:12px;margin-bottom:6px}
   .raw-pop .rp-x{cursor:pointer;color:#aaa;font-weight:400;font-size:13px}
   .raw-pop .rp-x:hover{color:#c0392b}
-  /* min-height:0 关键：flex 子项要能滚动必须加它，否则内容会把浮层撑出屏幕 */
-  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-word;flex:1 1 auto;min-height:0;overflow:auto;
+  /* 三重保证不横向超框：
+     ① min-width:0 —— flex 子项允许被压缩，min-content 再大也撑不大父容器；
+     ② overflow:auto —— 万一还是放不下，在浮层内部滚，绝不顶穿；
+     ③ word-break:break-all + overflow-wrap:anywhere —— 无空格的超长地址能任意断行。
+     （word-break:break-word 不行：它的断点不计入 min-content，浮层最小宽度仍被最长一行撑住） */
+  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere;
+    flex:1 1 auto;min-height:0;min-width:0;overflow:auto;
     color:#3a2f26;background:#fbf8f4;border:1px dashed #efe6d9;border-radius:6px;padding:8px;font-size:12px;line-height:1.55}
   .raw-pop .rp-tip{color:#9c8f80;font-size:11px;margin-top:6px}
   .raw-pop .rp-chk{margin-top:8px;font-size:12px;border-radius:6px;padding:5px 8px;line-height:1.4}
