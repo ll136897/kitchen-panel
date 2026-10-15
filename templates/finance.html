@@ -964,15 +964,33 @@ function rangeMenuHtml(range){
   if(range === 'day'){
     head = '选哪一天';
     items = _mItem(today, '今天') + _mItem(yest, '昨天');
-    const ds = (billDates || []).slice().sort((x,y)=> (y.date||'') < (x.date||'') ? -1 : 1).slice(0, 12);
+    // 全部有账的日子（下拉本身可滚，一直能滑到最早那天）
+    const ds = (billDates || []).slice().sort((x,y)=> (y.date||'') < (x.date||'') ? -1 : 1);
     if(ds.length){
-      items += '<div class="rm-sec">有账的日子</div>' + ds.map(d=>
-        _mItem(d.date, (d.date||'').slice(5).replace('-','.'), d.cnt)).join('');
+      items += '<div class="rm-sec">有账的日子（可滑到最早）</div>' + ds.map(d=>
+        _mItem(d.date, (d.date||'').slice(0,4) + '.' + (d.date||'').slice(5).replace('-','.'), d.cnt)).join('');
     }
   } else if(range === 'week'){
     head = '选哪一周';
     items = _mItem(today, '本周')
           + _mItem(fmtDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()-7)), '上周');
+    // 所有有账的周（按周一归组），一直能滑到最早那周
+    const wk = {}, wkOrder = [];
+    (billDates || []).forEach(d=>{
+      if(!d.date) return;
+      const dt = new Date(String(d.date).replace(/-/g, '/'));
+      if(isNaN(dt.getTime())) return;
+      const dow = dt.getDay() || 7;                       // 周一为一周之始
+      const mon = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() - dow + 1);
+      const k = fmtDate(mon);
+      if(!(k in wk)){ wk[k] = 0; wkOrder.push(k); }
+      wk[k] += (d.cnt || 0);
+    });
+    const wks = wkOrder.sort().reverse();
+    if(wks.length){
+      items += '<div class="rm-sec">有账的周（可滑到最早）</div>' + wks.map(k=>
+        _mItem(k, (k||'').slice(5).replace('-','.') + ' 那周', wk[k])).join('');
+    }
   } else {
     head = '选哪个月';
     items = _mItem(fmtDate(new Date(now.getFullYear(), now.getMonth(), 1)), '本月')
@@ -984,10 +1002,10 @@ function rangeMenuHtml(range){
       if(!(k in gs)){ gs[k] = 0; order.push(k); }
       gs[k] += (d.cnt || 0);
     });
-    const ks = order.sort().reverse().slice(0, 12);
+    const ks = order.sort().reverse();     // 全部有账月份，可滑到最早那月
     if(ks.length){
-      items += '<div class="rm-sec">有账的月份</div>' + ks.map(k=>
-        _mItem(k + '-01', parseInt(k.slice(5,7),10) + '月', gs[k])).join('');
+      items += '<div class="rm-sec">有账的月份（可滑到最早）</div>' + ks.map(k=>
+        _mItem(k + '-01', (k||'').slice(0,4) + '.' + parseInt(k.slice(5,7),10) + '月', gs[k])).join('');
     }
   }
   return '<div class="rm-hd">' + head + '</div>' + items;
@@ -1497,15 +1515,41 @@ function mgSorted(list){
     return String(b.booking_date || '').localeCompare(String(a.booking_date || ''));  // 同值时按日期倒序兜底
   });
 }
+// 搭建筛选：点「搭建」表头循环切换 全部 → 搭建 → 不搭建 → 全部（不新增控件、不占版面）
+let mgSetup = null;                      // null=全部 / 1=搭建 / 0=不搭建
+const MG_SETUP_TXT = {1:'🏕️ 搭建', 0:'🚫 不搭建'};
+function setupFilterTh(){
+  const on = (mgSetup === 1 || mgSetup === 0);
+  const mark = on ? ('<i class="srt-ar">' + (mgSetup === 1 ? '🏕️' : '🚫') + '</i>') : '';
+  return `<th class="srt${on?' on':''}" onclick="cycleMgSetup()" `
+       + `title="点一下按搭建筛选（当前：${on ? MG_SETUP_TXT[mgSetup] : '全部'}）">搭建${mark}</th>`;
+}
+function cycleMgSetup(){
+  mgSetup = (mgSetup === null) ? 1 : (mgSetup === 1 ? 0 : null);
+  renderKpiBody();
+}
+function mgFiltered(list){
+  if(mgSetup === null) return list;
+  return list.filter(o=> o.setup === mgSetup);
+}
 function kpiMargin(){
   const os = ordersOf(), t = totOf();
   if(!os.length) return kpiEmpty('这个区间没有订单');
   const alert = t.margin_alert || 40;
-  const list = mgSorted(os);
+  const shown = mgFiltered(os);
+  const list = mgSorted(shown);
   const dirTxt = mgSort.dir > 0 ? '升序 ↑' : '降序 ↓';
+  const fltTxt = (mgSetup === null) ? '' : (' · 已筛' + MG_SETUP_TXT[mgSetup]);
+  // 筛了搭建就显示筛选后的平均，否则用区间平均
+  const avg = shown.length
+    ? (Math.round(shown.reduce((s,o)=> s + (Number(o.margin)||0), 0) / shown.length * 10) / 10)
+    : 0;
+  const avgLbl = '平均毛利率' + ((mgSetup === null) ? '' : ('（' + MG_SETUP_TXT[mgSetup] + '）'));
+  const emptyRow = shown.length
+    ? '' : `<tr><td colspan="8" class="kpi-empty">当前筛选下没有单子（点「搭建」表头切回全部）</td></tr>`;
   return `
-    <div class="kpi-sec">逐单真实毛利率<span class="mini">按${MG_SORT_LABEL[mgSort.key]}${dirTxt} · 点表头换排序 · 警戒线 ${alert}%</span></div>
-    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr>${sortTh('date','日期')}<th>客户</th><th>套餐</th><th>搭建</th>${sortTh('profit','利润','r')}${sortTh('margin','毛利率','r')}${sortTh('owner','归属','r')}<th class="r">明细</th></tr></thead>
+    <div class="kpi-sec">逐单真实毛利率<span class="mini">按${MG_SORT_LABEL[mgSort.key]}${dirTxt}${fltTxt} · 点表头换排序 · 警戒线 ${alert}%</span></div>
+    <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr>${sortTh('date','日期')}<th>客户</th><th>套餐</th>${setupFilterTh()}${sortTh('profit','利润','r')}${sortTh('margin','毛利率','r')}${sortTh('owner','归属','r')}<th class="r">明细</th></tr></thead>
       <tbody>${list.map(o=>`<tr>
         <td>${kpiEsc((o.booking_date||'').slice(5))}</td><td class="cust-cell">${custNameHtml(o)}</td>
         ${pkgCellHtml(o)}
@@ -1513,9 +1557,9 @@ function kpiMargin(){
         <td class="r">${fmtY(o.profit)}</td>
         <td class="r"><span class="pf-tag ${pfTagCls(o.alert)}">${o.margin}%</span></td>
         <td class="r">${ownerTagOf(o)}</td>
-        <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="kpi-line total"><span>平均毛利率</span><span>${t.avg_margin||0}%</span></div>
-    <div class="kpi-note">💡 毛利率分母扣掉了代收代付的配送搭建费，比"利润÷收入"更贴近真实。低于 ${alert}% 标黄、亏本标红。点客户名可看原始订单记录。</div>
+        <td class="r">${orderLinks(o)}</td></tr>`).join('')}${emptyRow}</tbody></table></div></div>
+    <div class="kpi-line total"><span>${avgLbl}</span><span>${avg}%</span></div>
+    <div class="kpi-note">💡 毛利率分母扣掉了代收代付的配送搭建费，比"利润÷收入"更贴近真实。低于 ${alert}% 标黄、亏本标红。点客户名可看原始订单记录、点「搭建」表头按搭建筛选。</div>
   `;
 }
 
