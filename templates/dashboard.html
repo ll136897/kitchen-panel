@@ -369,7 +369,12 @@ function noteRecogHtml(data){
     return `<span style="display:inline-block;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:6px;padding:2px 8px;margin:2px;font-size:12px">🔧 ${escHtml(k)} ${mode==='set'?'共':'+'}${q}</span>`;
   }).join('');
   const has = swaps.length || adds.length || toolChips;
-  const swapRows = swaps.map(s=>`<div style="padding:3px 0"><span style="display:inline-block;background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;border-radius:6px;padding:1px 7px;font-size:11px;margin-right:6px">换菜</span><b>${escHtml(s.from||'')}</b> → <b>${escHtml(s.to||'')}</b></div>`).join('');
+  const swapLabel = (s)=>{
+    const f = (s.froms&&s.froms.length) ? s.froms.map(x=>`${x[1]?x[1]+'份':''}${escHtml(x[0])}`).join('、') : escHtml(s.from||'');
+    const t = `${s.explicit? (s.to_qty||1)+'份':''}${escHtml(s.to||'')}`;
+    return `<b>${f}</b> → <b>${t}</b>`;
+  };
+  const swapRows = swaps.map(s=>`<div style="padding:3px 0"><span style="display:inline-block;background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;border-radius:6px;padding:1px 7px;font-size:11px;margin-right:6px">换菜</span>${swapLabel(s)}</div>`).join('');
   const addRows = adds.map(a=>`<div style="padding:3px 0"><span style="display:inline-block;background:#f6ffed;border:1px solid #b7eb8f;color:#389e0d;border-radius:6px;padding:1px 7px;font-size:11px;margin-right:6px">加菜</span><b>${escHtml(a.name||'')}</b> ×${a.qty||1}${a.mode==='set'?'（替换）':''}</div>`).join('');
   const body = `${swapRows}${addRows}${toolChips?`<div style="margin-top:6px">${toolChips}</div>`:''}`;
   const summary = `📝 备注识别明细（换菜 ${swaps.length} · 加菜 ${adds.length} · 装备 ${Object.keys(tools).length}）${has?'':'：无'}`;

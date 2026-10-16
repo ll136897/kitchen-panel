@@ -106,9 +106,16 @@ def get_available_tool_stock():
     return stock
 
 
+# 菜名连接字（去连接字后做模糊匹配，处理"薄荷牛肉"↔"薄荷拌牛肉"、"松板肉"↔"原切松板肉"等）
+CONNECTION_WORDS = ['原切', '精选', '特选', '奶香', '爆汁', '麻辣', '葱香', '蒜香', '南美', '沙葱',
+                   '安格斯', '谷饲', '黑椒', '藤椒', '孜然', '蜜汁', '拌', '炒', '煮', '卤', '烤',
+                   '熏', '香', '好', '的', '新']
+
+
 def match_ingredient_id_by_name(name):
     """按菜名模糊匹配 ingredients 表，返回 id 或 None。
     备注写"鸡尖"→库里"麻辣鸡尖"；备注写"麻辣鸡尖"→库里"鸡尖"都能配上。
+    备注写"薄荷牛肉"→库里"薄荷拌牛肉"（去连接字）也能配上。
     """
     if not name:
         return None
@@ -128,6 +135,23 @@ def match_ingredient_id_by_name(name):
             nm = x["name"] or ''
             if key in nm or nm in key:
                 return x["id"]
+        # 4) 去连接字后再试（薄荷牛肉→薄荷拌牛肉、原切松板肉→松板肉 等）。
+        #    关键词本身可能无连接字（"薄荷牛肉"里没有"拌"），只要尚未匹配就跑这步，
+        #    把库里菜名也去连接字后再比（"薄荷拌牛肉"→"薄荷牛肉"即可对上）。
+        stripped_key = key
+        for w in CONNECTION_WORDS:
+            stripped_key = stripped_key.replace(w, '')
+        stripped_key = stripped_key.strip()
+        if stripped_key:
+            cur.execute("SELECT id, name FROM ingredients")
+            for x in cur.fetchall():
+                nm = (x["name"] or '')
+                nm_stripped = nm
+                for w in CONNECTION_WORDS:
+                    nm_stripped = nm_stripped.replace(w, '')
+                nm_stripped = nm_stripped.strip()
+                if stripped_key in nm_stripped or nm_stripped in stripped_key:
+                    return x["id"]
     return None
 
 
@@ -355,28 +379,69 @@ def calc_order_requirements(order_id):
             ing_demand[iid]["per_package"] = ei["per_package"]
             ing_demand[iid]["order_qty"] += ei["qty"]
 
-        # 备注换菜：A 换 B —— 扣掉 A 的全部用量，按同样数量加上 B
+        # 备注换菜：A 换 B（支持"N份A换M份B"按份数换算）
+        # - 无数量词、单from：沿用旧逻辑（整份换出、等量换入），保持历史单兼容
+        # - 写了份数 或 多from：按份数——换出 froms 各项对应份数(无份数=全部)、换入 to_qty 份
         for sw in (parsed.get("dish_swaps") or []):
-            src_id = match_ingredient_id_by_name(sw.get("from"))
-            dst_id = match_ingredient_id_by_name(sw.get("to"))
-            if not src_id or not dst_id or src_id == dst_id:
+            to_id = match_ingredient_id_by_name(sw.get("to"))
+            if not to_id:
                 continue
-            if src_id not in ing_demand:
-                continue
-            amount = ing_demand[src_id]["total"]
-            if amount <= 0:
-                continue
-            ing_demand[src_id]["total"] = 0
-            ing_demand[src_id]["swapped_out"] = True
-            if dst_id not in ing_demand:
-                ing_demand[dst_id] = {
+            froms = sw.get("froms") or [[sw.get("from"), None]]
+            explicit = bool(sw.get("explicit", False))
+            multi = len(froms) > 1
+            to_qty = sw.get("to_qty", 1) or 1
+            use_old = (not explicit) and (not multi)
+
+            removed_total = 0.0
+            for fitem in froms:
+                fname = fitem[0] if isinstance(fitem, (list, tuple)) else fitem
+                fqty = fitem[1] if isinstance(fitem, (list, tuple)) else None
+                src_id = match_ingredient_id_by_name(fname)
+                if not src_id or src_id not in ing_demand:
+                    continue
+                info = ing_demand[src_id]
+                if info.get("total", 0) <= 0:
+                    continue
+                if use_old:
+                    # 旧逻辑：整份换出
+                    removed_total += info["total"]
+                    info["total"] = 0
+                    info["swapped_out"] = True
+                else:
+                    # 该食材真实份量 = 总用量 / 总份数
+                    tp = info.get("total_portions", info.get("portion_count", 0)) or 0
+                    portion = (info["total"] / tp) if tp > 0 else info["total"]
+                    rm = portion * (fqty if fqty else 1e9)  # 无份数=全部
+                    if rm >= info["total"]:
+                        removed_total += info["total"]
+                        info["total"] = 0
+                        info["swapped_out"] = True
+                    else:
+                        removed_total += rm
+                        info["total"] -= rm
+
+            # 换入 to_qty 份（用该食材"每套餐固定份量"这个固定值，不能用动态总用量/总份数，
+            # 否则多次换入同食材会把份量越算越大，例如肥牛被换入两次会算成 150g/份）
+            if use_old:
+                add = removed_total  # 旧逻辑：等量换入
+            else:
+                to_info = ing_demand.get(to_id)
+                if to_info:
+                    pc = to_info.get("portion_count", 0) or 1
+                    dst_portion = (to_info.get("per_package", 0) or 0) / pc if pc > 0 else 100.0
+                else:
+                    dst_portion = 100.0
+                add = dst_portion * to_qty
+            if to_id not in ing_demand:
+                ing_demand[to_id] = {
                     "total": 0,
-                    "per_package": ing_demand[src_id].get("per_package", 0),
-                    "order_qty": ing_demand[src_id].get("order_qty", 1),
-                    "portion_count": ing_demand[src_id].get("portion_count", 1),
+                    "per_package": 100.0,
+                    "order_qty": 0,
+                    "portion_count": 1,
+                    "total_portions": 0,
                 }
-            ing_demand[dst_id]["total"] += amount
-            ing_demand[dst_id]["swapped_in"] = True
+            ing_demand[to_id]["total"] += add
+            ing_demand[to_id]["swapped_in"] = True
 
     # 拉取详情
     ingredients_result = []

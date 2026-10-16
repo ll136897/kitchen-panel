@@ -587,46 +587,89 @@ def _clean_swap_name(s):
     return s.strip()
 
 
+def _parse_qty_prefix(name):
+    """从 '两份五花肉' / '五花肉三份' 提取 (份数, 清理后菜名)；无数量词返回 (None, name)。"""
+    if not name:
+        return None, ''
+    m = re.match(r"^\s*([一二三四五六七八九十两\d]+)\s*份\s*(.+)$", name)
+    if m:
+        return _num_from_str(m.group(1)), m.group(2).strip()
+    m2 = re.match(r"^\s*(.+?)\s*([一二三四五六七八九十两\d]+)\s*份\s*$", name)
+    if m2:
+        return _num_from_str(m2.group(2)), m2.group(1).strip()
+    return None, name.strip()
+
+
 def _parse_dish_swaps(note):
-    """从备注解析"换菜"需求：把某道菜换成另一道菜。
+    """从备注解析"换菜"需求：把某道菜换成另一道菜，并保留写的"份数"。
+
     支持写法：
       - 鸡尖换翅根 / 麻辣鸡尖换成奥尔良鸡翅根 / 把鸡尖替换成翅根
-      - 不要鸡尖，换翅根 / 不要鸡尖 换翅根（"不要X" + "换Y" 跨段搭配）
-    返回 [{from: 原菜名, to: 新菜名}]
+      - 两份五花肉换一份肥牛  →  {froms:[[五花肉,2]], to:肥牛, to_qty:1, explicit:True}
+      - 松板肉、梅花肉换一份肥牛 → 多from：{froms:[[松板肉,1],[梅花肉,1]], to:肥牛, to_qty:1}
+      - 不要鸡尖，换翅根（"不要X" + "换Y" 跨句搭配）
+    返回 [{from(展示串), to, froms:[[名,份数|None]], to_qty, explicit}]
+    （份数 None 表示"全部/未写明"；explicit=True 表示备注里写了数量词）
     """
     if not note:
         return []
     swaps = []
-    segments = re.split(r"[+，,。；;、\s]+", note)
-    pending_src = None  # 上一段出现的"不要X"里的 X
+    pending_src = None  # 上一段"不要X"暂存的 X
+    # 按句子切分（不要按顿号，否则"松板肉、梅花肉"会被拆散）
+    sentences = re.split(r"[；;，,。\n]+", note)
 
-    for seg in segments:
-        if not seg:
+    for sent in sentences:
+        sent = (sent or "").strip()
+        if not sent:
             continue
-        # 1) 单独的"换X"：与上一段"不要X"配对
-        m_only = re.match(r"^(?:换成|换为|替换成|替换|改成|改为|换)\s*(.+)$", seg)
-        if m_only:
-            dst = _clean_swap_name(m_only.group(1))
-            if pending_src and dst and pending_src != dst:
-                if (pending_src, dst) not in [(s["from"], s["to"]) for s in swaps]:
-                    swaps.append({"from": pending_src, "to": dst})
+        m = re.search(r"(.+?)(?:换成|换为|替换成|替换|改成|改为|换)\s*(.+)$", sent)
+        if not m:
+            # 没出现"换"字：可能只是"不要X"，暂存
+            mno = re.match(r"^(?:不要了|不要|去掉|不加|没有|无)\s*(.+)$", sent)
+            if mno:
+                pending_src = _clean_swap_name(mno.group(1))
+            continue
+
+        left, right = m.group(1).strip(), m.group(2).strip()
+        # 去掉"不要/把"等前缀
+        left = re.sub(r"^(?:不要了|不要|去掉|不加|没有|无|把)\s*", "", left).strip()
+        if not left and pending_src:
+            left = pending_src
             pending_src = None
+
+        # 解析 from 列表（顿号/逗号分隔多个）
+        froms = []
+        explicit = False
+        for fp in re.split(r"[、,，]", left):
+            fp = fp.strip()
+            if not fp:
+                continue
+            q, nm = _parse_qty_prefix(fp)
+            nm = _clean_swap_name(nm)
+            if q is not None:
+                explicit = True
+            if nm:
+                froms.append([nm, q])
+        # 解析 to 及其份数
+        to_qty, to_name = _parse_qty_prefix(right)
+        to_name = _clean_swap_name(to_name)
+        if to_qty is not None:
+            explicit = True
+        if not froms or not to_name:
             continue
-        # 2) 段内完整写法 "A换B" / "A换成B"
-        m_full = re.search(r"(.+?)(?:换成|换为|替换成|替换|改成|改为|换)\s*(.+)$", seg)
-        if m_full:
-            src = _clean_swap_name(re.sub(r"^(?:不要了|不要|去掉|不加|没有|无|把)", "", m_full.group(1)))
-            dst = _clean_swap_name(m_full.group(2))
-            pending_src = None
-            if src and dst and len(src) >= 2 and len(dst) >= 2 and src != dst:
-                if (src, dst) not in [(s["from"], s["to"]) for s in swaps]:
-                    swaps.append({"from": src, "to": dst})
+        to_qty = to_qty or 1
+
+        # 去重
+        key = (tuple((f[0], f[1]) for f in froms), to_name, to_qty)
+        if any((tuple((f[0], f[1]) for f in s["froms"]), s["to"], s["to_qty"]) == key for s in swaps):
             continue
-        # 3) 只写了"不要X"：暂存，等后面出现"换Y"再配对
-        m_no = re.match(r"^(?:不要了|不要|去掉|不加|没有|无)\s*(.+)$", seg)
-        if m_no:
-            pending_src = _clean_swap_name(m_no.group(1))
-            continue
+        swaps.append({
+            "from": "、".join(f[0] for f in froms),
+            "to": to_name,
+            "froms": froms,
+            "to_qty": to_qty,
+            "explicit": explicit,
+        })
     return swaps
 
 
