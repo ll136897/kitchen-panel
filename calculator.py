@@ -810,6 +810,70 @@ def preview_parse(raw_text):
                     "total_portions": ei["qty"],
                 }
 
+        # 备注换菜：把换菜生效到预览食材（与 calc_order_requirements 完全一致的算法），
+        # 这样"食材需求预览"就是备餐页最终会显示的那张表，粘贴时就能逐项核对识别对没。
+        # need 对应 calc 里的 total；per_package/portion_count/total_portions 字段含义一致。
+        for sw in (parsed.get("dish_swaps") or []):
+            to_id = match_ingredient_id_by_name(sw.get("to"))
+            if not to_id:
+                continue
+            froms = sw.get("froms") or [[sw.get("from"), None]]
+            explicit = bool(sw.get("explicit", False))
+            multi = len(froms) > 1
+            to_qty = sw.get("to_qty", 1) or 1
+            use_old = (not explicit) and (not multi)
+
+            removed_total = 0.0
+            for fitem in froms:
+                fname = fitem[0] if isinstance(fitem, (list, tuple)) else fitem
+                fqty = fitem[1] if isinstance(fitem, (list, tuple)) else None
+                src_id = match_ingredient_id_by_name(fname)
+                if not src_id or src_id not in preview_ing:
+                    continue
+                info = preview_ing[src_id]
+                if info.get("need", 0) <= 0:
+                    continue
+                if use_old:
+                    removed_total += info["need"]
+                    info["need"] = 0
+                    info["swapped_out"] = True
+                else:
+                    tp = info.get("total_portions", info.get("portion_count", 0)) or 0
+                    portion = (info["need"] / tp) if tp > 0 else info["need"]
+                    rm = portion * (fqty if fqty else 1e9)
+                    if rm >= info["need"]:
+                        removed_total += info["need"]
+                        info["need"] = 0
+                        info["swapped_out"] = True
+                    else:
+                        removed_total += rm
+                        info["need"] -= rm
+
+            if use_old:
+                add = removed_total
+            else:
+                to_info = preview_ing.get(to_id)
+                if to_info:
+                    pc = to_info.get("portion_count", 0) or 1
+                    dst_portion = (to_info.get("per_package", 0) or 0) / pc if pc > 0 else 100.0
+                else:
+                    dst_portion = 100.0
+                add = dst_portion * to_qty
+            if to_id not in preview_ing:
+                cur.execute("SELECT name, unit, stock, threshold, category FROM ingredients WHERE id = ?", (to_id,))
+                r = cur.fetchone()
+                if r:
+                    preview_ing[to_id] = {
+                        "id": to_id, "name": r["name"], "unit": r["unit"],
+                        "stock": r["stock"], "threshold": r["threshold"],
+                        "need": 0, "category": r["category"] or "other",
+                        "per_package": 100.0, "portion_count": 1,
+                        "portion_size": 100.0, "total_packages": 0, "total_portions": 0,
+                    }
+            if to_id in preview_ing:
+                preview_ing[to_id]["need"] = round(preview_ing[to_id].get("need", 0) + add, 2)
+                preview_ing[to_id]["swapped_in"] = True
+
     # 细分 meat → beef/pork/chicken，合并小料类，分离餐具
     for v in preview_ing.values():
         v["category"] = _subcategorize_meat(v["name"], v["category"])

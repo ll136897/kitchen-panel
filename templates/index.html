@@ -204,6 +204,7 @@ function cardHtml(p,i,n){
       <div style="font-weight:800;font-size:14px">${title} · ${brief}${isWeak(p)?' <span style="color:#c0392b;font-size:12px">⚠️ 没识别出关键信息</span>':''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm" id="tog-${i}" onclick="toggleDetail(${i})">${open?'收起':'展开'}</button>
+        <button class="btn btn-sm btn-info" onclick="openPrepModal(${i})">📋 备餐表核对</button>
         <button class="btn btn-sm" onclick="mergeUp(${i})" ${i===0?'disabled style="opacity:.4"':''}>⬆️ 合并到上单</button>
         <button class="btn btn-sm btn-danger" onclick="dropChunk(${i})">🗑</button>
       </div></div>` : '' }
@@ -249,10 +250,13 @@ function noteRecogHtml(data){
 
 function detailInner(p){
   const pkgs = (p.matched_packages||[]).map(x=>`<div class="chip">${x.name} · ${x.people}人 · ${x.quantity}份 · ${x.service_type}</div>`).join('') || '<span class="muted">无匹配套餐</span>';
-  const ings = (p.preview_ingredients||[]).map(x=>{
+  const _ingsDict = (p.preview_ingredients||{});
+  const _ingsList = Array.isArray(_ingsDict) ? _ingsDict : Object.values(_ingsDict).flat();
+  const ings = _ingsList.map(x=>{
     const cls = x.shortage>0 ? 'row-warn' : (x.warning ? 'row-low' : '');
-    const short = x.shortage>0 ? `<span class="tag tag-red">缺 ${x.shortage}${x.unit}</span>` : '';
-    return `<tr class="${cls}"><td>${x.name}</td><td>${x.need}${x.unit}</td><td>${x.stock}${x.unit}</td><td>${short||'充足'}</td></tr>`;
+    const short = x.shortage>0 ? `<span class="tag tag-red">缺 ${x.shortage}${x.unit||''}</span>` : '';
+    const note = x.swapped_in ? ' <span style="color:#389e0d;font-size:11px">🟢换入</span>' : (x.swapped_out ? ' <span style="color:#a8071a;font-size:11px">🔴换出</span>' : '');
+    return `<tr class="${cls}"><td>${x.name}${note}</td><td>${x.need||0}${x.unit||''}</td><td>${x.stock||0}${x.unit||''}</td><td>${short||'充足'}</td></tr>`;
   }).join('') || '<tr><td colspan=4 class="muted">套餐未配置食材</td></tr>';
   const tools = (p.preview_tools||[]).map(x=>{
     const cls = x.shortage>0 ? 'row-warn' : (x.warning ? 'row-low' : '');
@@ -304,6 +308,60 @@ function detailInner(p){
         <tbody>${tools}</tbody>
       </table>
     </div>
+  `;
+}
+
+// 备餐表核对弹窗：把系统解析后会显示在备餐页的那张表原样弹出来，逐项核对识别对没。
+function openPrepModal(ref){
+  const data = (typeof ref === 'number') ? (parsedItems[ref]||{}) : (ref||{});
+  document.getElementById('prepModalBody').innerHTML = prepTableHtml(data);
+  document.getElementById('prepModal').classList.add('show');
+}
+function closePrepModal(){ document.getElementById('prepModal').classList.remove('show'); }
+function prepTableHtml(data){
+  const pkgs = (data.matched_packages||[]);
+  const pkgHtml = pkgs.length ? pkgs.map(p=>`<span class="chip pkg">${escHtml(p.name)} × ${p.quantity}${p.setup?'（搭建）':''}</span>`).join(' ') : '<span class="muted">未识别套餐</span>';
+  let ings = data.preview_ingredients||{};
+  ings = Array.isArray(ings) ? (()=>{const d={}; ings.forEach(x=>{(d[x.category||'other']=d[x.category||'other']||[]).push(x);}); return d;})() : ings;
+  const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 素菜',side:'🥗 小菜',sauce:'🧂 小料',drink:'🎁 赠品',staple:'🍚 主食',other:'📦 其他',packaging:'📦 食材包装',utensil:'🍱 客户餐具'};
+  const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#666',other:'#666',packaging:'#d35400',utensil:'#8e44ad'};
+  const catOrder = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','other','packaging','utensil'];
+  let rows = '';
+  for(const cat of catOrder){
+    const items = ings[cat];
+    if(!items || !items.length) continue;
+    rows += `<tr><td colspan="7" style="background:${catColor[cat]||'#666'};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${catLabel[cat]||cat} · ${items.length}项</td></tr>`;
+    for(const i of items){
+      const sc = i.shortage>0?'txt-red':'';
+      const tp = i.total_portions||i.total_packages||1;
+      const isSimple = (cat==='drink' && /可乐|雪碧/.test(i.name||''));
+      const ps = isSimple?'—':(i.portion_size||i.per_package||0);
+      const unit = i.unit||'';
+      const out = i.swapped_out, inn = i.swapped_in;
+      const badge = inn ? `<span class="swap-badge in">换入</span>` : (out ? `<span class="swap-badge out">换出</span>` : '');
+      const style = out ? 'text-decoration:line-through;opacity:.55' : '';
+      const needStr = (i.need||0)+unit;
+      rows += `<tr style="${style}">
+        <td style="text-align:left">${escHtml(i.name)} ${badge}</td>
+        <td style="text-align:center;font-weight:700">${tp}</td>
+        <td style="text-align:center">${ps||'—'}</td>
+        <td style="text-align:center">${unit}</td>
+        <td style="text-align:center;font-weight:800;color:var(--primary)">${needStr}</td>
+        <td style="text-align:center">${i.stock}</td>
+        <td style="text-align:center" class="${sc}">${i.shortage>0?i.shortage+unit:'✓'}</td>
+      </tr>`;
+    }
+  }
+  const tools = (data.preview_tools||[]);
+  const toolRows = tools.map(t=>`<tr><td style="text-align:left">${escHtml(t.name)}</td><td style="text-align:center;font-weight:700">${t.need}</td><td style="text-align:center">${t.stock}</td><td style="text-align:center" class="${t.shortage>0?'txt-red':''}">${t.shortage>0?t.shortage:'✓'}</td></tr>`).join('');
+  return `
+    <div style="margin-bottom:10px"><b>🍱 套餐</b>：${pkgHtml}</div>
+    ${noteRecogHtml(data)}
+    <h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🥩 备餐表（与备餐页最终一致）</h4>
+    <table class="tbl"><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>总克数</th><th>库存</th><th>缺口</th></tr></thead><tbody>${rows}</tbody></table>
+    ${tools.length?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具 / 装备</h4>
+    <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${toolRows}</tbody></table>`:''}
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">🔴 换出 = 被换掉的菜（不再备）；🟢 换入 = 换进来的菜。核对无误再点「确认入库」。</div>
   `;
 }
 
@@ -361,5 +419,24 @@ function loadSample(){
 
 async function doBackup(){const b=event.target;if(!confirm('备份会先把云端已有的订单合并进来（不会丢单），再把当前数据推上去。确定现在备份？'))return;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 </script>
+<style>
+  .prep-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;overflow:auto;padding:24px 12px}
+  .prep-modal-mask.show{display:flex;align-items:flex-start;justify-content:center}
+  .prep-modal-box{background:#fff;border-radius:14px;width:100%;max-width:680px;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:92vh;display:flex;flex-direction:column}
+  .prep-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff;border-radius:14px 14px 0 0}
+  .prep-modal-head b{font-size:16px;color:var(--primary)}
+  .prep-modal-head button{border:none;background:#f0ece4;border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer}
+  .prep-modal-body{padding:14px 18px 20px;overflow:auto}
+  .swap-badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;margin-left:5px;vertical-align:middle}
+  .swap-badge.in{background:#f6ffed;border:1px solid #b7eb8f;color:#389e0d}
+  .swap-badge.out{background:#fff1f0;border:1px solid #ffccc7;color:#a8071a}
+</style>
+<!-- 备餐表核对弹窗：粘贴解析后点「备餐表核对」弹出，原样展示备餐页最终那张表 -->
+<div class="prep-modal-mask" id="prepModal" onclick="if(event.target===this)closePrepModal()">
+  <div class="prep-modal-box">
+    <div class="prep-modal-head"><b>📋 备餐表核对（与备餐页最终一致）</b><button onclick="closePrepModal()" aria-label="关闭">✕</button></div>
+    <div class="prep-modal-body" id="prepModalBody"></div>
+  </div>
+</div>
 </body>
 </html>
