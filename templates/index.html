@@ -221,6 +221,26 @@ function cardHtml(p,i,n){
 function escHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+// 备注识别明细：把系统从备注里认出来的 换菜/加菜/装备 列出来，方便录入时核对"识别对没有"
+function noteRecogHtml(data){
+  const swaps = (data.dish_swaps||[]);
+  const adds = (data.extra_ingredients||[]);
+  const tools = (data.extra_tools||{});
+  const toolChips = Object.entries(tools).map(([k,v])=>{
+    const q = (typeof v==='object')? v.qty : v;
+    const mode = (typeof v==='object')? (v.mode||'set') : 'set';
+    return `<span style="display:inline-block;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:6px;padding:2px 8px;margin:2px;font-size:12px">🔧 ${escHtml(k)} ${mode==='set'?'共':'+'}${q}</span>`;
+  }).join('');
+  const has = swaps.length || adds.length || toolChips;
+  const swapRows = swaps.map(s=>`<div style="padding:3px 0"><span style="display:inline-block;background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;border-radius:6px;padding:1px 7px;font-size:11px;margin-right:6px">换菜</span><b>${escHtml(s.from||'')}</b> → <b>${escHtml(s.to||'')}</b></div>`).join('');
+  const addRows = adds.map(a=>`<div style="padding:3px 0"><span style="display:inline-block;background:#f6ffed;border:1px solid #b7eb8f;color:#389e0d;border-radius:6px;padding:1px 7px;font-size:11px;margin-right:6px">加菜</span><b>${escHtml(a.name||'')}</b> ×${a.qty||1}${a.mode==='set'?'（替换）':''}</div>`).join('');
+  const body = `${swapRows}${addRows}${toolChips?`<div style="margin-top:6px">${toolChips}</div>`:''}`;
+  const summary = `📝 备注识别明细（换菜 ${swaps.length} · 加菜 ${adds.length} · 装备 ${Object.keys(tools).length}）${has?'':'：无'}`;
+  return `<details class="note-recog" ${has?'open':''} style="margin:10px 0;border:1px solid #e8dfd0;border-radius:8px;background:#fffdf8;padding:8px 10px">
+    <summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--primary)">${summary}</summary>
+    <div style="margin-top:6px;font-size:13px;line-height:1.6">${body||'<span class="muted">备注里没识别到加菜 / 换菜 / 装备</span>'}</div>
+  </details>`;
+}
 
 function detailInner(p){
   const pkgs = (p.matched_packages||[]).map(x=>`<div class="chip">${x.name} · ${x.people}人 · ${x.quantity}份 · ${x.service_type}</div>`).join('') || '<span class="muted">无匹配套餐</span>';
@@ -259,6 +279,7 @@ function detailInner(p){
       </div>
       <div class="note-box"><b>备注:</b> ${p.note||'-'}</div>
       <div class="note-box"><b>备注解析出的额外工具:</b> ${extraStr}</div>
+      ${noteRecogHtml(p)}
     </div>
     <div class="card">
       <h3>套餐明细</h3>
