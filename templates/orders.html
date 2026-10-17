@@ -125,6 +125,17 @@
     .tag-lg{font-size:11px;padding:4px 11px}
     .order-head .oh-right{gap:5px}
   }
+  /* 备餐表核对弹窗（订单列表页，点「备餐核对」原地弹出，不跳走） */
+  .prep-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;overflow:auto;padding:24px 12px}
+  .prep-modal-mask.show{display:flex;align-items:flex-start;justify-content:center}
+  .prep-modal-box{background:#fff;border-radius:14px;width:100%;max-width:680px;box-shadow:0 10px 40px rgba(0,0,0,.3);max-height:92vh;display:flex;flex-direction:column}
+  .prep-modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eee;position:sticky;top:0;background:#fff;border-radius:14px 14px 0 0}
+  .prep-modal-head b{font-size:16px;color:var(--primary)}
+  .prep-modal-head button{border:none;background:#f0ece4;border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer}
+  .prep-modal-body{padding:14px 18px 20px;overflow:auto}
+  .swap-badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;margin-left:5px;vertical-align:middle}
+  .swap-badge.in{background:#f6ffed;border:1px solid #b7eb8f;color:#389e0d}
+  .swap-badge.out{background:#fff1f0;border:1px solid #ffccc7;color:#a8071a}
 </style>
 </head>
 <body>
@@ -673,7 +684,7 @@ function buildCard(o, isAnchor){
       ` : `<span class="lock-note">🔒 这单不是你归属的，只能看</span>`) : `
       <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
       <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
-      <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="location.href='/prep?focus=${o.id}'">🍱 备餐核对</button>
+      <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="openPrepModal(${o.id})">🍱 备餐核对</button>
       ${canTouch(o) ? `
       <button class="btn btn-sm" style="background:#eef2ff;color:#2b50c0;border:1px solid #cfd8ff" onclick="location.href='/orders/${o.id}'">✏️ 改单</button>
       ${o.status==='pending' ? `<button class="btn btn-sm btn-accent" onclick="setStatus(${o.id},'preparing')">🔥 开始备餐</button>` : ''}
@@ -1002,6 +1013,78 @@ function showRefreshToast(){
 }
 async function doBackup(){const b=event.target;if(!confirm('备份会先把云端已有的订单合并进来（不会丢单），再把当前数据推上去。确定现在备份？'))return;b.textContent='⏳ 备份中...';b.disabled=true;try{const r=await fetch('/api/backup',{method:'POST'});const d=await r.json();if(d.ok){b.textContent='✅ 已备份';setTimeout(()=>{b.textContent='💾 备份';b.disabled=false},2000)}else{alert(d.msg||'备份失败');b.textContent='💾 备份';b.disabled=false}}catch(e){alert('备份失败：网络错误');b.textContent='💾 备份';b.disabled=false}}
 autoSync(loadOrders, 60000);
+
+// ===== 备餐表核对弹窗：订单列表页点「🍱 备餐核对」原地弹出，不再整页跳到备餐页简略表 =====
+function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function openPrepModal(id){
+  const o = allOrders.find(x=>x.id===id) || {};
+  const body = document.getElementById('prepModalBody');
+  body.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">⏳ 正在加载备餐需求…</div>';
+  document.getElementById('prepModal').classList.add('show');
+  try{
+    const r = await fetch('/api/orders/'+id+'/requirements');
+    const d = await r.json();
+    if(d.ok){ body.innerHTML = prepReqHtml(d.data||{}, o); }
+    else { body.innerHTML = '<div style="padding:20px;color:#a8071a">⚠️ 加载失败：'+(d.msg||'未知错误')+'</div>'; }
+  }catch(e){
+    body.innerHTML = '<div style="padding:20px;color:#a8071a">⚠️ 网络错误，请重试</div>';
+  }
+}
+function closePrepModal(){ document.getElementById('prepModal').classList.remove('show'); }
+function prepReqHtml(req, o){
+  const pkgs = (o.packages||[]);
+  const pkgHtml = pkgs.length ? pkgs.map(p=>`<span class="chip pkg">${escHtml(p.name)} · ${p.people||'?'}人 × ${p.quantity}${o.setup_flag?'（搭建）':''}</span>`).join(' ') : '<span class="muted">无套餐</span>';
+  const ings = req.ingredients||[];
+  const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 素菜',side:'🥗 小菜',sauce:'🧂 小料',drink:'🎁 赠品',staple:'🍚 主食',other:'📦 其他',packaging:'📦 食材包装',utensil:'🍱 客户餐具'};
+  const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#666',other:'#666',packaging:'#d35400',utensil:'#8e44ad'};
+  const catOrder = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','other','packaging','utensil'];
+  const byCat = {};
+  for(const i of ings){ (byCat[i.category||'other']=byCat[i.category||'other']||[]).push(i); }
+  let rows = '';
+  for(const cat of catOrder){
+    const items = byCat[cat];
+    if(!items || !items.length) continue;
+    rows += `<tr><td colspan="6" style="background:${catColor[cat]||'#666'};color:#fff;font-weight:700;padding:5px 8px;font-size:13px">${catLabel[cat]||cat} · ${items.length}项</td></tr>`;
+    for(const i of items){
+      const sc = i.shortage>0?'txt-red':'';
+      const tp = i.total_portions||i.order_qty||1;
+      const ps = (i.portion_size||i.per_package||0);
+      const unit = i.unit||'';
+      const badge = i.swapped_in ? `<span class="swap-badge in">换入</span>` : '';
+      const needStr = (i.need||0)+unit;
+      rows += `<tr>
+        <td style="text-align:left">${escHtml(i.name)} ${badge}</td>
+        <td style="text-align:center;font-weight:700">${tp}</td>
+        <td style="text-align:center">${ps||'—'}</td>
+        <td style="text-align:center">${unit}</td>
+        <td style="text-align:center;font-weight:800;color:var(--primary)">${needStr}</td>
+        <td style="text-align:center" class="${sc}">${i.shortage>0?i.shortage+unit:'✓'}</td>
+      </tr>`;
+    }
+  }
+  const tools = req.tools||[];
+  const toolRows = tools.map(t=>`<tr><td style="text-align:left">${escHtml(t.name)}</td><td style="text-align:center;font-weight:700">${t.need}</td><td style="text-align:center">${t.stock}</td><td style="text-align:center" class="${t.shortage>0?'txt-red':''}">${t.shortage>0?t.shortage:'✓'}</td></tr>`).join('');
+  const noteHtml = o.note ? `<div class="note-box"><b>📝 备注：</b>${escHtml(o.note)}</div>` : '';
+  return `
+    <div style="margin-bottom:10px"><b>🍱 套餐</b>：${pkgHtml}</div>
+    ${noteHtml}
+    <h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🥩 备餐表（与备餐页最终一致）</h4>
+    <table class="tbl"><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>总克数</th><th>缺口</th></tr></thead><tbody>${rows}</tbody></table>
+    ${tools.length?`<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具 / 装备</h4>
+    <table class="tbl"><thead><tr><th>工具</th><th>需求</th><th>库存</th><th>缺口</th></tr></thead><tbody>${toolRows}</tbody></table>`:''}
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">🟢 换入 = 备注换进来的菜。核对无误可去备餐页整体勾选。</span>
+      <button class="btn btn-sm" onclick="window.open('/prep?focus=${o.id}','_blank')">🔗 打开完整备餐页</button>
+    </div>
+  `;
+}
 </script>
+<!-- 备餐表核对弹窗：订单列表页点「🍱 备餐核对」弹出，原地核对不跳走 -->
+<div class="prep-modal-mask" id="prepModal" onclick="if(event.target===this)closePrepModal()">
+  <div class="prep-modal-box">
+    <div class="prep-modal-head"><b>📋 备餐表核对（与备餐页最终一致）</b><button onclick="closePrepModal()" aria-label="关闭">✕</button></div>
+    <div class="prep-modal-body" id="prepModalBody"></div>
+  </div>
+</div>
 </body>
 </html>
