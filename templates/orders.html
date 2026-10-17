@@ -987,10 +987,25 @@ function submitReturn(){
 // 深度联动：从备餐页点"📋 看该订单"跳过来时，自动按这单的地址分组
 const _op = new URLSearchParams(location.search).get('focus');
 const _oid = _op ? parseInt(_op, 10) : null;
+// 首次进订单页：默认定位到「今天」；今天没单则定位到「最近有订单的一天」
+// （不再一进来就是「全部日期」；仍可用顶部「全部日期」按钮切回看所有单）
+let _dateAutoInited = false;
+function autoDefaultDate(){
+  if(_dateAutoInited) return;
+  _dateAutoInited = true;
+  const ds = allOrders.map(o=>o.booking_date).filter(Boolean).sort();
+  if(!ds.length) return;                       // 没有任何带日期的订单 → 保持全部
+  const t = new Date();
+  const today = t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+  const target = ds.includes(today) ? today : ds[ds.length-1];   // 今天有单→今天；否则最近有单日
+  setOrderDate(target);
+}
 loadOrders().then(()=>{
   if(_oid){
     const fo = allOrders.find(o=>o.id===_oid);
     if(fo) groupBy('address', fo.id);
+  } else {
+    autoDefaultDate();
   }
 });
 
