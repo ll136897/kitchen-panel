@@ -382,7 +382,7 @@ def _split_large_package(info):
 TOOL_ALIASES = {
     "桌子": "蛋卷桌", "餐桌": "蛋卷桌", "蛋卷桌": "蛋卷桌",
     "椅子": "椅子",
-    "天幕": "天幕", "棚": "天幕",
+    "天幕": "天幕", "天慕": "天幕", "棚": "天幕",
     "烤炉": "卡式炉", "炉子": "卡式炉", "卡式炉": "卡式炉",
     "烤盘": "烤盘",
     "夹子": "夹子",
@@ -430,85 +430,63 @@ def _parse_extra_tools(note):
       - 阿拉伯数字："多拿1张桌子，1个椅子"
       - 中文数字："配一套卡式炉"
       - 加号分隔："配一套新卡式炉+烤盘"
+      - 连续紧凑写法："1天幕2桌子9椅子"（数字紧贴各自物品，互不串味）
     返回 {工具名: {"qty": 数量, "mode": "set"|"add"}}
       mode="set" → 覆盖（总数=qty）；mode="add" → 增量（套餐基础上 +qty）
     """
     if not note:
         return {}
-    # 收集每个工具的所有 (mode, qty) 条目，最后统一解析
-    tool_entries = {}  # std_name -> [(mode, qty), ...]
-
-    def _add_entry(std_name, mode, qty):
-        tool_entries.setdefault(std_name, []).append((mode, qty))
-
     # 拆分成段：按 + ，,。；;、 空格 切分
     segments = re.split(r"[+，,。；;、\s]+", note)
-    # 过滤时间相关段：含"X点""X点钟""X点左右"等时间表达的都是时间安排，
-    # 不是工具数量需求（如"15点钟搭好天幕桌椅"不应被解析成15个天幕）
+    # 过滤时间相关段（含"X点"的不是工具数量需求）
     segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
 
-    # 量词集合
-    quantifier = "[张个把条只套份台]?"
-
-    # 1. 先用别名匹配（能识别"桌子""椅子""烤盘"等简称）
-    for alias, std_name in TOOL_ALIASES.items():
-        for seg in segments:
-            if alias not in seg:
-                continue
-            mode = _detect_mode(seg)
-            n = None
-            # 数字在前：1张桌子 / 一套卡式炉 / 一套新卡式炉
-            m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(alias)}", seg)
-            if m:
-                n = _num_from_str(m.group(1))
-            else:
-                # 别名在前：桌子1张 / 卡式炉一套
-                m = re.search(rf"{re.escape(alias)}\S{{0,4}}?(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}", seg)
-                if m:
-                    n = _num_from_str(m.group(1))
-            if n is None:
-                # 没数字但有"配/带/拿"+别名 → 默认1
-                if re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(alias)}", seg):
-                    n = 1
-            if n:
-                _add_entry(std_name, mode, n)
-
-    # 2. 再用数据库完整工具名兜底匹配
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT name FROM tools")
         known_tools = [r["name"] for r in cur.fetchall()]
-    for tname in known_tools:
-        if tname in tool_entries:
-            continue
-        for seg in segments:
-            if tname not in seg:
-                continue
-            mode = _detect_mode(seg)
-            n = None
-            m = re.search(rf"(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}\S{{0,4}}?{re.escape(tname)}", seg)
-            if m:
-                n = _num_from_str(m.group(1))
-            else:
-                m = re.search(rf"{re.escape(tname)}\S{{0,4}}?(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*{quantifier}", seg)
-                if m:
-                    n = _num_from_str(m.group(1))
-            if n is None and re.search(rf"(配|带|拿|加|备|要)\S{{0,3}}?{re.escape(tname)}", seg):
-                n = 1
-            if n:
-                _add_entry(tname, mode, n)
+    # (匹配名, 标准名) 列表，按匹配名长度降序，避免"桌"误匹配"蛋卷桌"
+    pairs = list(TOOL_ALIASES.items())
+    for t in known_tools:
+        if t not in [s for _, s in pairs]:
+            pairs.append((t, t))
+    pairs.sort(key=lambda x: len(x[0]), reverse=True)
 
-    # 解析每个工具的最终 mode 和 qty
+    QUANT = "[张个把条只套份台]"
+    num_re = re.compile(r"(\d+|[一二两三四五六七八九十]+)")
     result = {}
-    for std_name, entries in tool_entries.items():
-        has_add = any(m == "add" for m, _ in entries)
-        if has_add:
-            # 有任意增量 → 全部累加
-            total = sum(q for _, q in entries)
-            result[std_name] = {"qty": total, "mode": "add"}
-        else:
-            # 全是覆盖 → 取最后一个（最终总数）
-            result[std_name] = {"qty": entries[-1][1], "mode": "set"}
+    for seg in segments:
+        events = []
+        for m in num_re.finditer(seg):
+            events.append((m.start(), 'num', _num_from_str(m.group(1))))
+        for name, std in pairs:
+            for m in re.finditer(re.escape(name), seg):
+                events.append((m.start(), 'tool', (name, std)))
+        events.sort(key=lambda e: e[0])
+        num = None
+        ptr = 0                      # 上一个事件结束位置
+        for pos, typ, val in events:
+            if typ == 'num':
+                num = val
+            elif typ == 'tool':
+                name, std = val
+                gap = seg[ptr:pos]
+                if num is not None:
+                    # 数字与物品之间只允许量词/空白；夹了其他字（如未识别物品）→ 丢弃该数字防串味
+                    if re.fullmatch(r"\s*" + QUANT + r"?\s*", gap):
+                        mode = _detect_mode(seg)
+                        if mode == 'add' and std in result:
+                            result[std]["qty"] += num
+                        else:
+                            result[std] = {"qty": num, "mode": mode}
+                        num = None
+                    else:
+                        num = None
+                else:
+                    # 无数字但有"配/带/拿/加/备/要+物品" → 默认1
+                    if re.search(r"(配|带|拿|加|备|要)\S{0,3}?" + re.escape(name), seg):
+                        result[std] = {"qty": 1, "mode": _detect_mode(seg)}
+            ptr = pos + (len(val) if typ == 'tool' else 1)
     return result
 
 

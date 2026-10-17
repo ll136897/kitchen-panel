@@ -557,8 +557,12 @@ function downloadFile(url){
       if (typeof a.download === 'undefined'){ window.open(url, '_blank'); return; }
       const u = URL.createObjectURL(blob);
       a.href = u; a.download = fname;
-      document.body.appendChild(a); a.click();
+      document.body.appendChild(a);
+      // 部分手机/微信内置浏览器会静默拦截 a.click() 的 blob 下载（点了没反应、也没提示），
+      // 这里用 try/catch 兜底：click 失败就改用新标签打开，确保一定有反馈。
+      try { a.click(); } catch(e){ window.open(url, '_blank'); }
       setTimeout(function(){ URL.revokeObjectURL(u); a.remove(); }, 1500);
+      if (typeof showToast === 'function') showToast('✅ 文件已生成，开始下载');
     })
     .catch(function(err){
       if (typeof showToast === 'function') showToast('⚠️ 导出失败：' + err); else alert('导出失败：' + err);
