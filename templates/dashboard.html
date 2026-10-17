@@ -609,8 +609,20 @@ function prepTableHtml(data){
       const badge = inn ? `<span class="swap-badge in">换入</span>` : (out ? `<span class="swap-badge out">换出</span>` : '');
       const style = out ? 'text-decoration:line-through;opacity:.55' : '';
       const needStr = (i.need||0)+unit;
+      // 拆分展示：原套餐量 + 换入量，让核对者一眼看到「本来那2份肥牛」还在
+      let sub = '';
+      if(inn){
+        const added = Math.max(0, (i.need||0) - (i.base_need||0));
+        if((i.base_need||0) > 0){
+          sub = `<div style="font-size:11px;color:#389e0d;margin-top:2px">🥩原套餐${i.base_need}${unit} ＋ 🟢换入${added}${unit}</div>`;
+        } else {
+          sub = `<div style="font-size:11px;color:#389e0d;margin-top:2px">🟢换入 ${needStr}</div>`;
+        }
+      } else if(out){
+        sub = `<div style="font-size:11px;color:#a8071a;margin-top:2px">🔴 原${i.base_need||0}${unit}，已换出</div>`;
+      }
       rows += `<tr style="${style}">
-        <td style="text-align:left">${escHtml(i.name)} ${badge}</td>
+        <td style="text-align:left">${escHtml(i.name)} ${badge}${sub}</td>
         <td style="text-align:center;font-weight:700">${tp}</td>
         <td style="text-align:center">${ps||'—'}</td>
         <td style="text-align:center">${unit}</td>

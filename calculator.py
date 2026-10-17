@@ -738,11 +738,15 @@ def preview_parse(raw_text):
                         "portion_size": round(r["per_package"] / max(1, pc), 2),
                         "total_packages": 0,
                         "total_portions": 0,
+                        "base_need": 0,          # 套餐本来用量（换菜前），用于弹窗拆分展示「原套餐 + 换入」
+                        "base_portions": 0,
                     }
                 preview_ing[r["id"]]["need"] += amount
+                preview_ing[r["id"]]["base_need"] += amount
                 preview_ing[r["id"]]["total_packages"] += pk["quantity"]
                 preview_ing[r["id"]]["portion_count"] = pc
                 preview_ing[r["id"]]["total_portions"] = pc * preview_ing[r["id"]]["total_packages"]
+                preview_ing[r["id"]]["base_portions"] = preview_ing[r["id"]]["total_portions"]
                 preview_ing[r["id"]]["portion_size"] = round(preview_ing[r["id"]]["need"] / max(1, preview_ing[r["id"]]["total_portions"]), 2) if preview_ing[r["id"]]["total_portions"] else 0
 
             cur.execute("""
@@ -869,10 +873,14 @@ def preview_parse(raw_text):
                         "need": 0, "category": r["category"] or "other",
                         "per_package": 100.0, "portion_count": 1,
                         "portion_size": 100.0, "total_packages": 0, "total_portions": 0,
+                        "base_need": 0, "base_portions": 0,
                     }
             if to_id in preview_ing:
                 preview_ing[to_id]["need"] = round(preview_ing[to_id].get("need", 0) + add, 2)
                 preview_ing[to_id]["swapped_in"] = True
+                preview_ing[to_id]["total_portions"] = (preview_ing[to_id].get("total_portions", 0) or 0) + to_qty
+                tp2 = preview_ing[to_id].get("total_portions", 0) or 0
+                preview_ing[to_id]["portion_size"] = round(preview_ing[to_id]["need"] / tp2, 2) if tp2 else 0
 
     # 细分 meat → beef/pork/chicken，合并小料类，分离餐具
     for v in preview_ing.values():
