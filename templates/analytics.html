@@ -26,7 +26,7 @@
   .an-chart.dragging .an-bar-wrap{pointer-events:none}
   .an-bar-wrap{flex:1 1 0;min-width:30px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;cursor:pointer}
   .an-bar-v{font-size:9px;font-weight:700;color:#8a7364;margin-bottom:3px;white-space:nowrap}
-  .an-bar{width:72%;background:linear-gradient(180deg,#e8705f,#c0392b);border-radius:5px 5px 0 0;min-height:3px;transition:opacity .15s}
+  .an-bar{width:72%;background:linear-gradient(180deg,#e8705f,#c0392b);border-radius:5px 5px 0 0;min-height:3px;flex-shrink:0;transition:opacity .15s}
   .an-bar-wrap:hover .an-bar{opacity:.8}
   .an-bar-l{font-size:9px;color:#9a8b7c;margin-top:4px;white-space:nowrap}
   .an-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed #f0e9df;cursor:pointer}
@@ -264,7 +264,8 @@ function renderChart(){
   if(!ps.length){ document.getElementById('anChart').innerHTML = '<div class="an-empty">还没有数据</div>'; return; }
   const max = Math.max.apply(null, ps.map(function(p){ return Number(p[m]||0); }).concat([1]));
   document.getElementById('anChart').innerHTML = ps.map(function(p){
-    const h = Math.max(3, Math.round(Number(p[m]||0) / max * 100));
+    // 缩放到85%：给柱顶的金额标签留出空间，防止最高柱+标签溢出容器后被 flex 压缩，导致高柱被压扁、高低差被视觉压平
+    const h = Math.max(3, Math.round(Number(p[m]||0) / max * 85));
     const val = (m === 'orders') ? (anNum(p[m]) + '单') : anFmtY(p[m]);
     const short = String(p.label||'').split('~')[0];
     return '<div class="an-bar-wrap" onclick="drillPeriod(\'' + p.start + '\',\'' + anEsc(p.label) + '\')" title="点看这一期的单">' +
