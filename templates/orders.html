@@ -525,25 +525,32 @@ window.addEventListener('scroll', function(e){
 }, true);
 window.addEventListener('resize', function(){ if(_monthMenuEl) _mmReposition(); }, true);
 
-// 归属筛选：全部 / 刘 / 孙（两人都能看，用来分开看各自录的单）
+// 归属筛选：全部 / 我归属的 / 某人归属的（复用 /api/signers，与备餐页一致——
+// 选项永远来自签单人列表 刘+孙，不依赖当前订单里有没有填归属，所以一定能筛）
+let SIGNERS = [];
 function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
 function ownerKey(o){ return (o && o.created_by) ? String(o.created_by) : ''; }
+function loadSigners(){
+  return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(d=>{
+    SIGNERS = (d && d.data) || [];
+    renderOrderOwnerChips();
+  }).catch(()=>{ SIGNERS = []; renderOrderOwnerChips(); });
+}
 function renderOrderOwnerChips(){
   const box = document.getElementById('orderOwnerChips');
   if(!box) return;
-  // 从订单里归纳出"有哪些归属"（不需要额外接口）
-  const cnt = {}, nm = {};
-  allOrders.forEach(o=>{
-    const k = ownerKey(o);
-    cnt[k] = (cnt[k]||0) + 1;
-    if(k && !nm[k]) nm[k] = prettyName(o.created_by_name) || ('用户'+k);
-  });
+  const cnt = {};   // 各归属的订单数（仅用于角标，选项来自 SIGNERS）
+  allOrders.forEach(o=>{ const k = ownerKey(o); cnt[k] = (cnt[k]||0) + 1; });
   const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
-  const others = Object.keys(cnt).filter(k=>k && k!==mine).sort((a,b)=> cnt[b]-cnt[a]);
   let html = `<span class="sort-label" style="flex:0 0 100%">归属</span>`;
   html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrders.length}</button>`;
-  if(mine && cnt[mine]) html += `<button class="date-chip ${filterOwner==='me'?'active':''}" onclick="setOrderOwner('me')">${ownerSign(CUR_USER.name)} ${cnt[mine]}</button>`;
-  html += others.map(k=>`<button class="date-chip ${filterOwner===k?'active':''}" onclick="setOrderOwner('${k}')">${ownerSign(nm[k])} ${cnt[k]}</button>`).join('');
+  SIGNERS.forEach(function(u){
+    const v = u.is_me ? 'me' : String(u.id);
+    const label = (function(){ const n=(u.name||'').trim(); if(!n) return '未标注'; if(n.indexOf('管理员')===0||n.indexOf('老板')>-1) return '刘'; return n.charAt(0); })();
+    const keyMatch = (v==='me') ? mine : v;
+    const c = cnt[keyMatch] || 0;
+    html += `<button class="date-chip ${filterOwner===v?'active':''}" onclick="setOrderOwner('${v}')">${label} ${c}</button>`;
+  });
   if(cnt['']) html += `<button class="date-chip ${filterOwner==='0'?'active':''}" onclick="setOrderOwner('0')">未标注 ${cnt['']}</button>`;
   box.innerHTML = html;
 }
@@ -1000,6 +1007,7 @@ function autoDefaultDate(){
   const target = ds.includes(today) ? today : ds[ds.length-1];   // 今天有单→今天；否则最近有单日
   setOrderDate(target);
 }
+loadSigners();
 loadOrders().then(()=>{
   if(_oid){
     const fo = allOrders.find(o=>o.id===_oid);
