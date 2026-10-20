@@ -557,7 +557,8 @@ def auth_guard():
 
 @app.context_processor
 def _inject_user():
-    return {"cur_user": getattr(g, "cur_user", None)}
+    cu = getattr(g, "cur_user", None) or {}
+    return {"cur_user": getattr(g, "cur_user", None), "is_boss": cu.get("role") == "boss"}
 
 
 # ===== 订单归属与权限（2026-10-02）=====
