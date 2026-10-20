@@ -46,6 +46,8 @@
     <option value="partner">合伙人</option>
     <option value="staff">店员</option>
   </select>
+  <label>所属门店</label>
+  <select id="ns"><option value="">（不指定）</option></select>
   <label>初始密码</label>
   <div class="pw-wrap">
     <input id="np" type="password" placeholder="至少 4 位">
@@ -81,13 +83,19 @@
 <script>
 async function load(){
   const ac=document.getElementById('addCard'); if(ac && !IS_BOSS) ac.style.display='none';
+  if(IS_BOSS){
+    try{ const sr=await fetch('/api/stores'); const sd=await sr.json();
+      const ns=document.getElementById('ns'); ns.innerHTML='<option value="">（不指定）</option>';
+      (sd.stores||[]).forEach(s=>{ const o=document.createElement('option'); o.value=s.id; o.textContent=s.name+(s.type==='BRANCH'?'（分店）':''); ns.appendChild(o); });
+    }catch(e){}
+  }
   const r=await fetch('/api/users');const d=await r.json();
   const box=document.getElementById('list');box.innerHTML='';
   (d.users||[]).forEach(u=>{
     const div=document.createElement('div');div.className='row';
     const ds=u.active?'':'（已禁用）';
     div.innerHTML=`<span class="nm">${u.name||u.username}</span>
-      <span class="ds">${u.username}${ds}</span>
+      <span class="ds">${u.username}${ds}${u.store_name?(' · '+u.store_name):''}</span>
       <span class="acts">
         ${IS_BOSS ? `<button class="ghost" onclick="toggle(${u.id})">${u.active?'禁用':'启用'}</button>
         <button class="ghost" onclick="resetPw(${u.id})">重置密码</button>
@@ -101,10 +109,11 @@ async function addUser(){
   const name=document.getElementById('nn').value.trim();
   const role=document.getElementById('nr').value;
   const password=document.getElementById('np').value;
+  const store_id=document.getElementById('ns').value||null;
   const m=document.getElementById('addMsg');
   if(!username||!password){m.textContent='用户名和密码必填';return;}
   const r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username,name,role,password})});
+    body:JSON.stringify({username,name,role,password,store_id})});
   const d=await r.json();
   m.textContent=d.ok?'添加成功':'失败：'+(d.msg||'');
   if(d.ok){document.getElementById('nu').value='';document.getElementById('nn').value='';document.getElementById('np').value='';load();}

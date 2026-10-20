@@ -480,10 +480,12 @@ _PARTNER_WRITE = _STAFF_WRITE + (
     # 门店支出台账：合伙人也能记/改/删门店支出、导入账单对账（运营数据，非原数据）；老板当然可以
     "/api/finance/expense", "/api/finance/expense-statement", "/api/finance/labor",
 )
-# 只有老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置/账号等
+# 只有老板能看的页面/接口（账号管理）：合伙人/店员都看不到
+_BOSS_READ = ("/admin", "/api/users")
+# 老板和合伙人能看的页面/接口（店员看不到）：财务/分析/菜单/设置等
 _PARTNER_READ = (
     "/config", "/finance", "/api/finance", "/menu", "/api/menu",
-    "/history", "/admin", "/api/users", "/dashboard", "/analytics", "/api/analytics",
+    "/history", "/dashboard", "/analytics", "/api/analytics",
 )
 
 
@@ -511,7 +513,9 @@ def _required_role(path, method):
             return "partner"
         # 4) 其余写操作默认只有老板
         return "boss"
-    # 读取：这些页面/接口老板和合伙人都能看（店员看不到）
+    # 读取：账号管理仅老板；其余老板/合伙人能看（店员看不到）
+    if _hit(path, _BOSS_READ):
+        return "boss"
     if _hit(path, _PARTNER_READ):
         return "partner"
     # 其余（订单/备餐/出餐单等）登录即可
@@ -529,7 +533,7 @@ def auth_guard():
     if uid:
         try:
             row = get_db().execute(
-                "SELECT id,username,name,role,active FROM users WHERE id=?",
+                "SELECT id,username,name,role,active,store_id FROM users WHERE id=?",
                 (uid,)).fetchone()
             if row and row["active"]:
                 user = dict(row)
@@ -588,11 +592,17 @@ def _signer_candidates(db=None):
     返回 [{id, name, role, is_me}]，自己排第一个。"""
     db = db or g.db
     me = getattr(g, "cur_user", None) or {}
-    rows = db.execute("""
-        SELECT id, name, username, role FROM users
-        WHERE COALESCE(active,1)=1 AND role IN ('boss','partner')
-        ORDER BY CASE role WHEN 'boss' THEN 0 ELSE 1 END, id
-    """).fetchall()
+    sid = me.get("store_id")
+    is_boss = me.get("role") == "boss"
+    sql = """SELECT id, name, username, role FROM users
+        WHERE COALESCE(active,1)=1 AND role IN ('boss','partner')"""
+    params = []
+    if not is_boss:
+        # 分店账号只见本店可归属的人（合作方同级，但数据隔离）
+        sql += " AND store_id = ?"
+        params.append(sid)
+    sql += " ORDER BY CASE role WHEN 'boss' THEN 0 ELSE 1 END, id"
+    rows = db.execute(sql, params).fetchall()
     out, seen = [], set()
     if me.get("id"):
         out.append({"id": me["id"], "name": me.get("name") or me.get("username") or "",
@@ -643,10 +653,50 @@ def _signer_clause(args, alias=""):
         return "", []
 
 
+def store_scope(cur_user, store_param=None, alias="o"):
+    """订单按门店可见范围（分店模式核心隔离）。
+
+    - 老板(boss)：store_param 为空/'all' → 看全部；为某店 id → 只看该店。
+    - 非老板：锁定到自己 store_id（忽略 store_param）。
+    返回 (sql_clause, params)；clause 以 ' AND ' 开头，无限制时 ('', [])。
+    可见判定：订单的 出餐店 或 获客店 命中目标店即可见（分店既是合作方也能自接单）。"""
+    cu = cur_user or {}
+    pre = (alias + ".") if alias else ""
+    if cu.get("role") == "boss":
+        sp = (store_param or "").strip()
+        if sp and sp != "all":
+            try:
+                t = int(sp)
+                return " AND (%sfulfilling_store_id=? OR %sacquiring_store_id=?) " % (pre, pre), [t, t]
+            except (TypeError, ValueError):
+                pass
+        return "", []
+    sid = cu.get("store_id")
+    if sid:
+        return " AND (%sfulfilling_store_id=? OR %sacquiring_store_id=?) " % (pre, pre), [sid, sid]
+    # 没绑定门店（异常态）→ 看不到任何单，避免越权
+    return " AND 1=0 ", []
+
+
 @app.route("/api/signers")
 def api_signers():
     """可归属的人（录入订单时选"这单算谁的"）"""
     return jsonify({"ok": True, "data": _signer_candidates()})
+
+
+@app.route("/api/stores")
+def api_stores():
+    """门店列表：老板用于门店筛选；分店账号也能看到自己店名"""
+    db = g.db
+    rows = db.execute(
+        "SELECT id,name,type,profit_share_pct,owner_user_id FROM stores ORDER BY id").fetchall()
+    stores = [dict(r) for r in rows]
+    cu = getattr(g, "cur_user", None) or {}
+    my_name = next((s["name"] for s in stores if s["id"] == cu.get("store_id")), None)
+    return jsonify({"ok": True, "stores": stores,
+                    "my_store_id": cu.get("store_id"),
+                    "my_store_name": my_name,
+                    "is_boss": cu.get("role") == "boss"})
 
 
 # 别人归属时的统一回复
@@ -700,7 +750,8 @@ def admin_page():
 def list_users():
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id,username,name,role,active FROM users ORDER BY id").fetchall()
+            "SELECT u.id,u.username,u.name,u.role,u.active,u.store_id,s.name AS store_name "
+            "FROM users u LEFT JOIN stores s ON u.store_id=s.id ORDER BY u.id").fetchall()
     return jsonify({"ok": True, "users": [dict(r) for r in rows]})
 
 
@@ -711,13 +762,19 @@ def add_user():
     name = (data.get("name") or "").strip()
     role = data.get("role") if data.get("role") in ("boss", "partner", "staff") else "staff"
     pw = data.get("password") or ""
+    store_id = data.get("store_id")
+    try:
+        # 不指定门店时默认归总店(id=1)，避免账号因 store_id 为空触发 store_scope 的 1=0 而"看啥都空"
+        store_id = int(store_id) if store_id not in (None, "") else 1
+    except (TypeError, ValueError):
+        store_id = 1
     if not un or not pw:
         return jsonify({"ok": False, "msg": "用户名和密码必填"}), 400
     try:
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO users(username,name,role,pw_hash,active,created_at) VALUES(?,?,?,?,?,?)",
-                (un, name, role, generate_password_hash(pw), 1, _now()))
+                "INSERT INTO users(username,name,role,pw_hash,active,created_at,store_id) VALUES(?,?,?,?,?,?,?)",
+                (un, name, role, generate_password_hash(pw), 1, _now(), store_id))
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": "创建失败：" + str(e)}), 400
@@ -1422,7 +1479,8 @@ def order_detail(oid):
     """订单详情：基本信息 + 备餐需求 + 工具借还 + 成本明细"""
     db = g.db
     cur = db.cursor()
-    cur.execute("SELECT * FROM orders WHERE id = ?", (oid,))
+    _sc, _sp = store_scope(getattr(g, "cur_user", None), None, alias="")
+    cur.execute("SELECT * FROM orders WHERE id = ?" + _sc, (oid,) + tuple(_sp))
     r = cur.fetchone()
     if not r:
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
@@ -1646,18 +1704,22 @@ def create_order():
     _entered_name = _u.get("name") or _u.get("username") or ""
     for chunk, parsed in zip(chunks, parsed_chunks):
         matched = match_packages_in_db(parsed["packages"])
+        # 分店模式：新单归属到当前账号所属门店（获客店=出餐店=本店；派单改派在后续批次做）
+        _store = _u.get("store_id") or 1
         cur.execute("""
             INSERT INTO orders
             (raw_text, booking_date, booking_time, address, contact_name,
              contact_phone, amount, deposit, meal_time, pickup_time, note, status,
-             created_by, created_by_name, entered_by, entered_by_name)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)
+             created_by, created_by_name, entered_by, entered_by_name,
+             acquiring_store_id, fulfilling_store_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)
         """, (
             chunk, parsed["booking_date"], parsed["booking_time"],
             parsed["address"], parsed["contact_name"], parsed["contact_phone"],
             parsed["amount"], parsed["deposit"], parsed["meal_time"],
             parsed["pickup_time"], parsed["note"],
             _sign_uid, _sign_name, _u.get("id"), _entered_name,
+            _store, _store,
         ))
         order_id = cur.lastrowid
         order_ids.append(order_id)
@@ -1687,6 +1749,7 @@ def list_orders():
     cur = db.cursor()
     purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
     show_deleted = request.args.get("deleted") == "1"
+    _sc, _sp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     # 列表要带上"归属"（created_by）和"实际录入人"（entered_by）：
     # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
@@ -1697,8 +1760,8 @@ def list_orders():
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
-            WHERE o.deleted_at IS NOT NULL ORDER BY o.id DESC LIMIT 500
-        """)
+            WHERE o.deleted_at IS NOT NULL """ + _sc + """ ORDER BY o.id DESC LIMIT 500
+        """, tuple(_sp))
     else:
         # ⚠️ 以前这里是 LIMIT 100 —— 订单超过 100 单后**订单页会静默丢掉最早的单**
         #    （117 单时 9 月只显示 58 单、实际 75 单）。订单页的筛选/排序/按月分组
@@ -1710,8 +1773,8 @@ def list_orders():
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
-            WHERE o.deleted_at IS NULL ORDER BY o.id DESC LIMIT 5000
-        """)
+            WHERE o.deleted_at IS NULL """ + _sc + """ ORDER BY o.id DESC LIMIT 5000
+        """, tuple(_sp))
     orders = [dict(r) for r in cur.fetchall()]
     # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。
     # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
@@ -4108,6 +4171,9 @@ def finance_orders():
     _sc, _sp = _signer_clause(request.args, "o")
     date_clause += _sc
     params.extend(_sp)
+    _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
+    date_clause += _stc
+    params.extend(_stp)
     rows = cur.execute(f"""
         SELECT o.id, o.booking_date, o.contact_name, o.contact_phone, o.address,
                o.amount, o.deposit, o.payment_status, o.deposit_status, o.status,
@@ -4208,6 +4274,7 @@ def set_order_cost(oid):
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
     if not _can_touch_order(db, oid):
         return _deny_order()
+    _ostore = cur.execute("SELECT COALESCE(fulfilling_store_id,1) FROM orders WHERE id=?", (oid,)).fetchone()[0]
     kind = (data.get("kind") or "").strip()
     allowed = ("outsource", "fuel", "labor", "consume", "other")
     if kind not in allowed:
@@ -4222,8 +4289,8 @@ def set_order_cost(oid):
                         "updated_at=datetime('now','localtime') WHERE id=? AND order_id=?",
                         (name, amount, note, rid, oid))
         else:
-            cur.execute("INSERT INTO order_costs (order_id,kind,name,amount,note) VALUES (?,?,?,?,?)",
-                        (oid, kind, name, amount, note))
+            cur.execute("INSERT INTO order_costs (order_id,kind,name,amount,note,store_id) VALUES (?,?,?,?,?,?)",
+                        (oid, kind, name, amount, note, _ostore))
     else:
         qty = data.get("qty")
         up = data.get("unit_price")
@@ -4233,8 +4300,8 @@ def set_order_cost(oid):
         else:
             qty = up = None
         cur.execute("DELETE FROM order_costs WHERE order_id=? AND kind=?", (oid, kind))
-        cur.execute("INSERT INTO order_costs (order_id,kind,qty,unit_price,amount,note) VALUES (?,?,?,?,?,?)",
-                    (oid, kind, qty, up, amount, note))
+        cur.execute("INSERT INTO order_costs (order_id,kind,qty,unit_price,amount,note,store_id) VALUES (?,?,?,?,?,?,?)",
+                    (oid, kind, qty, up, amount, note, _ostore))
     db.commit()
     return jsonify({"ok": True, "data": order_profit(db, oid)})
 
@@ -4264,8 +4331,11 @@ def finance_profit_overview():
     可选 by=me|0|<user_id> 按"归属"筛选（固定开销仍按每单摊销，不会全压到一个人头上）"""
     from profit import period_overview
     _sc, _sp = _signer_clause(request.args, "o")
+    _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
+    _clause = _sc + _stc
+    _params = list(_sp) + list(_stp)
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
-                         extra_clause=_sc, extra_params=_sp)
+                         extra_clause=_clause, extra_params=_params)
     return jsonify({"ok": True, "data": ov})
 
 
@@ -4276,8 +4346,11 @@ def finance_period_real_profit():
     支持 by=me|0|<user_id> 归属筛选。"""
     from profit import period_real_profit
     _sc, _sp = _signer_clause(request.args, "o")
+    _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
+    _clause = _sc + _stc
+    _params = list(_sp) + list(_stp)
     ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
-                            extra_clause=_sc, extra_params=_sp)
+                            extra_clause=_clause, extra_params=_params)
     return jsonify({"ok": True, "data": ov})
 
 
@@ -5062,6 +5135,10 @@ def analytics_overview():
     elif by.isdigit():
         by_clause, by_params = " AND created_by = ? ", [int(by)]
 
+    _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
+    by_clause += _stc
+    by_params.extend(_stp)
+
     rows = db.execute("""
         SELECT o.id, o.booking_date, o.booking_time, o.contact_name, o.contact_phone, o.address,
                o.amount, o.status, o.payment_status, o.created_by,
@@ -5079,13 +5156,14 @@ def analytics_overview():
         except Exception:
             return None
 
+    _pkc, _pkp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     pk_rows = db.execute("""
         SELECT p.name, p.min_people, p.max_people, op.quantity, op.order_id
         FROM order_packages op
         JOIN packages p ON p.id = op.package_id
         JOIN orders o ON o.id = op.order_id
         WHERE o.status!='cancelled' AND o.deleted_at IS NULL
-    """).fetchall()
+    """ + _pkc, _pkp).fetchall()
     order_pkgs = {}
     for r in pk_rows:
         order_pkgs.setdefault(r["order_id"], []).append(r["name"])
@@ -5783,12 +5861,13 @@ def prep_merged():
         date = request.args.get("date") or _today_cst().isoformat()
         # 归属筛选（?by=...）：只看某个人归属的单
         _sc, _sp = _signer_clause(request.args)
+        _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"), alias="")
         cur.execute("""
             SELECT id FROM orders
             WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date = ?
-        """ + _sc + """
+        """ + _sc + _stc + """
             ORDER BY booking_time
-        """, (date,) + tuple(_sp))
+        """, (date,) + tuple(_sp) + tuple(_stp))
         order_ids = [r["id"] for r in cur.fetchall()]
     data = calc_merged_prep(order_ids)
     return jsonify({"ok": True, "data": data, "order_ids": order_ids})
@@ -5802,14 +5881,15 @@ def prep_dates():
     db = g.db
     cur = db.cursor()
     _sc, _sp = _signer_clause(request.args)
+    _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"), alias="")
     cur.execute("""
         SELECT booking_date, COUNT(*) as cnt
         FROM orders
         WHERE status IN ('pending','preparing') AND deleted_at IS NULL AND booking_date IS NOT NULL AND booking_date != ''
-    """ + _sc + """
+    """ + _sc + _stc + """
         GROUP BY booking_date
         ORDER BY booking_date
-    """, _sp)
+    """, tuple(_sp) + tuple(_stp))
     today = _today_cst().isoformat()
     dates = []
     for r in cur.fetchall():

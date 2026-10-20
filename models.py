@@ -278,6 +278,10 @@ def init_db():
                            ("source", "TEXT")]:
             if _col not in cols:
                 cur.execute("ALTER TABLE orders ADD COLUMN %s %s" % (_col, _typ))
+        # 分店模式：获客店 / 出餐店（NULL=历史单，下面回填为总店）
+        for _col in ("acquiring_store_id", "fulfilling_store_id"):
+            if _col not in cols:
+                cur.execute("ALTER TABLE orders ADD COLUMN %s INTEGER" % _col)
         # 老数据：created_by 当初既是"录入人"也是"归属"，两者补成一致
         # （放在下面 created_by 建好之后再补，见后文）
         # 归属（2026-10-02）：订单归属到"谁的归属"，用于权限（只能改自己归属的单）+ 独立统计
@@ -388,6 +392,10 @@ def init_db():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_order_costs_oid ON order_costs(order_id)")
+        # 分店模式：成本归属店（NULL=历史成本，下面回填为对应订单的出餐店）
+        _occ = [r[1] for r in cur.execute("PRAGMA table_info(order_costs)").fetchall()]
+        if "store_id" not in _occ:
+            cur.execute("ALTER TABLE order_costs ADD COLUMN store_id INTEGER")
 
         # 备餐勾选清单（后厨在线打勾用）
         cur.execute("""
@@ -418,6 +426,18 @@ def init_db():
             )
         """)
 
+        # 门店主数据（分店模式）：总店 + 分店，分店按 id 隔离数据
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'HEAD',   -- HEAD(总店) / BRANCH(分店)
+                owner_user_id INTEGER,
+                profit_share_pct REAL NOT NULL DEFAULT 20,  -- 分店付总店的流量费比例
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
         # 一次性迁移（2026-10-02）：把合伙人账号从 staff 升为 partner。
         # 用户明确要求：孙梦是**合伙人**，所有页面都能看、功能都能用，
         # 只是不能改「原数据」和老板录的订单 —— 这跟"店员(staff)"不是一回事。
@@ -445,6 +465,13 @@ def init_db():
                 print("[迁移] 已把合伙人账号显示名规范为 孙")
         except Exception as _e:
             print("[迁移] 合伙人账号改名跳过：", _e)
+        # 分店模式：员工所属门店（NULL=历史账号，下面回填为总店）
+        try:
+            _uc = [r[1] for r in cur.execute("PRAGMA table_info(users)").fetchall()]
+            if "store_id" not in _uc:
+                cur.execute("ALTER TABLE users ADD COLUMN store_id INTEGER")
+        except Exception as _e:
+            print("[迁移] users.store_id 跳过：", _e)
 
         # 默认设置：备餐提前小时数
         cur.execute("INSERT OR IGNORE INTO settings (key,value,note) VALUES ('prep_lead_hours','2','备餐提前小时数，用餐时间-该值=应开始备餐时间')")
@@ -585,6 +612,23 @@ def init_db():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_stmt_lines_sid ON expense_statement_lines(statement_id)")
+
+        # ---- 分店模式：种子门店 + 历史回填（幂等）----
+        try:
+            cur.execute("INSERT OR IGNORE INTO stores (id,name,type,profit_share_pct) VALUES (1,'总店','HEAD',20)")
+            cur.execute("INSERT OR IGNORE INTO stores (id,name,type,profit_share_pct) VALUES (2,'分店A','BRANCH',20)")
+            # 历史订单全部归总店自营（获客店=出餐店=总店）
+            cur.execute("UPDATE orders SET acquiring_store_id=1, fulfilling_store_id=1 "
+                        "WHERE acquiring_store_id IS NULL OR fulfilling_store_id IS NULL")
+            # 历史账号全部归总店
+            cur.execute("UPDATE users SET store_id=1 WHERE store_id IS NULL")
+            # 历史成本归属到对应订单的出餐店（拿不到则归总店）
+            cur.execute("UPDATE order_costs SET store_id=COALESCE("
+                        "(SELECT fulfilling_store_id FROM orders WHERE orders.id=order_costs.order_id),1) "
+                        "WHERE store_id IS NULL")
+            print("[迁移] 门店种子+历史回填完成")
+        except Exception as _e:
+            print("[迁移] 门店种子/回填跳过：", _e)
 
         # ---- 收尾回填（必须放在所有表都建好之后）----
         backfill_purchase(cur)
