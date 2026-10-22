@@ -45,9 +45,7 @@
   /* 搜索框 + 日期快捷切换（与备餐页同款风格） */
   .search-row{display:flex;gap:8px;margin:8px 0 8px;flex-wrap:wrap;align-items:center}
   #searchBox{flex:1;min-width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;font-size:15px}
-  /* 日期条 + 归属条合并为一行（桌面并排、窄屏自动换行），保留信息密度但省一整行竖向空间 */
-  .filt-duo{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-  .filt-duo .date-chips{flex:1 1 240px;min-width:0;margin-bottom:0}
+  /* 日期条、归属条各占一行：归属在日期下面（与备餐页一致）；各自仍可横向滑动 */
   /* 日期条：单行横滑，不换行、不堆月份头，省竖向空间 */
   .date-chips{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;
     -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
@@ -175,10 +173,8 @@
     <input id="searchBox" type="search" placeholder="🔍 搜 姓名 / 电话 / 地址 / 日期 / 备注 / 订单号" oninput="onSearch(this.value)">
     <button class="btn btn-sm btn-refresh" onclick="clearSearch()">✕ 清除</button>
   </div>
-  <div class="filt-duo">
-    <div class="date-chips" id="orderDateChips"></div>
-    <div class="date-chips" id="orderOwnerChips"></div>
-  </div>
+  <div class="date-chips" id="orderDateChips"></div>
+  <div class="date-chips" id="orderOwnerChips"></div>
   <div class="sort-chips" id="orderSortChips">
     <span class="sort-label">排序</span>
     <button class="sort-chip active" data-mode="date" onclick="setSort('date')" title="最近的日期在最上面；同一天里按出餐时间 上午→下午">📅 出餐日期·最近在上</button>
@@ -548,7 +544,7 @@ function renderOrderOwnerChips(){
   const cnt = {};   // 各归属的订单数（仅用于角标，选项来自 SIGNERS；用全量缓存计数，筛选某人后角标仍准确）
   allOrdersAll.forEach(o=>{ const k = ownerKey(o); cnt[k] = (cnt[k]||0) + 1; });
   const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
-  let html = `<span class="sort-label" style="flex:0 0 100%">归属</span>`;
+  let html = `<span class="sort-label">归属</span>`;
   html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrdersAll.length}</button>`;
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
