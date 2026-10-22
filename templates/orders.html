@@ -303,7 +303,8 @@ function setOrderSetup(v){ filterSetup = v; renderOrders(); }
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
 
 let showDeleted = false;
-let allOrders = [];
+let allOrders = [];        // 当前视图数据（按归属筛选后服务端返回的子集）
+let allOrdersAll = [];     // 全量缓存（仅"全部"拉取时刷新），用于归属 chip 角标正确计数
 let selMode = false;          // 是否进入批量选择模式
 let selectedIds = new Set();  // 已勾选的订单 id
 let currentVisibleIds = [];   // 当前渲染出来的订单 id（用于全选）
@@ -383,10 +384,12 @@ function setScope(s){
 }
 
 function loadOrders(){
-  const url = showDeleted ? '/api/orders?deleted=1' : '/api/orders';
+  let url = showDeleted ? '/api/orders?deleted=1' : '/api/orders';
+  if(filterOwner){ url += (url.indexOf('?')>=0 ? '&' : '?') + 'by=' + encodeURIComponent(filterOwner); }
   return fetch(url).then(r=>r.json()).then(d=>{
     if(!d.ok) return;
     allOrders = d.data || [];
+    if(!filterOwner) allOrdersAll = allOrders;  // 仅全量拉取时刷新缓存，筛某人后角标计数仍用全量
     const nDel = d.deleted_count || 0;
     const btn = document.getElementById('trashBtn');
     if(btn){
@@ -529,7 +532,9 @@ window.addEventListener('resize', function(){ if(_monthMenuEl) _mmReposition(); 
 // 归属筛选：全部 / 我归属的 / 某人归属的（复用 /api/signers，与备餐页一致——
 // 选项永远来自签单人列表 刘+孙，不依赖当前订单里有没有填归属，所以一定能筛）
 let SIGNERS = [];
-function setOrderOwner(v){ filterOwner = v; renderOrderOwnerChips(); renderOrders(); }
+// 归属筛选：点选后重新向服务端拉数据（?by=...），与备餐页 setPrepBy 行为完全一致
+// —— 服务端按归属真过滤，列表/KPI/卡片只含该人单，而不是前端内存假过滤。
+function setOrderOwner(v){ filterOwner = v; loadOrders(); }
 function ownerKey(o){ return (o && o.created_by) ? String(o.created_by) : ''; }
 function loadSigners(){
   return fetch('/api/signers', {cache:'no-store'}).then(r=>r.json()).then(d=>{
@@ -540,11 +545,11 @@ function loadSigners(){
 function renderOrderOwnerChips(){
   const box = document.getElementById('orderOwnerChips');
   if(!box) return;
-  const cnt = {};   // 各归属的订单数（仅用于角标，选项来自 SIGNERS）
-  allOrders.forEach(o=>{ const k = ownerKey(o); cnt[k] = (cnt[k]||0) + 1; });
+  const cnt = {};   // 各归属的订单数（仅用于角标，选项来自 SIGNERS；用全量缓存计数，筛选某人后角标仍准确）
+  allOrdersAll.forEach(o=>{ const k = ownerKey(o); cnt[k] = (cnt[k]||0) + 1; });
   const mine = CUR_USER && CUR_USER.id ? String(CUR_USER.id) : '';
   let html = `<span class="sort-label" style="flex:0 0 100%">归属</span>`;
-  html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrders.length}</button>`;
+  html += `<button class="date-chip ${filterOwner===''?'active':''}" onclick="setOrderOwner('')">全部 ${allOrdersAll.length}</button>`;
   SIGNERS.forEach(function(u){
     const v = u.is_me ? 'me' : String(u.id);
     const label = (function(){ const n=(u.name||'').trim(); if(!n) return '未标注'; if(n.indexOf('管理员')===0||n.indexOf('老板')>-1) return '刘'; return n.charAt(0); })();
@@ -739,11 +744,8 @@ function renderOrders(){
   let scope = allOrders;
   if(filterMonth) scope = scope.filter(o=> (o.booking_date||'').slice(0,7)===filterMonth);
   if(filterDate)  scope = scope.filter(o=> o.booking_date===filterDate);
-  if(filterOwner){
-    if(filterOwner==='me') scope = scope.filter(o=> ownerKey(o) === String(CUR_USER && CUR_USER.id || ''));
-    else if(filterOwner==='0') scope = scope.filter(o=> ownerKey(o) === '');
-    else scope = scope.filter(o=> ownerKey(o) === filterOwner);
-  }
+  // 注：归属筛选已由后端 /api/orders?by= 处理（见 loadOrders），此处不再做内存过滤，
+  // 避免与备餐页行为不一致、以及"前端假过滤但 KPI 仍显示全量"的数字对不上。
   if(filterSetup !== ''){
     scope = scope.filter(o=> String(setupKey(o)) === String(filterSetup));
   }
@@ -757,7 +759,7 @@ function renderOrders(){
   scope.forEach(o=>{ count[o.status]=(count[o.status]||0)+1; if(o.status!=='cancelled') totalAmt += (o.amount||0); });
   const scName = filterOwner ? '筛选订单' : (filterDate ? '当日订单' : (filterMonth ? '当月订单' : (filterText ? '筛选订单' : '全部订单')));
   const anyFilter = !!(filterDate||filterMonth||filterText||filterOwner||(filterSetup!==''));
-  const scNote = anyFilter ? `共 ${allOrders.length} 单` : `合计 ¥${money(totalAmt)} · ${ownerBreakdown(allOrders)}`;
+  const scNote = anyFilter ? `共 ${scope.length} 单` : `合计 ¥${money(totalAmt)} · ${ownerBreakdown(allOrders)}`;
   if(kpis) kpis.innerHTML = [
     {cls:'kpi-dark',icon:'📋',num:scope.length,lbl:scName,sub:scNote},
     {cls:'kpi-red',icon:'⏳',num:count.pending,lbl:'待备'},

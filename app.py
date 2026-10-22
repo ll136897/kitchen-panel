@@ -1751,6 +1751,9 @@ def list_orders():
     purge_expired_deleted(db)          # 超过 7 天的回收站订单自动清掉
     show_deleted = request.args.get("deleted") == "1"
     _sc, _sp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
+    # 归属筛选：?by=me | 0(未标注) | <user_id> | 空(全部)。与备餐页一致走服务端真过滤，
+    # 而不是前端内存过滤——这样点归属后列表/KPI/导出都只含该人，行为和备餐页完全相同。
+    _sg, _sgp = _signer_clause(request.args, "o")
     # 列表要带上"归属"（created_by）和"实际录入人"（entered_by）：
     # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
@@ -1761,8 +1764,8 @@ def list_orders():
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
-            WHERE o.deleted_at IS NOT NULL """ + _sc + """ ORDER BY o.id DESC LIMIT 500
-        """, tuple(_sp))
+            WHERE o.deleted_at IS NOT NULL """ + _sc + _sg + """ ORDER BY o.id DESC LIMIT 500
+        """, tuple(_sp) + tuple(_sgp))
     else:
         # ⚠️ 以前这里是 LIMIT 100 —— 订单超过 100 单后**订单页会静默丢掉最早的单**
         #    （117 单时 9 月只显示 58 单、实际 75 单）。订单页的筛选/排序/按月分组
@@ -1774,8 +1777,8 @@ def list_orders():
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
                    o.entered_by, o.entered_by_name
             FROM orders o LEFT JOIN users u ON o.created_by = u.id
-            WHERE o.deleted_at IS NULL """ + _sc + """ ORDER BY o.id DESC LIMIT 5000
-        """, tuple(_sp))
+            WHERE o.deleted_at IS NULL """ + _sc + _sg + """ ORDER BY o.id DESC LIMIT 5000
+        """, tuple(_sp) + tuple(_sgp))
     orders = [dict(r) for r in cur.fetchall()]
     # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。
     # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
