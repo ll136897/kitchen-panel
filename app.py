@@ -1712,15 +1712,15 @@ def create_order():
             (raw_text, booking_date, booking_time, address, contact_name,
              contact_phone, amount, deposit, meal_time, pickup_time, note, status,
              created_by, created_by_name, entered_by, entered_by_name,
-             acquiring_store_id, fulfilling_store_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)
+             acquiring_store_id, fulfilling_store_id, setup_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)
         """, (
             chunk, parsed["booking_date"], parsed["booking_time"],
             parsed["address"], parsed["contact_name"], parsed["contact_phone"],
             parsed["amount"], parsed["deposit"], parsed["meal_time"],
             parsed["pickup_time"], parsed["note"],
             _sign_uid, _sign_name, _u.get("id"), _entered_name,
-            _store, _store,
+            _store, _store, parsed.get("setup_time", ""),
         ))
         order_id = cur.lastrowid
         order_ids.append(order_id)

@@ -240,6 +240,7 @@ function loadDetail(){
       <div class="cell"><div class="k">🔒 押金</div><div class="v">¥${o.deposit||0} (${depMap[o.deposit_status]||'-'})</div></div>
       <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
       <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
+      ${(o.setup_time ? `<div class="cell"><div class="k">🛠 搭建时间</div><div class="v">${o.setup_time}</div></div>` : '')}
       <div class="cell"><div class="k">🧾 记账</div><div class="v" style="font-size:13px">${(o.menu_name||((o.packages&&o.packages[0])?o.packages[0].pkg_name:'')||'-')}${o.setup_flag===1?' · 搭建':(o.setup_flag===0?' · 不搭建':'')}${o.delivery_fee?' · 配送¥'+o.delivery_fee:''}${o.delivery_person?' · '+o.delivery_person:''}${o.source?' · '+o.source:''}</div></div>
       <div class="cell"><div class="k">📋 状态</div><div class="v">${stMap[o.status]||o.status}</div></div>
       <div class="cell"><div class="k">👤 归属</div><div class="v">${ownerText(o)}</div></div>

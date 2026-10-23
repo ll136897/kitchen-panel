@@ -230,6 +230,7 @@ def init_db():
                 deposit REAL,                     -- 押金
                 meal_time TEXT,                   -- 用餐时间
                 pickup_time TEXT,                 -- 收餐时间
+                setup_time TEXT,                  -- 搭建时间（新格式「烤肉到家」：用餐时间之外单独给出的搭建时刻）
                 note TEXT,                        -- 备注
                 status TEXT DEFAULT 'pending',    -- pending/preparing/done
                 payment_status TEXT DEFAULT 'unpaid',  -- unpaid/paid/partial 货款状态
@@ -267,6 +268,10 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN delivered INTEGER DEFAULT 0")
         if "served" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN served INTEGER DEFAULT 0")
+        # 搭建时间（2026-10-23 新增）：新格式「烤肉到家」把搭建时刻单独成行（搭建时间:10.30），
+        # 与用餐时间区分开，解析后落库，避免录入时填了却看不到。
+        if "setup_time" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN setup_time TEXT")
         # 销售流水表 / 记账口径（2026-10-10）：这几个字段是"导出记账表"和"算真实到手"用的
         #   menu_name       —— 套餐名(展示用)：备餐表按内部套餐拆料，但记账只写一个名字（如"16人餐"）
         #   setup_flag      —— 是否搭建 1/0（NULL=没填）

@@ -24,6 +24,7 @@ def _clean_meal_time(text):
     输出：'晚上6点' （由 calculator.parse_time_str 进一步解析为 18:00）
     输入：'12.00' / '12:00' → 原样返回
     输入：'22点后加收每小时50元夜间服务费' → '22点'
+    输入：'10.25 13.00' → '13.00'（前面是日期，最后一个是真实用餐时间）
     """
     if not text:
         return ""
@@ -33,14 +34,42 @@ def _clean_meal_time(text):
         s = s.split("/", 1)[0].strip()
     # 删除全角/半角括号及括号内备注
     s = re.sub(r"[（(][^）)]*[）)]", "", s)
-    # 删除"前/后"等修饰（"6点前"→"6点"，"22点后加收..."→"22点"）
+    # 多 token（如「10.25 13.00」）：最后一个是真正的用餐时间，前面的是日期 → 取最后一个
+    toks = s.split()
+    cands = [t for t in toks if re.search(r"\d{1,2}\s*[.:：点时]\s*\d{0,2}\s*(点|半)?", t)]
+    target = cands[-1] if cands else s
     # 找首个时间表达，截断到该时间后
-    m = re.search(r"(凌晨|早上|早晨|清晨|上午|中午|正午|下午|傍晚|晚上|晚间|夜里|夜晚)?\s*\d{1,2}\s*[.:：点时]\s*\d{0,2}\s*(点|半)?", s)
+    m = re.search(r"(凌晨|早上|早晨|清晨|上午|中午|正午|下午|傍晚|晚上|晚间|夜里|夜晚)?\s*\d{1,2}\s*[.:：点时]\s*\d{0,2}\s*(点|半)?", target)
     if m:
         # 保留时段词 + 数字 + 单位
         return m.group(0).strip()
     # 退化：直接返回原文本去掉括号后的内容
-    return s.strip()
+    return target.strip()
+
+
+def _extract_clock_after_date(value):
+    """从「10.25 13.00」这类"日期 时间"组合里取出时间（13.00），忽略前面的日期。
+    供「用餐时间」在没有独立「预约时间」字段时，补全 booking_time 用。
+    返回 '' 表示没有可提取的时间（如老格式「12.00」会被当成日期误删 → 返回 ''，
+    因为老格式的 booking_time 本就来自「预约时间」）。
+    """
+    s = re.sub(r"[（(][^）)]*[）)]", "", str(value)).strip()
+    if "/" in s:
+        s = s.split("/", 1)[0].strip()
+    toks = s.split()
+
+    def _looks_like_date(tok):
+        m = re.match(r"^(\d{1,2})[月./\-](\d{1,2})([号日]?)$", tok)
+        if not m:
+            return False
+        # 首数字必须是合法月份（1~12），否则像「13.00」其实是时间并非日期
+        return 1 <= int(m.group(1)) <= 12
+
+    # 去掉像日期的 token（M.D / M-D / M月D，且首数字≤12），剩下的才是时间
+    rest = [t for t in toks if not _looks_like_date(t)]
+    if not rest:
+        return ""
+    return _extract_time(" ".join(rest))
 
 
 def _normalize_date(s):
@@ -151,6 +180,7 @@ def parse_order_text(raw_text):
         "deposit": 0.0,
         "meal_time": "",
         "pickup_time": "",
+        "setup_time": "",      # 搭建时间（新格式「烤肉到家」独有字段，如 10.30）
         "note": "",
         "package_lines": [],   # 套餐明细行（原始文本）
         "extra_tools": {},     # 从备注解析出的额外工具需求
@@ -168,7 +198,7 @@ def parse_order_text(raw_text):
         # 容忍字段名前有少量多余前缀（例如"对吧预约时间:9.25 17.00"），
         # 前缀不含冒号、最多 6 个字符，避免误吞其它内容。
         # 「客户姓名」是「联系人」的同义写法（微信确认文本里两种都有）
-        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|客户姓名|联系人|联系电话|金额|押金|用餐时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
+        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|客户姓名|联系人|联系电话|金额|押金|用餐时间|搭建时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
         if m:
             # 保存上一个字段
             if current_key is not None:
@@ -222,6 +252,16 @@ def parse_order_text(raw_text):
             result["deposit"] = _parse_amount(value)
         elif key == "用餐时间":
             result["meal_time"] = _clean_meal_time(value)
+            # 新格式「烤肉到家」把日期也写在用餐时间里（如「10.25 13.00」），
+            # 而该格式没有独立的「预约时间」字段 → 用这里的日期补全 booking_date/booking_time，
+            # 否则订单会落到「日期未知」、排不到日历里。
+            if not result["booking_date"]:
+                _d = _normalize_date(value)
+                if _d:
+                    result["booking_date"] = _d
+                    result["booking_time"] = _extract_clock_after_date(value)
+        elif key == "搭建时间":
+            result["setup_time"] = value
         elif key == "收餐时间":
             result["pickup_time"] = value
         elif key == "备注":
