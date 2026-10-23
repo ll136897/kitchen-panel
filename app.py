@@ -3805,7 +3805,7 @@ def export_setup_sheet():
     cur = g.db.cursor()
     cur.execute("""
         SELECT o.id, o.booking_date, o.booking_time, o.meal_time, o.address,
-               o.contact_name, o.contact_phone, o.note,
+               o.contact_name, o.contact_phone, o.note, o.setup_time,
                COALESCE(u.name, o.created_by_name) AS signer
         FROM orders o LEFT JOIN users u ON o.created_by = u.id
         WHERE o.booking_date=? AND o.status IN ('pending','preparing') AND o.deleted_at IS NULL
@@ -3880,8 +3880,11 @@ def export_setup_sheet():
         except Exception:
             pass
         note = (o["note"] or "").strip()
+        # 「搭建时间」优先用新格式「烤肉到家」单独给出的 setup_time（如 10.30），
+        # 老格式没有该字段时回退到预约时间 booking_time，保持旧单不变。
+        setup_val = (o.get("setup_time") or o.get("booking_time") or "")
         rows.append([
-            i, o["signer"] or "", d_txt, time_txt(o["booking_time"]), time_txt(o["meal_time"]),
+            i, o["signer"] or "", d_txt, time_txt(setup_val), time_txt(o["meal_time"]),
             o["address"] or "", o["contact_name"] or "",
             o["contact_phone"] or "", pkg_txt, people or "",
             tian, zhuo, yi, ka, other, note if note and note != "无" else "无",
