@@ -1195,6 +1195,13 @@ def calc_merged_prep(order_ids):
             except Exception:
                 o["has_swap"] = False
                 o["has_extra"] = False
+            # 地点分组用「归一地址」：同一个地方的不同写法（江家艺苑 / 江家艺苑儿童乐园…）归为一组。
+            # 显示仍用原始地址，具体点位（4号停车场、儿童乐园）不丢。
+            try:
+                from addresses import canonical_address as _ca
+                o["addr_group"] = _ca(o.get("address") or "") or (o.get("address") or "")
+            except Exception:
+                o["addr_group"] = o.get("address") or ""
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 

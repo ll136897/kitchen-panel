@@ -241,10 +241,14 @@
   .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
   .bmain{flex:1;min-width:0;line-height:1.22}
   .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
-  .bname{font-weight:800;color:#2b1e14;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 客户名：至少露出 5 个字（再长才省略），不会被归属/时间挤没 */
+  .bname{font-weight:800;color:#2b1e14;font-size:13px;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;min-width:5.2em;flex:0 1 auto}
   .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:12px}
-  .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bline3{font-size:11px;color:#6b5d52;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 套餐：不截断 —— 混单要完整露出两个套餐（放不下就换行，不许省略） */
+  .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;white-space:normal;word-break:break-all}
+  /* 地点 + 备注：不省略（地点至少露出一排约 15 字，备注必须完整可见），超长换行 */
+  .bline3{font-size:11px;color:#6b5d52;margin-top:1px;white-space:normal;word-break:break-word}
   .bnote{color:#c0392b;font-weight:700}
   /* 备餐状态块：替代原来的「送/出」两个方块，只占一个位置，点击变色区分已备/未备 */
   .bprep{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
@@ -253,9 +257,11 @@
   .bprep.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
-  /* 归属（刘/孙）小徽标 */
-  .bwho{font-size:11px;padding:1px 5px;border-radius:6px;background:#efe6d8;color:#7a6247;
-    font-weight:800;flex:0 0 auto}
+  /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
+  .bwho{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap}
+  .bwho.w-liu{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
+  .bwho.w-sun{background:#fff1dc;color:#b45309;border:1px solid #f3d5ab}
+  .bwho.w-none{background:#f2efe9;color:#9a8b6a;border:1px solid #e3dbcd}
   /* 换菜/加菜等备注要点徽标 */
   .btag{font-size:11px;color:#c0392b;font-weight:800;margin-left:4px;white-space:nowrap}
   /* 原录入订单：默认收起，只占一行摘要，不占版面；点开才显示原文 */
@@ -1075,7 +1081,8 @@ function renderBoard(orders){
   const gKey=o=>{
     if(boardKey==='time') return boardTime(o)||'时间未定';
     if(boardKey==='pkg') return boardPkgTxt(o);
-    if(boardKey==='addr') return o.address||'未填地点';
+    // 地点分组用「归一地址」：江家艺苑的各种写法归为一组（显示仍用原地址，点位细节不丢）
+    if(boardKey==='addr') return o.addr_group || o.address || '未填地点';
     if(boardKey==='served') return o.served?'✅ 已出餐':'⬜ 未出餐';
     return o.delivered?'✅ 已送达':'⬜ 未送达';
   };
@@ -1112,7 +1119,7 @@ function renderBoard(orders){
       <div class="bprep ${done?'on':''}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)">${done?'✓':'备'}</div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${(who&&who!=='未标注')?`<span class="bwho">${who}</span>`:''}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${(who&&who!=='未标注')?`<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>`:''}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
         ${hidePkg?'':`<div class="bline2">🍱 ${boardPkgTxt(o)}</div>`}
         ${hideAddr
           ? ((note||tagHtml)?`<div class="bline3">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>`:'')
