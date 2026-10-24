@@ -1195,13 +1195,22 @@ def calc_merged_prep(order_ids):
             except Exception:
                 o["has_swap"] = False
                 o["has_extra"] = False
-            # 地点分组用「归一地址」：同一个地方的不同写法（江家艺苑 / 江家艺苑儿童乐园…）归为一组。
-            # 显示仍用原始地址，具体点位（4号停车场、儿童乐园）不丢。
+            # 地点分两级（2026-10-25 用户定）：
+            #   addr_group  = 一级地点（青龙湖 / 江家艺苑…归一后的名字），占主要位置、也用于分组
+            #   addr_detail = 小地区（原地址去掉一级地名后的剩余，如"二期"、"东入口儿童乐园区"），
+            #                 在最下一排小字显示，不挤占主要版面
             try:
                 from addresses import canonical_address as _ca
-                o["addr_group"] = _ca(o.get("address") or "") or (o.get("address") or "")
+                _addr = (o.get("address") or "").strip()
+                _g = _ca(_addr) or _addr
+                o["addr_group"] = _g or "未填地点"
+                _d = ""
+                if _g and _g in _addr:
+                    _d = _addr.replace(_g, "", 1).strip(" 　·、,，-—~(")
+                o["addr_detail"] = _d
             except Exception:
-                o["addr_group"] = o.get("address") or ""
+                o["addr_group"] = o.get("address") or "未填地点"
+                o["addr_detail"] = ""
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 
