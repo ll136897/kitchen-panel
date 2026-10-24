@@ -2086,23 +2086,26 @@ def list_daily_labor():
 #      地址匹配不到时用 default_outsource（默认 100）
 # 用户手工填过的 setup_flag / delivery_fee 永远优先，只在为空时才自动推导。
 DEFAULT_DELIVERY_PERSON = "陈卓"
-_RENT_KW = ("桌椅", "卡式炉", "气罐", "烤盘", "租赁", "出租", "租用")
+# 租赁关键词（判「半包加租赁」用）。单一真相源在 profit._RENT_KW，
+# 这里不再另存一份，避免改了一处忘了另一处导致两侧搭建判定不一致。
 _LABOR_KW = ("兼职", "工资", "人工", "帮工", "小时工", "临工", "小工", "劳务")
 
 
 def _place_delivery_fee(db, address):
-    """按地址匹配场地单价表 → 这一单要付给配送/搭建师傅的钱。"""
+    """按地址匹配场地单价表 → 这一单要付给配送/搭建师傅的钱。
+
+    收口：与财务页成本口径共用 profit.match_place（同一套「地址归一 + 双向匹配」规则），
+    避免订单页推导的场地单价/搭建费 与 财务页成本算出来的不一致。
+    """
     try:
-        from profit import get_config as _gc
+        from profit import get_config as _gc, match_place as _mp
         cfg = _gc(db) or {}
+        place = _mp(address, cfg)
+        if place:
+            return float(place.get("outsource") or 0)
+        return float(cfg.get("default_outsource", 100) or 0)
     except Exception:
-        cfg = {}
-    addr = address or ""
-    for p in (cfg.get("places") or []):
-        nm = (p.get("name") or "").strip()
-        if nm and nm in addr:
-            return float(p.get("outsource") or 0)
-    return float(cfg.get("default_outsource") or 100)
+        return 100.0
 
 
 def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_text="",
@@ -2119,11 +2122,12 @@ def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_te
     # ② 原始文字明确标注了 搭建/不搭建（用户每单都写了），高于价格推导
     #    批量录入时 raw_text 里混着好几单，先切出本单那一段，否则会读成别人的搭建状态
     try:
-        from profit import _setup_from_text as _sft
+        from profit import _setup_from_text as _sft, _RENT_KW as _rent_kw
         from parser import own_raw_block as _orb
     except Exception:
         _sft = None
         _orb = None
+        _rent_kw = ()
     if _sft is not None:
         _rt = raw_text or ""
         if _orb is not None:
@@ -2149,7 +2153,7 @@ def _guess_setup_and_fee(db, price_total, pkg_qty, amount, address, note, raw_te
         return 1, fee_full, "全包（金额≥套餐正价）"
     if amt <= half + 0.5:
         return 0, 0.0, "半包（金额=正价−配送搭建费）"
-    for kw in _RENT_KW:
+    for kw in (_rent_kw or ()):
         if kw in (note or ""):
             return 0, 0.0, "半包加租赁（备注有%s）" % kw
     if abs(amt - total) <= abs(amt - half):
@@ -4167,16 +4171,24 @@ def finance_summary():
         FROM orders o WHERE {date_clause}
     """, params).fetchone()
     summary = dict(r)
-    # 成本计算：每单食材成本 = 各食材用量 × 单价
-    r = cur.execute(f"""
-        SELECT COALESCE(SUM(pi.per_package * op.quantity * i.cost),0) as food_cost
-        FROM order_packages op
-        JOIN orders o ON op.order_id = o.id
-        JOIN package_ingredients pi ON pi.package_id = op.package_id
-        JOIN ingredients i ON pi.ingredient_id = i.id
-        WHERE {date_clause}
-    """, params).fetchone()
-    summary["food_cost"] = r["food_cost"] or 0
+    # 食材成本：逐单走 profit._food_cost（== calculator.calc_order_ingredient_net 净需求×单价），
+    # 与财务页「逐单明细」同源。不再用「套餐配量×份数」单独粗算——那会漏掉换菜/备注加菜/单点，
+    # 导致 KPI 的食材成本 ≠ 各单明细加总。
+    try:
+        from profit import _food_cost as _fc
+        _fids = [x["id"] for x in cur.execute(
+            f"SELECT o.id FROM orders o WHERE {date_clause}", params).fetchall()]
+        summary["food_cost"] = round(sum(_fc(db, int(fid)) for fid in _fids), 2)
+    except Exception:
+        r = cur.execute(f"""
+            SELECT COALESCE(SUM(pi.per_package * op.quantity * i.cost),0) as food_cost
+            FROM order_packages op
+            JOIN orders o ON op.order_id = o.id
+            JOIN package_ingredients pi ON pi.package_id = op.package_id
+            JOIN ingredients i ON pi.ingredient_id = i.id
+            WHERE {date_clause}
+        """, params).fetchone()
+        summary["food_cost"] = r["food_cost"] or 0
     # 工具损耗成本（丢失的工具 × 真实成本）
     r = cur.execute(f"""
         SELECT COALESCE(SUM(tl.lost_qty * t.cost),0) as tool_loss_cost

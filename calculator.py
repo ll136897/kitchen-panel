@@ -364,9 +364,13 @@ def calc_order_ingredient_net(order_id):
         cur = conn.cursor()
         cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT raw_text FROM orders WHERE id=?", (order_id,))
+        cur.execute("SELECT raw_text, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
         row = cur.fetchone()
         raw_text = row["raw_text"] if row else ""
+        _cname = row["contact_name"] if row else ""
+        _cphone = row["contact_phone"] if row else ""
+        _amt = row["amount"] if row else None
+        _addr = row["address"] if row else ""
 
     ing_demand = {}
     with get_db() as conn:
@@ -397,8 +401,11 @@ def calc_order_ingredient_net(order_id):
                     ing_demand[iid]["cost_only"] = True
 
     # 备注加菜 + 换菜（与下方 calc_order_requirements / preview 同一套算法，避免分叉）
-    from parser import parse_order_text, match_extra_ingredients_to_db
-    parsed = parse_order_text(raw_text)
+    from parser import parse_order_text, match_extra_ingredients_to_db, own_raw_block
+    # 批量录入时整段原文混着好几单，先切出「本单那一段」再解析，
+    # 否则会把别人的加菜/换菜算到这单头上（串单坑）。
+    own = own_raw_block(raw_text, _cname, _cphone, _amt, _addr)
+    parsed = parse_order_text(own or raw_text)
     for ei in match_extra_ingredients_to_db(parsed.get("extra_ingredients", [])):
         iid = ei.get("matched_id")
         if not iid:
