@@ -350,168 +350,165 @@ def calc_prep_urgency(order):
     return {"level": level, "minutes_to_prep": diff_min, "label": label}
 
 
-def calc_order_requirements(order_id):
-    """
-    根据订单ID计算该订单的备餐需求（食材+工具）。
-    核心逻辑：每套餐固定配量 × 订单里的套餐份数
+def calc_order_ingredient_net(order_id):
+    """订单『套餐食材』净需求（备餐页与成本页共用的单一真相源）。
+
+    包含：套餐固定配量×份数 + 备注加菜(set覆盖/add增量) + 换菜(份数换算)。
+    不含：单点菜品(order_dishes)——备餐端展开成食材量、成本端按菜品报价，口径不同各自处理。
+
+    返回 {ing_id: {total, per_package, order_qty, portion_count, total_portions,
+                   cost_only, swapped_in, swapped_out}}。
+    total 为换菜/加菜生效后的净用量（克/个）。
     """
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT op.*, p.name as pkg_name, p.min_people, p.max_people
-            FROM order_packages op
-            LEFT JOIN packages p ON op.package_id = p.id
-            WHERE op.order_id = ?
-        """, (order_id,))
+        cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
-
-        cur.execute("""
-            SELECT od.*, d.name as dish_name, d.price
-            FROM order_dishes od
-            LEFT JOIN dishes d ON od.dish_id = d.id
-            WHERE od.order_id = ?
-        """, (order_id,))
-        dishes = [dict(r) for r in cur.fetchall()]
-
-        cur.execute("SELECT raw_text FROM orders WHERE id = ?", (order_id,))
+        cur.execute("SELECT raw_text FROM orders WHERE id=?", (order_id,))
         row = cur.fetchone()
         raw_text = row["raw_text"] if row else ""
 
-    # 食材需求 = 套餐(每套餐固定配量 × 订单份数) + 单点
-    # ing_demand: id -> {total, per_package(代表), order_qty(套餐份数和)}
     ing_demand = {}
-
     with get_db() as conn:
         cur = conn.cursor()
         for pk in pkgs:
             cur.execute("""
-                SELECT pi.per_package, pi.portion_count, i.id, i.name, i.unit
+                SELECT pi.per_package, pi.portion_count, pi.cost_only, i.id
                 FROM package_ingredients pi
                 JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ? AND pi.cost_only = 0
+                WHERE pi.package_id = ?
             """, (pk["package_id"],))
             for r in cur.fetchall():
                 amount = r["per_package"] * pk["quantity"]
                 pc = r["portion_count"] or 1
-                if r["id"] not in ing_demand:
-                    ing_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0, "portion_count": pc, "total_portions": 0}
-                ing_demand[r["id"]]["total"] += amount
-                # per_package/portion_count 取用量大的那个套餐作为代表
-                if amount > ing_demand[r["id"]]["per_package"] * ing_demand[r["id"]]["order_qty"]:
-                    ing_demand[r["id"]]["per_package"] = r["per_package"]
-                    ing_demand[r["id"]]["portion_count"] = pc
-                ing_demand[r["id"]]["order_qty"] += pk["quantity"]
-                ing_demand[r["id"]]["total_portions"] += pc * pk["quantity"]
+                iid = r["id"]
+                if iid not in ing_demand:
+                    ing_demand[iid] = {"total": 0, "per_package": r["per_package"],
+                                       "order_qty": 0, "portion_count": pc,
+                                       "total_portions": 0, "cost_only": bool(r["cost_only"])}
+                ing_demand[iid]["total"] += amount
+                # per_package/portion_count 取用量最大的套餐作为代表
+                if amount > ing_demand[iid]["per_package"] * ing_demand[iid]["order_qty"]:
+                    ing_demand[iid]["per_package"] = r["per_package"]
+                    ing_demand[iid]["portion_count"] = pc
+                ing_demand[iid]["order_qty"] += pk["quantity"]
+                ing_demand[iid]["total_portions"] += pc * pk["quantity"]
+                if r["cost_only"]:
+                    ing_demand[iid]["cost_only"] = True
 
-        for d in dishes:
-            cur.execute("""
-                SELECT di.amount, i.id
-                FROM dish_ingredients di
-                JOIN ingredients i ON di.ingredient_id = i.id
-                WHERE di.dish_id = ?
-            """, (d["dish_id"],))
-            for r in cur.fetchall():
-                amount = r["amount"] * d["quantity"]
-                if r["id"] not in ing_demand:
-                    ing_demand[r["id"]] = {"total": 0, "per_package": r["amount"], "order_qty": 0}
-                ing_demand[r["id"]]["total"] += amount
-                ing_demand[r["id"]]["per_package"] = r["amount"]
-                ing_demand[r["id"]]["order_qty"] += d["quantity"]
+    # 备注加菜 + 换菜（与下方 calc_order_requirements / preview 同一套算法，避免分叉）
+    from parser import parse_order_text, match_extra_ingredients_to_db
+    parsed = parse_order_text(raw_text)
+    for ei in match_extra_ingredients_to_db(parsed.get("extra_ingredients", [])):
+        iid = ei.get("matched_id")
+        if not iid:
+            continue
+        amount = ei["total"]
+        mode = ei.get("mode", "add")
+        if iid not in ing_demand:
+            ing_demand[iid] = {"total": 0, "per_package": ei.get("per_package"),
+                               "order_qty": 0, "portion_count": 1,
+                               "total_portions": 0, "cost_only": False}
+        if mode == "set":
+            ing_demand[iid]["total"] = amount
+        else:
+            ing_demand[iid]["total"] += amount
+        ing_demand[iid]["per_package"] = ei.get("per_package")
+        ing_demand[iid]["order_qty"] += ei.get("qty", 1)
 
-    # 工具需求 = 套餐工具 + 备注解析的额外工具
-    # 统一走 calc_order_tool_needs()（"占用统计"用同一个函数，保证口径一致、且不会递归）
-    tool_demand = calc_order_tool_needs(order_id)
-    with get_db() as conn:
-        cur = conn.cursor()
-        parsed = parse_order_text(raw_text)
-
-        # 备注解析额外加菜（单点食材）
-        from parser import match_extra_ingredients_to_db
-        extra_ings = match_extra_ingredients_to_db(parsed.get("extra_ingredients", []))
-        for ei in extra_ings:
-            iid = ei.get("matched_id")
-            if not iid:
+    for sw in (parsed.get("dish_swaps") or []):
+        to_id = match_ingredient_id_by_name(sw.get("to"))
+        if not to_id:
+            continue
+        froms = sw.get("froms") or [[sw.get("from"), None]]
+        explicit = bool(sw.get("explicit", False))
+        multi = len(froms) > 1
+        to_qty = sw.get("to_qty", 1) or 1
+        use_old = (not explicit) and (not multi)
+        removed_total = 0.0
+        for fitem in froms:
+            fname = fitem[0] if isinstance(fitem, (list, tuple)) else fitem
+            fqty = fitem[1] if isinstance(fitem, (list, tuple)) else None
+            src_id = match_ingredient_id_by_name(fname)
+            if not src_id or src_id not in ing_demand:
                 continue
-            amount = ei["total"]  # 已经算好的总克数
-            mode = ei.get("mode", "add")
-            if iid not in ing_demand:
-                ing_demand[iid] = {"total": 0, "per_package": ei["per_package"], "order_qty": 0}
-            if mode == "set":
-                ing_demand[iid]["total"] = amount        # 覆盖
+            info = ing_demand[src_id]
+            if info.get("total", 0) <= 0:
+                continue
+            if use_old:
+                removed_total += info["total"]
+                info["total"] = 0
+                info["swapped_out"] = True
             else:
-                ing_demand[iid]["total"] += amount       # 增量
-            ing_demand[iid]["per_package"] = ei["per_package"]
-            ing_demand[iid]["order_qty"] += ei["qty"]
-
-        # 备注换菜：A 换 B（支持"N份A换M份B"按份数换算）
-        # - 无数量词、单from：沿用旧逻辑（整份换出、等量换入），保持历史单兼容
-        # - 写了份数 或 多from：按份数——换出 froms 各项对应份数(无份数=全部)、换入 to_qty 份
-        for sw in (parsed.get("dish_swaps") or []):
-            to_id = match_ingredient_id_by_name(sw.get("to"))
-            if not to_id:
-                continue
-            froms = sw.get("froms") or [[sw.get("from"), None]]
-            explicit = bool(sw.get("explicit", False))
-            multi = len(froms) > 1
-            to_qty = sw.get("to_qty", 1) or 1
-            use_old = (not explicit) and (not multi)
-
-            removed_total = 0.0
-            for fitem in froms:
-                fname = fitem[0] if isinstance(fitem, (list, tuple)) else fitem
-                fqty = fitem[1] if isinstance(fitem, (list, tuple)) else None
-                src_id = match_ingredient_id_by_name(fname)
-                if not src_id or src_id not in ing_demand:
-                    continue
-                info = ing_demand[src_id]
-                if info.get("total", 0) <= 0:
-                    continue
-                if use_old:
-                    # 旧逻辑：整份换出
+                tp = info.get("total_portions", info.get("portion_count", 0)) or 0
+                portion = (info["total"] / tp) if tp > 0 else info["total"]
+                rm = portion * (fqty if fqty else 1e9)
+                if rm >= info["total"]:
                     removed_total += info["total"]
                     info["total"] = 0
                     info["swapped_out"] = True
                 else:
-                    # 该食材真实份量 = 总用量 / 总份数
-                    tp = info.get("total_portions", info.get("portion_count", 0)) or 0
-                    portion = (info["total"] / tp) if tp > 0 else info["total"]
-                    rm = portion * (fqty if fqty else 1e9)  # 无份数=全部
-                    if rm >= info["total"]:
-                        removed_total += info["total"]
-                        info["total"] = 0
-                        info["swapped_out"] = True
-                    else:
-                        removed_total += rm
-                        info["total"] -= rm
-
-            # 换入 to_qty 份（用该食材"每套餐固定份量"这个固定值，不能用动态总用量/总份数，
-            # 否则多次换入同食材会把份量越算越大，例如肥牛被换入两次会算成 150g/份）
-            if use_old:
-                add = removed_total  # 旧逻辑：等量换入
+                    removed_total += rm
+                    info["total"] -= rm
+        if use_old:
+            add = removed_total
+        else:
+            to_info = ing_demand.get(to_id)
+            if to_info:
+                pc = to_info.get("portion_count", 0) or 1
+                dst_portion = (to_info.get("per_package", 0) or 0) / pc if pc > 0 else 100.0
             else:
-                to_info = ing_demand.get(to_id)
-                if to_info:
-                    pc = to_info.get("portion_count", 0) or 1
-                    dst_portion = (to_info.get("per_package", 0) or 0) / pc if pc > 0 else 100.0
-                else:
-                    dst_portion = 100.0
-                add = dst_portion * to_qty
-            if to_id not in ing_demand:
-                ing_demand[to_id] = {
-                    "total": 0,
-                    "per_package": 100.0,
-                    "order_qty": 0,
-                    "portion_count": 1,
-                    "total_portions": 0,
-                }
-            ing_demand[to_id]["total"] += add
-            ing_demand[to_id]["swapped_in"] = True
+                dst_portion = 100.0
+            add = dst_portion * to_qty
+        if to_id not in ing_demand:
+            ing_demand[to_id] = {"total": 0, "per_package": 100.0, "order_qty": 0,
+                                 "portion_count": 1, "total_portions": 0, "cost_only": False}
+        ing_demand[to_id]["total"] += add
+        ing_demand[to_id]["swapped_in"] = True
+
+    return ing_demand
+
+
+def calc_order_requirements(order_id):
+    """
+    根据订单ID计算该订单的备餐需求（食材+工具）。
+    套餐食材净需求走 calc_order_ingredient_net（与成本页共用，换菜/加菜只此一处实现）。
+    """
+    # 套餐食材净需求（含备注加菜 + 换菜），与成本页同一函数，保证口径一致
+    ing_demand = calc_order_ingredient_net(order_id)
+
+    # 单点菜品：展开成食材量进入备餐清单（成本页按菜品报价另算，口径不同，此处不共用）
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT od.*, d.name as dish_name FROM order_dishes od
+            LEFT JOIN dishes d ON od.dish_id = d.id WHERE od.order_id = ?
+        """, (order_id,))
+        dishes = [dict(r) for r in cur.fetchall()]
+        for d in dishes:
+            cur.execute("""
+                SELECT di.amount, i.id FROM dish_ingredients di
+                JOIN ingredients i ON di.ingredient_id = i.id WHERE di.dish_id = ?
+            """, (d["dish_id"],))
+            for r in cur.fetchall():
+                amount = r["amount"] * d["quantity"]
+                if r["id"] not in ing_demand:
+                    ing_demand[r["id"]] = {"total": 0, "per_package": r["amount"], "order_qty": 0,
+                                           "portion_count": 1, "total_portions": 0, "cost_only": False}
+                ing_demand[r["id"]]["total"] += amount
+                ing_demand[r["id"]]["per_package"] = r["amount"]
+                ing_demand[r["id"]]["order_qty"] += d["quantity"]
+
+    # 工具需求：统一走 calc_order_tool_needs()（占用统计也用它，保证口径一致、不会递归）
+    tool_demand = calc_order_tool_needs(order_id)
 
     # 拉取详情
     ingredients_result = []
     with get_db() as conn:
         cur = conn.cursor()
         for ing_id, info in ing_demand.items():
+            if info.get("cost_only"):
+                continue  # 成本专用项（如生菜）不进备餐采购清单，但成本页照算
             cur.execute("SELECT name, unit, stock, threshold, category FROM ingredients WHERE id = ?", (ing_id,))
             r = cur.fetchone()
             if r:
@@ -586,6 +583,7 @@ def calc_order_requirements(order_id):
                 })
 
     return {"ingredients": ingredients_result, "tools": sort_tools(tools_result, "need")}
+
 
 
 def calc_dashboard(signer_clause="", signer_params=()):
