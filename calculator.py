@@ -1110,7 +1110,7 @@ def calc_merged_prep(order_ids):
                 continue
             o = dict(r)
             cur.execute("""
-                SELECT op.quantity, op.people, p.name
+                SELECT op.quantity, op.people, p.name, op.setup_flag
                 FROM order_packages op
                 LEFT JOIN packages p ON op.package_id = p.id
                 WHERE op.order_id = ?

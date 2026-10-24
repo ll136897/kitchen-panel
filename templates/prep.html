@@ -980,19 +980,23 @@ function urgBadge(u){
 
 // ===== 简略备餐表（白板式）：按 时间/套餐/地点/出餐/送达 分组，送/出 直接打勾 =====
 function boardTime(o){ return ((o.meal_time||o.booking_time||'')+'').trim(); }
-// 套餐简略格式：单套餐的区间档（如 2-3人餐）取「人数上限」显示「3人餐」；
-// 多套餐（混单）保留完整名称不缩写（搭建/半包要逐项看清）。
+// 套餐简略格式：所有套餐的区间档（如 2-3人餐）都取「人数上限」显示「3人餐」。
+// 单套餐：直接缩写；混单（多套餐）：每个照样缩写，但按「搭建 / 非搭建」分组，避免看不清哪份要搭建。
 function pkgShort(name){
   return (name||'').replace(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/g, '$2人餐');
 }
 function fmtPkgs(o){
   const pkgs = o.packages || [];
   if(!pkgs.length) return '套餐未记录';
-  if(pkgs.length === 1){
-    const p = pkgs[0];
-    return pkgShort(p.name) + (p.quantity>1 ? '×'+p.quantity : '');
-  }
-  return pkgs.map(p=>`${p.name||''}${p.quantity>1?'×'+p.quantity:''}`).join(' ');
+  const fmt = p => pkgShort(p.name) + (p.quantity>1 ? '×'+p.quantity : '');
+  if(pkgs.length === 1) return fmt(pkgs[0]);
+  // 混单：缩写每个套餐，再按搭建/非搭建分两组（用 ｜ 分隔，手机端标题里空格会被压成·，｜能保留）
+  const setup = pkgs.filter(p => p.setup_flag).map(fmt);
+  const nosetup = pkgs.filter(p => !p.setup_flag).map(fmt);
+  const parts = [];
+  if(setup.length)   parts.push('搭建 ' + setup.join(' '));
+  if(nosetup.length) parts.push('非搭建 ' + nosetup.join(' '));
+  return parts.join('｜');
 }
 function boardPkgTxt(o){ return fmtPkgs(o); }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
