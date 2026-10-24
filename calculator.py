@@ -29,6 +29,10 @@ def tool_qty_by_people(name, people):
       蛋卷桌: 3/4人=1，6/8人=2，10人=3  → 即 max(1, ceil(people/4))
       椅子  : =人数（仅搭建套餐计入，见 calc_order_tool_needs）
       卡式炉/烤盘: ceil(people/4)；燃气罐: ceil(people/4)+1（多备1）；夹子/剪刀: ceil(people/8)
+    ⚠️ 调用方注意（2026-10-25 修）：天幕/蛋卷桌是**阶梯/取整**规则，一单有多个搭建套餐时
+    必须传「整单搭建部分的总人数」调**一次**，不能按套餐个数累加——
+    「4人餐×3」=12人按规则是 2顶天幕/3张桌，按包累加会错成 3顶/4张。
+    calc_order_tool_needs 已按此实现（setup_people 合计后调一次）。
     改任何装备数量规则 → 只改这里，并同步更新仓库根 LOGIC.md 的对应条目。
     """
     p = people or 0
@@ -72,29 +76,24 @@ def calc_order_tool_needs(order_id, only_setup=False):
 
         # 天幕/蛋卷桌/椅子：按「人数规则」在搭建套餐上计算（混单只计搭建单，不搭建套餐不带这三项）。
         # 说明：这些规则此前只在单套餐成本页(calc_*_package)生效，订单级装备表/占用统计漏用了，这里补齐。
+        # ⚠️ 2026-10-25 修（用户报「8单怎么出9顶天幕」）：天幕(≤10人=1顶/>10人=2顶)和
+        # 蛋卷桌(ceil(人/4))是**阶梯/取整**规则，以前按套餐个数累加（每个搭建套餐各算一次）——
+        # 「4人餐×3」=12人会被算成 3顶天幕/4张桌，而规则本意是按**整单搭建人数**算一次（12人→2顶/3张）。
+        # 椅子=人数是线性规则，两种算法等价；为口径统一也一并按整单人数算。
+        # 混单（10人餐搭建+3人餐不搭建）不受影响：只累加搭建部分人数。
         cur.execute("SELECT id, name FROM tools")
         _tid = {r["name"]: r["id"] for r in cur.fetchall()}
         TM, TBL, CHAIR = _tid.get("天幕"), _tid.get("蛋卷桌"), _tid.get("椅子")
         setup_pkgs = [p for p in pkgs if p.get("setup_flag") == 1]
-
-        for pk in setup_pkgs:
-            people = pk.get("people") or 0
-            qty = pk.get("quantity") or 1
-            if TM is not None:
-                d = tool_demand.setdefault(TM, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += tool_qty_by_people("天幕", people) * qty
-                d["per_package"] = tool_qty_by_people("天幕", people)
-                d["order_qty"] += qty
-            if TBL is not None:
-                d = tool_demand.setdefault(TBL, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += tool_qty_by_people("蛋卷桌", people) * qty
-                d["per_package"] = tool_qty_by_people("蛋卷桌", people)
-                d["order_qty"] += qty
-            if CHAIR is not None:
-                d = tool_demand.setdefault(CHAIR, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += tool_qty_by_people("椅子", people) * qty
-                d["per_package"] = tool_qty_by_people("椅子", people)
-                d["order_qty"] += qty
+        # 整单「搭建部分」的总人数 = Σ(套餐人数×份数)；阶梯/取整类装备按这个数算一次
+        setup_people = sum((pk.get("people") or 0) * (pk.get("quantity") or 1) for pk in setup_pkgs)
+        setup_qty = sum(pk.get("quantity") or 1 for pk in setup_pkgs)
+        if setup_people > 0:
+            for _tname, _tid2 in (("天幕", TM), ("蛋卷桌", TBL), ("椅子", CHAIR)):
+                if _tid2 is None:
+                    continue
+                _n = tool_qty_by_people(_tname, setup_people)
+                tool_demand[_tid2] = {"total": _n, "per_package": _n, "order_qty": setup_qty}
 
         # 其余工具（卡式炉/烤盘/燃气罐/夹子/剪刀等）：按套餐 package_tools 现有配置累加
         for pk in pkgs:
