@@ -235,6 +235,61 @@ try:
 except Exception as _e:
     print(f"[init] backfill after seed skipped: {_e}")
 
+def _fix_pkg_setup_flags():
+    """修正「每套餐搭建标记」与原文不一致的历史数据（幂等）。
+
+    起因：早期按整单搭建标记统一回填，混单（如「10人餐（搭建）+ 3人餐（不搭建）」）
+    会被全部标成搭建 → 备餐页显示成「3人餐（搭建）」，与实际不符、有误导。
+    做法：重新解析原文（先切出本单段），按每套餐 service_type 修正 order_packages.setup_flag。
+    只动「原文明确写了（搭建）/（不搭建）」的套餐；原文没标的一律不动，避免改坏。
+    返回被修正的订单 id 列表。
+    """
+    from parser import parse_order_text, match_packages_in_db, own_raw_block
+    db = get_db()
+    fixed = []
+    rows = db.execute(
+        "SELECT id, contact_name, contact_phone, amount, address, raw_text FROM orders "
+        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> ''"
+    ).fetchall()
+    for r in rows:
+        oid = r["id"]
+        if "搭建" not in (r["raw_text"] or ""):
+            continue                      # 原文根本没提搭建 → 不动
+        own = own_raw_block(r["raw_text"], r["contact_name"], r["contact_phone"],
+                            r["amount"], r["address"])
+        try:
+            parsed = parse_order_text(own).get("packages") or []
+            matched = match_packages_in_db(parsed) or []
+        except Exception:
+            continue
+        want = {}
+        for m in matched:
+            pid = m.get("package_id")
+            st = m.get("service_type")
+            if pid is None or st not in ("搭建", "外送"):
+                continue
+            want[pid] = 1 if st == "搭建" else 0
+        if not want:
+            continue
+        changed = False
+        for cr in db.execute(
+                "SELECT id, package_id, setup_flag FROM order_packages WHERE order_id=?", (oid,)).fetchall():
+            w = want.get(cr["package_id"])
+            if w is None:
+                continue
+            if cr["setup_flag"] is None or int(cr["setup_flag"]) != w:
+                db.execute("UPDATE order_packages SET setup_flag=? WHERE id=?", (w, cr["id"]))
+                changed = True
+        if changed:
+            has = db.execute("SELECT COUNT(*) c FROM order_packages WHERE order_id=? AND setup_flag=1",
+                             (oid,)).fetchone()["c"]
+            db.execute("UPDATE orders SET setup_flag=? WHERE id=?", (1 if has else 0, oid))
+            fixed.append(oid)
+    if fixed:
+        db.commit()
+    return fixed
+
+
 # ===== 一次性数据修复：补回被漏掉的套餐 =====
 # 背景：解析器曾把「10人餐+8人餐」只当成 10 人餐（只取了第一个数字），第二个套餐被整个丢掉。
 # 后果：18 人的单只按 10 人入库 → 食材/搭建费/人工全都少算（搭建费 200 只收了 100）。
@@ -246,6 +301,17 @@ try:
         print("[init] 已补回漏录的套餐：%s" % _fixed)
 except Exception as _e:
     print(f"[init] fix_missing_packages skipped: {_e}")
+
+# ===== 一次性数据修复：修正每套餐搭建标记与原文不一致 =====
+# 背景：早期按整单搭建标记统一回填，混单里「3人餐（不搭建）」被标成了搭建，
+# 备餐页显示「搭建 10人餐 3人餐」→ 误导（用户 2026-10-24 反馈叶子女士那单）。
+# 幂等：只在原文明确标了（搭建）/（不搭建）且与库里不一致时才改；改完再跑不动。
+try:
+    _fixed2 = _fix_pkg_setup_flags()
+    if _fixed2:
+        print("[init] 已修正套餐搭建标记：%s" % _fixed2)
+except Exception as _e:
+    print(f"[init] fix_pkg_setup_flags skipped: {_e}")
 
 # 启动定时备份（10分钟）
 try:

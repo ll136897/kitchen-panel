@@ -246,6 +246,18 @@
   .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bline3{font-size:11px;color:#6b5d52;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bnote{color:#c0392b;font-weight:700}
+  /* 备餐状态块：替代原来的「送/出」两个方块，只占一个位置，点击变色区分已备/未备 */
+  .bprep{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
+    border:1px solid #d9cdbb;border-radius:7px;background:#f7f2e9;color:#a08b6a;
+    font-size:12px;font-weight:800;flex:0 0 auto;align-self:center;cursor:pointer;user-select:none}
+  .bprep.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
+  /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
+  .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
+  /* 归属（刘/孙）小徽标 */
+  .bwho{font-size:11px;padding:1px 5px;border-radius:6px;background:#efe6d8;color:#7a6247;
+    font-weight:800;flex:0 0 auto}
+  /* 换菜/加菜等备注要点徽标 */
+  .btag{font-size:11px;color:#c0392b;font-weight:800;margin-left:4px;white-space:nowrap}
   /* 原录入订单：默认收起，只占一行摘要，不占版面；点开才显示原文 */
   .raw-drop{margin:0 12px 10px;font-size:13px}
   .raw-drop>summary{cursor:pointer;color:var(--primary);font-weight:700;padding:5px 0;user-select:none;list-style:none}
@@ -988,15 +1000,13 @@ function pkgShort(name){
 function fmtPkgs(o){
   const pkgs = o.packages || [];
   if(!pkgs.length) return '套餐未记录';
-  const fmt = p => pkgShort(p.name) + (p.quantity>1 ? '×'+p.quantity : '');
-  if(pkgs.length === 1) return fmt(pkgs[0]);
-  // 混单：缩写每个套餐，再按搭建/非搭建分两组（用 ｜ 分隔，手机端标题里空格会被压成·，｜能保留）
-  const setup = pkgs.filter(p => p.setup_flag).map(fmt);
-  const nosetup = pkgs.filter(p => !p.setup_flag).map(fmt);
-  const parts = [];
-  if(setup.length)   parts.push('搭建 ' + setup.join(' '));
-  if(nosetup.length) parts.push('非搭建 ' + nosetup.join(' '));
-  return parts.join('｜');
+  // 搭建是常态 → **不标注**（与其他订单写法一致，不再出现「搭建 10人餐」这种误导）；
+  // 只有「不搭建（半包）」才明确标出来，一眼看出哪份不用搭。
+  return pkgs.map(p =>
+    pkgShort(p.name)
+    + (p.quantity>1 ? '×'+p.quantity : '')
+    + (p.setup_flag === 0 ? '（不搭建）' : '')
+  ).join(' ');
 }
 function boardPkgTxt(o){ return fmtPkgs(o); }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1025,6 +1035,23 @@ function boardToggle(oid, flag, val, ev){
     }
   }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
 }
+// 备餐状态：点一下切换「未备(pending) ↔ 已备(preparing)」，靠颜色区分，不占额外版面
+function boardTogglePrep(oid, cur, ev){
+  if(ev) ev.stopPropagation();
+  const next = (cur === 'pending') ? 'preparing' : 'pending';
+  fetch(`/api/orders/${oid}`, {method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status: next})})
+  .then(r=>r.json()).then(d=>{
+    if(!d || !d.ok){ if(typeof showToast==='function') showToast((d&&d.msg)||'操作失败（只能改自己录入的订单）'); return; }
+    if(prepData && prepData.orders){
+      const o = prepData.orders.find(x=>x.id===oid);
+      if(o) o.status = next;
+      try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+      renderBoard(prepData.orders);
+    }
+  }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
+}
+
 function renderBoard(orders){
   const list=document.getElementById('boardList');
   const sumEl=document.getElementById('boardSum');
@@ -1076,17 +1103,20 @@ function renderBoard(orders){
     const hideTime = boardKey==='time';
     const hidePkg  = boardKey==='pkg';
     const hideAddr = boardKey==='addr';
-    return `<div class="brow" onclick="enterFocus(${o.id})">
-      <div class="bchecks">
-        <span class="bflag ${o.delivered?'on':''}" title="送达" onclick="boardToggle(${o.id},'delivered',${o.delivered?0:1},event)">送</span>
-        <span class="bflag ${o.served?'on':''}" title="出餐" onclick="boardToggle(${o.id},'served',${o.served?0:1},event)">出</span>
-      </div>
+    // 备餐状态：pending=未备，其余=已备；点左边小方块切换，用颜色区分（不额外占版面）
+    const done = !!o.status && o.status !== 'pending';
+    const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
+    const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'');
+    const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
+    return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
+      <div class="bprep ${done?'on':''}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}"
+           onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)">${done?'✓':'备'}</div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${(who&&who!=='未标注')?`<span class="bwho">${who}</span>`:''}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
         ${hidePkg?'':`<div class="bline2">🍱 ${boardPkgTxt(o)}</div>`}
         ${hideAddr
-          ? (note?`<div class="bline3"><span class="bnote">📝 ${note}</span></div>`:'')
-          : `<div class="bline3">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}</div>`}
+          ? ((note||tagHtml)?`<div class="bline3">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>`:'')
+          : `<div class="bline3">📍 ${o.address||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>`}
       </div>
     </div>`;
   };

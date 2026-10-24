@@ -1186,6 +1186,15 @@ def calc_merged_prep(order_ids):
                                          o.get("contact_phone"), o.get("amount"), o.get("address"))
             except Exception:
                 o["own_raw_text"] = o.get("raw_text") or ""
+            # 备注要点：换菜/加菜写在原文里，简略表要能一眼看到（否则等于"备注被省略"）
+            try:
+                from parser import parse_order_text as _pot
+                _pp = _pot(o.get("own_raw_text") or "") or {}
+                o["has_swap"] = bool(_pp.get("dish_swaps"))
+                o["has_extra"] = bool(_pp.get("extra_ingredients"))
+            except Exception:
+                o["has_swap"] = False
+                o["has_extra"] = False
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 
