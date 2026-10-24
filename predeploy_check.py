@@ -104,7 +104,13 @@ def check_git():
         ok("工作区干净")
     head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
     run(["git", "fetch", "origin"])
-    remote = run(["git", "ls-remote", "origin", "main"]).stdout.split()[0]
+    ls_remote = run(["git", "ls-remote", "origin", "main"]).stdout.split()
+    if not ls_remote:
+        # GitHub:443 间歇不可达时 ls-remote 返回空——以前这里 split()[0] 直接 IndexError 崩掉，
+        # 现在干净地判 ❌（没确认推上去就不许部署），并提示重试
+        bad("本地提交都已在远端", "无法确认：git ls-remote 无返回（GitHub 网络不通？稍后重跑本脚本）")
+        return
+    remote = ls_remote[0]
     anc = run(["git", "merge-base", "--is-ancestor", head, remote]).returncode == 0
     if anc:
         ok("本地提交都已在远端", "HEAD=%s" % head[:7])
