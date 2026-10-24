@@ -1202,14 +1202,22 @@ def calc_merged_prep(order_ids):
             try:
                 from addresses import canonical_address as _ca
                 _addr = (o.get("address") or "").strip()
-                _g = _ca(_addr) or _addr
+                _g = _ca(_addr) or _addr          # 归一值：分组用（青龙湖 / 江家艺苑）
                 o["addr_group"] = _g or "未填地点"
                 _d = ""
                 if _g and _g in _addr:
                     _d = _addr.replace(_g, "", 1).strip(" 　·、,，-—~(")
-                o["addr_detail"] = _d
+                # 细节很短（"二期" / "一期" / "A区"…）说明它只是地名后缀、不是独立点位：
+                # 不单独占一行浪费版面 —— 一级地点直接显示完整原地址（"青龙湖二期"）。
+                if _d and len(_d) <= 3:
+                    o["addr_main"] = _addr or "未填地点"
+                    o["addr_detail"] = ""
+                else:
+                    o["addr_main"] = _g or _addr or "未填地点"
+                    o["addr_detail"] = _d
             except Exception:
                 o["addr_group"] = o.get("address") or "未填地点"
+                o["addr_main"] = o.get("address") or "未填地点"
                 o["addr_detail"] = ""
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
