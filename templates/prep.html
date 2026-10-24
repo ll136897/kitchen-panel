@@ -221,10 +221,6 @@
   .muted{color:var(--muted)}
 
   /* 简略备餐表（白板）：分组 chips + 行（手机紧凑优先，主次分明） */
-  .board-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-  .board-tabs button{padding:7px 12px;border-radius:10px;border:1px solid var(--border-l);
-    background:#fff;color:#6b5d52;font-weight:700;font-size:13px;cursor:pointer}
-  .board-tabs button.active{background:var(--primary);border-color:var(--primary);color:#fff}
   .bgrp{margin:6px 0 2px;font-size:13px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:6px;
     background:#faf5ee;padding:3px 8px;border-radius:6px}
   .bgrp .bmeta{font-size:11px;color:var(--muted);font-weight:600}
@@ -413,20 +409,13 @@
     <div id="ordersList"></div>
   </div>
 
-  <!-- 简略备餐表（白板式）：送达/出餐勾选 + 按 时间/套餐/地点/出餐/送达 分组 -->
+  <!-- 简略备餐表：固定按「备餐批次」排（时间档 → 套餐规格 → 备餐时间）。
+       已移除原来的分组切换（时间/套餐/地点/出餐/送达）——只留这一套，更精简。 -->
   <div class="card" id="boardCard">
     <h3><span class="dot" style="background:#1b7a43"></span>🧾 简略备餐表
       <span id="boardSum" class="muted" style="font-size:13px;font-weight:600;margin-left:6px"></span></h3>
-    <div class="board-tabs" id="boardTabs">
-      <button data-k="batch" onclick="setBoardKey('batch')">🍳 备餐批次</button>
-      <button data-k="time" onclick="setBoardKey('time')">⏰ 时间</button>
-      <button data-k="pkg" onclick="setBoardKey('pkg')">🍱 套餐</button>
-      <button data-k="addr" onclick="setBoardKey('addr')">📍 地点</button>
-      <button data-k="served" class="active" onclick="setBoardKey('served')">🍽 出餐</button>
-      <button data-k="delivered" onclick="setBoardKey('delivered')">🚚 送达</button>
-    </div>
     <div id="boardList"></div>
-    <div class="ord-hint">点「送/出」小方块 = 打勾；点行 = 看这单要备什么</div>
+    <div class="ord-hint">点左侧色条 = 标记已备 / 未备；点任意一行 = 看这单要备什么</div>
   </div>
 
   <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具） -->
@@ -548,11 +537,9 @@ function getFixedIdx(name, cat){
 }
 let prepData = null;
 let currentMode = 'board';
-// 简略表分组维度（记忆上次选择）
-// 默认改成「备餐批次」：先按时间档（外地单按"用餐时间-1h"提前一档），
+// 简略表固定用「备餐批次」：先按时间档（外地单按"用餐时间-1h"提前一档），
 // 档内再按套餐规格聚在一起（相同规格可一起备），组内按备餐时间先后排。
-let boardKey = 'batch';
-try{ boardKey = localStorage.getItem('board_key_v3') || 'batch'; }catch(e){}
+// 原来的分组切换（时间/套餐/地点/出餐/送达）已按用户要求移除，只留这一套。
 let prepDates = [];
 let todayOverride = null;  // 后端返回的"今天"（北京时间），覆盖浏览器时区
 let todayDateStr = '';      // 后端返回的今天日期，供各函数共用
@@ -624,10 +611,7 @@ function switchMode(mode){
   document.getElementById('tabMerged').classList.toggle('active', mode==='merged');
   document.getElementById('tabOrder').classList.toggle('active', mode==='order');
   document.getElementById('tabBoard').classList.toggle('active', mode==='board');
-  // 简略表 tab 的激活态每次都要对齐（进简略表时 boardKey chips 也要同步）
-  if(mode==='board'){
-    document.querySelectorAll('#boardTabs button').forEach(b=>b.classList.toggle('active', b.dataset.k===boardKey));
-  }
+  // 简略表已固定「备餐批次」分组，没有可切换的 chips 了
   render();
 }
 
@@ -1084,12 +1068,7 @@ function boardSlotRank(k){
   if(k.indexOf('晚档')>=0) return 2;
   return 9;
 }
-function setBoardKey(k){
-  boardKey=k;
-  try{ localStorage.setItem('board_key_v3',k); }catch(e){}
-  document.querySelectorAll('#boardTabs button').forEach(b=>b.classList.toggle('active', b.dataset.k===k));
-  if(prepData && prepData.orders) render();
-}
+// 分组切换已移除（固定备餐批次），不再需要 setBoardKey
 function boardToggle(oid, flag, val, ev){
   if(ev) ev.stopPropagation();
   fetch('/api/prep/board-flag', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1141,15 +1120,8 @@ function renderBoard(orders){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
   }
-  const gKey=o=>{
-    if(boardKey==='batch') return boardTimeSlot(o);
-    if(boardKey==='time') return boardTime(o)||'时间未定';
-    if(boardKey==='pkg') return boardPkgTxt(o);
-    // 地点分组用「归一地址」：江家艺苑的各种写法归为一组（显示仍用原地址，点位细节不丢）
-    if(boardKey==='addr') return o.addr_group || o.address || '未填地点';
-    if(boardKey==='served') return o.served?'✅ 已出餐':'⬜ 未出餐';
-    return o.delivered?'✅ 已送达':'⬜ 未送达';
-  };
+  // 简略表固定按「备餐批次」分组（时间档），其余分组维度已移除
+  const gKey=o=>boardTimeSlot(o);
   const groups=new Map();
   orders.forEach(o=>{
     const k=gKey(o);
@@ -1157,26 +1129,11 @@ function renderBoard(orders){
     groups.get(k).push(o);
   });
   let garr=[...groups.entries()];
-  if(boardKey==='time'){
-    // 时间未定排最后
-    garr.sort((a,b)=>{
-      const ka=a[0]==='时间未定'?'99:99':a[0];
-      const kb=b[0]==='时间未定'?'99:99':b[0];
-      return ka<kb?-1:ka>kb?1:0;
-    });
-  } else if(boardKey==='batch'){
-    // 早档 → 午档 → 晚档（时间未定最后）
-    garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));
-  } else if(boardKey==='served'||boardKey==='delivered'){
-    // 未办妥的排前面
-    garr.sort((a,b)=>(b[0].startsWith('⬜')?1:0)-(a[0].startsWith('⬜')?1:0));
-  }
+  // 早档 → 午档 → 晚档（时间未定最后）
+  garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));
   const rowHtml=o=>{
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
-    const hideTime = boardKey==='time';
-    const hidePkg  = boardKey==='pkg';
-    const hideAddr = boardKey==='addr';
     // 备餐状态：pending=未备，其余=已备；点左边小方块切换，用颜色区分（不额外占版面）
     const done = !!o.status && o.status !== 'pending';
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
@@ -1189,14 +1146,13 @@ function renderBoard(orders){
     const detailHtml = o.addr_detail ? `<span class="bdetail">↳ ${o.addr_detail}</span>` : '';
     const noteLine = (note||tagHtml)
       ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
-    const addrLine = hideAddr ? '' :
-      `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
+    const addrLine = `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
     return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
       <div class="bstat ${done?'on':boardSlotClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}${boardIsLocal(o)?'':'（外地：需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
-        ${hidePkg?'':`<div class="bline2">🍱 ${boardPkgTxt(o).replace(/(\d+)人餐/g,'<span class="bnum">$1</span>人餐')}</div>`}
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}<span class="btime">${t||'—'}</span></div>
+        <div class="bline2">🍱 ${boardPkgTxt(o).replace(/(\d+)人餐/g,'<span class="bnum">$1</span>人餐')}</div>
         ${addrLine}
         ${noteLine}
       </div>
@@ -1205,28 +1161,25 @@ function renderBoard(orders){
   list.innerHTML = garr.map(([k,arr])=>{
     const ppl=arr.reduce((s,o)=>s+boardPeople(o),0);
     let html = `<div class="bgrp">${k} <span class="bmeta">${arr.length}单 · ${ppl}人</span></div>`;
-    if(boardKey==='batch'){
-      // 档内再按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
-      const specMap = new Map();
-      arr.forEach(o=>{
-        const sk = boardSpecKey(o);
-        if(!specMap.has(sk)) specMap.set(sk,[]);
-        specMap.get(sk).push(o);
+    // 档内再按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
+    const specMap = new Map();
+    arr.forEach(o=>{
+      const sk = boardSpecKey(o);
+      if(!specMap.has(sk)) specMap.set(sk,[]);
+      specMap.get(sk).push(o);
+    });
+    const specArr = [...specMap.entries()].sort((a,b)=>
+      (parseInt(a[0])||0) - (parseInt(b[0])||0));      // 规格从小到大，先备小份
+    html += specArr.map(([sk,sub])=>{
+      sub.sort((a,b)=>{
+        const ta = boardPrepTime(a)||'99:99', tb = boardPrepTime(b)||'99:99';
+        return ta < tb ? -1 : ta > tb ? 1 : 0;         // 组内按备餐时间先后
       });
-      const specArr = [...specMap.entries()].sort((a,b)=>
-        (parseInt(a[0])||0) - (parseInt(b[0])||0));      // 规格从小到大，先备小份
-      html += specArr.map(([sk,sub])=>{
-        sub.sort((a,b)=>{
-          const ta = boardPrepTime(a)||'99:99', tb = boardPrepTime(b)||'99:99';
-          return ta < tb ? -1 : ta > tb ? 1 : 0;         // 组内按备餐时间先后
-        });
-        const sppl = sub.reduce((s,o)=>s+boardPeople(o),0);
-        return `<div class="bsub">🍱 ${sk} · ${sub.length}单 / ${sppl}人</div>` +
-               `<div class="bgrid">` + sub.map(rowHtml).join('') + `</div>`;
-      }).join('');
-      return html;
-    }
-    return html + `<div class="bgrid">` + arr.map(rowHtml).join('') + `</div>`;
+      const sppl = sub.reduce((s,o)=>s+boardPeople(o),0);
+      return `<div class="bsub">🍱 ${sk} · ${sub.length}单 / ${sppl}人</div>` +
+             `<div class="bgrid">` + sub.map(rowHtml).join('') + `</div>`;
+    }).join('');
+    return html;
   }).join('');
 }
 
