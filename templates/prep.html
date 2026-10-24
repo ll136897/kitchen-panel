@@ -241,22 +241,21 @@
   .bflag.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
   .bmain{flex:1;min-width:0;line-height:1.22}
   .bline1{display:flex;align-items:baseline;justify-content:space-between;gap:6px}
-  /* 客户名：完整显示、不省略（放不下就换行，绝不截掉名字）；至少 5 字宽起步 */
-  .bname{font-weight:800;color:#2b1e14;font-size:13px;min-width:5.2em;flex:1 1 auto;word-break:break-all}
+  /* 客户名：单行不改行（放不下才末尾省略），至少 5 字宽起步 */
+  .bname{font-weight:800;color:#2b1e14;font-size:13px;min-width:5.2em;flex:1 1 auto;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .btime{font-weight:800;color:#9a3412;flex:0 0 auto;font-variant-numeric:tabular-nums;font-size:12px}
-  /* 套餐：不截断 —— 混单要完整露出两个套餐（放不下就换行，不许省略） */
+  /* 套餐：完整露出（混单两个套餐都要），放不下换行 */
   .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;white-space:normal;word-break:break-all}
-  /* 一级地点 + 备注：不省略，但**自然排版**——放得下就一排显示完，不硬拆成两排
-     （不用 word-break:break-word，那会把短备注也劈成两行） */
+  /* 地点：一级地点（+ 小地区小字跟在后面，同一行） */
   .bline3{font-size:11px;color:#4a3b2e;margin-top:1px;font-weight:700}
-  /* 小地区（东入口儿童乐园区 / 4号停车场…）：最下一排小字；没有就不渲染这一行，行高自动缩回最小 */
-  .bline4{font-size:10px;color:#8a7a68;margin-top:1px}
+  .bdetail{font-size:10px;color:#8a7a68;font-weight:600;margin-left:4px}
+  /* 备注：独立一行，完整显示（放得下一排就一排，不硬拆） */
+  .bline4{font-size:11px;margin-top:1px}
   .bnote{color:#c0392b;font-weight:700}
-  /* 备餐状态块：替代原来的「送/出」两个方块，只占一个位置，点击变色区分已备/未备 */
-  .bprep{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
-    border:1px solid #d9cdbb;border-radius:7px;background:#f7f2e9;color:#a08b6a;
-    font-size:12px;font-weight:800;flex:0 0 auto;align-self:center;cursor:pointer;user-select:none}
-  .bprep.on{background:#eaf7ee;border-color:#27ae60;color:#1b7a43}
+  /* 备餐状态：左侧细色条（几乎不占版面，替代原来的方块），点击切换；已备=绿 */
+  .bstat{width:5px;align-self:stretch;border-radius:3px;background:#ddd3c4;flex:0 0 auto;cursor:pointer}
+  .bstat.on{background:#27ae60;box-shadow:0 0 0 1px #1b7a43 inset}
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
@@ -1117,16 +1116,23 @@ function renderBoard(orders){
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
     const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'');
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
+    const whoHtml = (who&&who!=='未标注')
+      ? `<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>` : '';
+    // 排版（2026-10-25 重做）：左侧细色条=备餐状态（不再用占地方的方块）
+    //   行1 名字(单行) + 归属 + 时间 ｜ 行2 套餐 ｜ 行3 地点(+小地区小字) ｜ 行4 备注(独立一行，完整)
+    const detailHtml = o.addr_detail ? `<span class="bdetail">↳ ${o.addr_detail}</span>` : '';
+    const noteLine = (note||tagHtml)
+      ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
+    const addrLine = hideAddr ? '' :
+      `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
     return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
-      <div class="bprep ${done?'on':''}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}"
-           onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)">${done?'✓':'备'}</div>
+      <div class="bstat ${done?'on':''}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}"
+           onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${(who&&who!=='未标注')?`<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>`:''}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}${hideTime?'':`<span class="btime">${t||'—'}</span>`}</div>
         ${hidePkg?'':`<div class="bline2">🍱 ${boardPkgTxt(o)}</div>`}
-        ${hideAddr
-          ? ((note||tagHtml)?`<div class="bline3">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>`:'')
-          : `<div class="bline3">📍 ${o.addr_main||'—'}${note?` · <span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>`}
-        ${o.addr_detail?`<div class="bline4">↳ ${o.addr_detail}</div>`:''}
+        ${addrLine}
+        ${noteLine}
       </div>
     </div>`;
   };
