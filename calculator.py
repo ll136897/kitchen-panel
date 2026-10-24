@@ -19,6 +19,34 @@ def now_cst():
     return datetime.datetime.now(CST)
 
 
+def tool_qty_by_people(name, people):
+    """装备按人数配的【唯一口径 / single source of truth】。
+
+    所有页面/功能（订单装备表、占用统计、搭建装备表、餐标配餐器 catering_suggest）
+    算天幕/蛋卷桌/椅子/炉/盘/罐/夹/剪 时【必须】调本函数，禁止在某个页面或函数里再写一套 if/elif。
+    规则由用户 2026-10-24 确认：
+      天幕  : ≤10人=1顶，>10人(如13人)=2顶
+      蛋卷桌: 3/4人=1，6/8人=2，10人=3  → 即 max(1, ceil(people/4))
+      椅子  : =人数（仅搭建套餐计入，见 calc_order_tool_needs）
+      卡式炉/烤盘: ceil(people/4)；燃气罐: ceil(people/4)+1（多备1）；夹子/剪刀: ceil(people/8)
+    改任何装备数量规则 → 只改这里，并同步更新仓库根 LOGIC.md 的对应条目。
+    """
+    p = people or 0
+    if name == "天幕":
+        return 1 if p <= 10 else 2
+    if name == "蛋卷桌":
+        return max(1, (p + 3) // 4)
+    if name == "椅子":
+        return p
+    if name in ("卡式炉", "烤盘"):
+        return (p + 3) // 4
+    if name == "燃气罐":
+        return (p + 3) // 4 + 1
+    if name in ("夹子", "剪刀"):
+        return (p + 7) // 8
+    return 1
+
+
 def calc_order_tool_needs(order_id, only_setup=False):
     """只算某单需要的装备（套餐配的装备 + 备注追加的），**不依赖可用量**。
     单独抽出来是为了让"占用统计"能调用它而不会与 get_available_tool_stock() 递归。
@@ -49,31 +77,23 @@ def calc_order_tool_needs(order_id, only_setup=False):
         TM, TBL, CHAIR = _tid.get("天幕"), _tid.get("蛋卷桌"), _tid.get("椅子")
         setup_pkgs = [p for p in pkgs if p.get("setup_flag") == 1]
 
-        def _tm_qty(people):
-            # ≤10人餐1顶；13人(>10)默认2顶（额外情况可在备注写「1天幕」覆盖为1）
-            return 1 if (people or 0) <= 10 else 2
-
-        def _table_qty(people):
-            # 3/4人餐1个，6/8人餐2个，10人餐3个（即 ceil(people/4)）
-            return max(1, (people + 3) // 4)
-
         for pk in setup_pkgs:
             people = pk.get("people") or 0
             qty = pk.get("quantity") or 1
             if TM is not None:
                 d = tool_demand.setdefault(TM, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += _tm_qty(people) * qty
-                d["per_package"] = _tm_qty(people)
+                d["total"] += tool_qty_by_people("天幕", people) * qty
+                d["per_package"] = tool_qty_by_people("天幕", people)
                 d["order_qty"] += qty
             if TBL is not None:
                 d = tool_demand.setdefault(TBL, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += _table_qty(people) * qty
-                d["per_package"] = _table_qty(people)
+                d["total"] += tool_qty_by_people("蛋卷桌", people) * qty
+                d["per_package"] = tool_qty_by_people("蛋卷桌", people)
                 d["order_qty"] += qty
             if CHAIR is not None:
                 d = tool_demand.setdefault(CHAIR, {"total": 0, "per_package": 0, "order_qty": 0})
-                d["total"] += people * qty
-                d["per_package"] = people
+                d["total"] += tool_qty_by_people("椅子", people) * qty
+                d["per_package"] = tool_qty_by_people("椅子", people)
                 d["order_qty"] += qty
 
         # 其余工具（卡式炉/烤盘/燃气罐/夹子/剪刀等）：按套餐 package_tools 现有配置累加
@@ -1492,22 +1512,7 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
     tool_list = []
     for t in all_tools:
         n = t["name"]
-        if n == "椅子":
-            qty = people
-        elif n == "卡式炉":
-            qty = math.ceil(people / 4)
-        elif n == "烤盘":
-            qty = math.ceil(people / 4)
-        elif n == "燃气罐":
-            qty = math.ceil(people / 4) + 1  # 多备一个
-        elif n == "天幕":
-            qty = 1 if people <= 10 else 2
-        elif n == "蛋卷桌":
-            qty = math.ceil(people / 5)
-        elif n in ("夹子", "剪刀"):
-            qty = math.ceil(people / 8)
-        else:
-            qty = 1
+        qty = tool_qty_by_people(n, people)  # 统一走单一口径，避免和订单装备表各算各的
         tool_list.append({
             "id": t["id"], "name": n, "per_package": qty,
             "stock": t["stock"], "shortage": max(0, qty - t["stock"])
