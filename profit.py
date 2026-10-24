@@ -437,7 +437,7 @@ def order_profit(db, oid, cfg=None):
 
     # 这单**原始录入信息**：财务页改成本时要能对着看，免得改错单（2026-10-14）
     _pkgs = cur.execute("""
-        SELECT op.quantity, op.people, op.price, p.name AS pkg_name
+        SELECT op.quantity, op.people, op.price, op.setup_flag, p.name AS pkg_name
         FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
         WHERE op.order_id = ? ORDER BY op.id
     """, (oid,)).fetchall()
@@ -462,7 +462,8 @@ def order_profit(db, oid, cfg=None):
         "packages": [{"name": (dict(_p).get("pkg_name") or ""),
                       "people": dict(_p).get("people"),
                       "quantity": dict(_p).get("quantity"),
-                      "price": dict(_p).get("price")} for _p in _pkgs],
+                      "price": dict(_p).get("price"),
+                      "setup_flag": dict(_p).get("setup_flag")} for _p in _pkgs],
     }
 
     return {

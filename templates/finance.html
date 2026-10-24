@@ -1299,12 +1299,17 @@ function toggleRawPop(oid, ev){
   fetch('/api/orders/'+oid+'/detail').then(function(r){ return r.json(); }).then(function(d){
     const o = (d && d.ok && d.data) ? d.data : {};
     // 优先用「只属于这一单」的原文片段：批量录入时整段原文混着别人的单，直接显示会是错的
+    // 套餐级标记：detail 接口 packages 带 setup_flag；混单（既有搭建又有半包）据此判定
+    const _pkgs = o.packages || [];
+    const _hs = _pkgs.some(p => p.setup_flag === 1);
+    const _hn = _pkgs.some(p => p.setup_flag === 0);
     rawPopCache[oid] = {raw_text: o.own_raw_text || o.raw_text || '',
                         setup_flag: (o.setup_flag===0||o.setup_flag===1) ? o.setup_flag
-                                   : ((o.setup===0||o.setup===1) ? o.setup : null)};
+                                   : ((o.setup===0||o.setup===1) ? o.setup : null),
+                        has_setup: _hs, has_nosetup: _hn};
     done();
   }).catch(function(){
-    rawPopCache[oid] = {raw_text: '(读取失败，请重试)', setup_flag: null};
+    rawPopCache[oid] = {raw_text: '(读取失败，请重试)', setup_flag: null, has_setup: false, has_nosetup: false};
     done();
   });
 }
@@ -1315,11 +1320,14 @@ function renderRawPop(oid){
 }
 function renderRawPopHtml(oid){
   const el = ensureRawPop();
-  const c = rawPopCache[oid] || {raw_text:'', setup_flag:null};
+  const c = rawPopCache[oid] || {raw_text:'', setup_flag:null, has_setup:false, has_nosetup:false};
   const raw = (c.raw_text || '').trim();
   const fromText = rawSetupFromText(raw);
   let chk = '';
-  if(fromText !== null){
+  // 套餐级优先：混单（含搭建套餐 + 半包套餐）直接判定为混单，不再走"整段文字判不搭建"的误判逻辑
+  if(c.has_setup && c.has_nosetup){
+    chk = `<div class="rp-chk ok">✅ 已识别为「混单」：含搭建套餐 + 半包套餐（搭建/不搭建筛选都能命中）</div>`;
+  } else if(fromText !== null){
     const sys = c.setup_flag;
     if(sys === null || sys === undefined){
       chk = `<div class="rp-chk">⚠️ 系统没判定出搭建状态，建议核对</div>`;
@@ -1842,16 +1850,26 @@ function renderOrderInfo(od){
   const put = (k, v)=>{ if(v!==undefined && v!==null && v!=='') rows.push([k, String(v)]); };
   const pkg = (od.packages||[]).map(x=>{
     const n = x.name || (x.people ? (x.people + '人餐') : '');
-    return n ? (n + (x.quantity && x.quantity > 1 ? (' ×' + x.quantity) : '')) : '';
+    if(!n) return '';
+    const tag = (x.setup_flag === 1) ? '（搭建）' : (x.setup_flag === 0 ? '（半包）' : '');
+    return n + (x.quantity && x.quantity > 1 ? (' ×' + x.quantity) : '') + tag;
   }).filter(Boolean).join(' + ');
   put('👤 联系人', od.contact_name);
   put('📞 电话', od.contact_phone);
   put('📍 地址', od.address);
   put('🍱 套餐', pkg || od.menu_name);
-  // 搭建与否：这是成本大头（搭建才收搭建费），必须摆在录入信息里对着核对
-  const _st = (od.setup === 1 || od.setup === 0) ? od.setup
-            : ((od.setup_flag === 1 || od.setup_flag === 0) ? od.setup_flag : null);
-  if(_st !== null) put('🏗️ 搭建', _st === 1 ? '搭建（全包）' : '不搭建（半包）');
+  // 搭建与否：这是成本大头（搭建才收搭建费），必须摆在录入信息里对着核对。
+  // 套餐级判断：含搭建套餐→搭建；含半包→不搭建；两者都有→混单。
+  const _pkgs = od.packages || [];
+  const _hs = _pkgs.some(p => p.setup_flag === 1);
+  const _hn = _pkgs.some(p => p.setup_flag === 0);
+  let _setupLabel = null;
+  if(_hs && _hn) _setupLabel = '混单（含搭建+半包）';
+  else if(_hs)   _setupLabel = '搭建（全包）';
+  else if(_hn)   _setupLabel = '不搭建（半包）';
+  else if(od.setup === 1 || od.setup === 0) _setupLabel = od.setup ? '搭建（全包）' : '不搭建（半包）';
+  else if(od.setup_flag === 1 || od.setup_flag === 0) _setupLabel = od.setup_flag ? '搭建（全包）' : '不搭建（半包）';
+  if(_setupLabel) put('🏗️ 搭建', _setupLabel);
   put('📅 预约', (od.booking_date||'') + (od.booking_time ? (' ' + od.booking_time) : ''));
   put('🕐 用餐', od.meal_time);
   put('💵 金额', od.amount ? fmtY(od.amount) : '');
