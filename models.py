@@ -325,6 +325,7 @@ def init_db():
                 people INTEGER NOT NULL,          -- 实际人数（取max）
                 quantity INTEGER NOT NULL DEFAULT 1, -- 份数
                 price REAL,                       -- 本单该套餐单价（可改；NULL=用套餐标准价）
+                setup_flag INTEGER,               -- 该套餐是否搭建 1/0（NULL=未标注）；支持一单内部分搭建部分半包
                 FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
                 FOREIGN KEY (package_id) REFERENCES packages(id)
             )
@@ -333,6 +334,28 @@ def init_db():
         _opc = [r[1] for r in cur.execute("PRAGMA table_info(order_packages)").fetchall()]
         if "price" not in _opc:
             cur.execute("ALTER TABLE order_packages ADD COLUMN price REAL")
+        # 迁移：套餐级搭建标记（2026-10-24 新增）——支撑「10人餐搭建+3人餐不搭建」式混单
+        if "setup_flag" not in _opc:
+            cur.execute("ALTER TABLE order_packages ADD COLUMN setup_flag INTEGER")
+        # 回填：每单的套餐搭建标记 = 该单的搭建标记（旧单都是整单统一搭建/不搭建）。
+        # 优先用订单已存的 setup_flag；缺则看 raw_text 里的「搭建/不搭建」字样。
+        # 同时把 orders.setup_flag 用套餐汇总结果对齐（任一搭建=搭建），保证历史单的订单级标记也准确。
+        try:
+            for _oid, _raw, _osf in cur.execute(
+                    "SELECT id, raw_text, setup_flag FROM orders").fetchall():
+                if _osf is not None:
+                    _val = 1 if _osf == 1 else 0
+                else:
+                    _t = _raw or ""
+                    _val = 0 if "不搭建" in _t else (1 if "搭建" in _t else None)
+                cur.execute("UPDATE order_packages SET setup_flag=? WHERE order_id=?",
+                            (_val, _oid))
+                if _val is not None:
+                    cur.execute(
+                        "UPDATE orders SET setup_flag=? WHERE id=? AND setup_flag IS NULL",
+                        (_val, _oid))
+        except Exception as _e:
+            print("[迁移] 套餐级搭建标记回填跳过：", _e)
 
         # 订单→单点明细
         cur.execute("""

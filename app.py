@@ -1727,11 +1727,26 @@ def create_order():
         for pk in matched:
             if not pk["package_id"]:
                 continue
+            # 套餐级搭建标记：搭建→1，其余（不搭建/外送/自提）→0。
+            # 支撑「10人餐搭建+3人餐不搭建」式混单——每个套餐各自记录搭建与否。
+            _pk_sf = 1 if pk.get("service_type") == "搭建" else 0
             cur.execute("""
                 INSERT INTO order_packages
-                (order_id, package_id, people, quantity)
-                VALUES (?,?,?,?)
-            """, (order_id, pk["package_id"], pk["people"], pk["quantity"]))
+                (order_id, package_id, people, quantity, setup_flag)
+                VALUES (?,?,?,?,?)
+            """, (order_id, pk["package_id"], pk["people"], pk["quantity"], _pk_sf))
+        # 汇总各套餐搭建标记 → 订单级 setup_flag（任一搭建=搭建；全部不搭建=不搭建）。
+        # 这样混单（10人餐搭建+3人餐不搭建）订单级判为搭建、只收一次搭建费，3人餐不另收。
+        cur.execute("SELECT setup_flag FROM order_packages WHERE order_id=?", (order_id,))
+        _flags = [r["setup_flag"] for r in cur.fetchall()]
+        if any(f == 1 for f in _flags):
+            _order_sf = 1
+        elif _flags and all(f == 0 for f in _flags if f is not None) and all(f is not None for f in _flags):
+            _order_sf = 0
+        else:
+            _order_sf = None
+        if _order_sf is not None:
+            cur.execute("UPDATE orders SET setup_flag=? WHERE id=?", (_order_sf, order_id))
         results.append({"order_id": order_id, "name": parsed.get("contact_name", ""),
                         "date": parsed.get("booking_date", ""), "amount": parsed.get("amount", 0)})
 
@@ -1787,19 +1802,28 @@ def list_orders():
     # 加套餐明细；同时按"价格"推导 搭建（手工填过 setup_flag 的优先，否则用和销售流水表一致的规则）
     for o in orders:
         cur.execute("""
-            SELECT op.people, op.quantity, p.name, COALESCE(op.price, p.price) AS price
+            SELECT op.people, op.quantity, p.name, COALESCE(op.price, p.price) AS price,
+                   op.setup_flag AS pkg_setup
             FROM order_packages op
             LEFT JOIN packages p ON op.package_id = p.id
             WHERE op.order_id = ?
         """, (o["id"],))
         pkgs = cur.fetchall()
         o["packages"] = [dict(r) for r in pkgs]
+        # 订单级 setup_flag 优先用「各套餐标记汇总」：任一搭建=搭建（混单 10人餐搭建+3人餐不搭建 判为搭建）；
+        # 全部不搭建=不搭建；都为空才退回价格推导。这样混单不会被 raw_text 里的「不搭建」误判成不搭建。
         if o.get("setup_flag") is None:
-            price_total = sum((r["price"] or 0) * (r["quantity"] or 0) for r in pkgs)
-            pkg_qty = sum((r["quantity"] or 0) for r in pkgs)
-            g_setup, _g_fee, _why = _guess_setup_and_fee(
-                db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
-            o["setup_flag"] = g_setup  # 仅用于前端展示；库里 setup_flag 已由原始文字(搭建/不搭建)回填，这里只读不写
+            _flags = [r["pkg_setup"] for r in pkgs]
+            if any(f == 1 for f in _flags):
+                o["setup_flag"] = 1
+            elif _flags and all(f == 0 for f in _flags if f is not None) and all(f is not None for f in _flags):
+                o["setup_flag"] = 0
+            else:
+                price_total = sum((r["price"] or 0) * (r["quantity"] or 0) for r in pkgs)
+                pkg_qty = sum((r["quantity"] or 0) for r in pkgs)
+                g_setup, _g_fee, _why = _guess_setup_and_fee(
+                    db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
+                o["setup_flag"] = g_setup  # 仅用于前端展示；库里 setup_flag 已由原始文字(搭建/不搭建)回填，这里只读不写
     deleted_count = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL").fetchone()[0]
     return jsonify({"ok": True, "data": orders, "deleted_count": deleted_count})
@@ -1920,6 +1944,22 @@ def edit_order(oid):
         cur.execute("UPDATE orders SET %s WHERE id=?" % ", ".join(sets), params)
 
     if "packages" in data:
+        # 编辑场景无「每套餐级搭建」输入：按本单整体搭建标记回填每套餐 setup_flag。
+        # 取订单已存 setup_flag，缺则按 raw_text 里的搭建字样推导（兼容批量录入混单，先切出本单片段）。
+        cur.execute("SELECT raw_text, contact_name, contact_phone, amount, address, setup_flag "
+                    "FROM orders WHERE id=?", (oid,))
+        _o = cur.fetchone()
+        _o_sf = _o["setup_flag"] if _o else None
+        if _o_sf is None:
+            try:
+                from profit import _setup_from_text as _sft
+                from parser import own_raw_block as _orb
+                _own = _orb(_o["raw_text"], _o["contact_name"], _o["contact_phone"],
+                            _o["amount"], _o["address"]) if _o else ""
+                _o_sf = _sft(_own or "")
+            except Exception:
+                _o_sf = None
+        _pk_sf = 1 if _o_sf == 1 else 0
         rows = []
         for p in (data.get("packages") or []):
             try:
@@ -1947,11 +1987,11 @@ def edit_order(oid):
                     price = float(price)
                 except (TypeError, ValueError):
                     price = None
-            rows.append((pid, int(people or 0), qty, price))
+            rows.append((pid, int(people or 0), qty, price, _pk_sf))
         cur.execute("DELETE FROM order_packages WHERE order_id=?", (oid,))
-        for pid, people, qty, price in rows:
-            cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity, price) "
-                        "VALUES (?,?,?,?,?)", (oid, pid, people, qty, price))
+        for pid, people, qty, price, sf in rows:
+            cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity, price, setup_flag) "
+                        "VALUES (?,?,?,?,?,?)", (oid, pid, people, qty, price, sf))
 
     db.commit()
     return jsonify({"ok": True, "msg": "已保存"})
@@ -3809,7 +3849,9 @@ def export_setup_sheet():
                COALESCE(u.name, o.created_by_name) AS signer
         FROM orders o LEFT JOIN users u ON o.created_by = u.id
         WHERE o.booking_date=? AND o.status IN ('pending','preparing') AND o.deleted_at IS NULL
-          AND (o.raw_text IS NULL OR o.raw_text NOT LIKE '%不搭建%')
+          -- 任一套餐需要搭建（含「10人餐搭建+3人餐不搭建」式混单）即纳入搭建装备表；
+          -- 不再靠 raw_text 不含「不搭建」粗筛（那样会把混单整单误排除）
+          AND o.id IN (SELECT order_id FROM order_packages WHERE setup_flag = 1)
         ORDER BY o.booking_time, o.id
     """, (date,))
     orders = [dict(r) for r in cur.fetchall()]
@@ -3850,7 +3892,8 @@ def export_setup_sheet():
         pkg_txt = "、".join(f"{r['name']}×{r['quantity']}" for r in pkgs)
         people = sum((r["max_people"] or 0) * (r["quantity"] or 1) for r in pkgs)
 
-        needs = calc_order_tool_needs(o["id"]) or {}
+        # 只统计「需要搭建」的套餐装备（混单时不含半包套餐的天幕等，避免多算）
+        needs = calc_order_tool_needs(o["id"], only_setup=True) or {}
         names = {}
         for tid, info in needs.items():
             if not info.get("total"):

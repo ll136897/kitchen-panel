@@ -292,19 +292,24 @@ def parse_order_text(raw_text):
 
 
 def _split_pkg_segments(line):
-    """把一行里的多个套餐拆开：「10人餐+8人餐 （搭建）」→ ['10人餐 （搭建）', '8人餐 （搭建）']
+    """把一行里的多个套餐拆开，且**保留每个套餐各自的（搭建）/（不搭建）标记**。
+
+    支持两种写法：
+      · 整行共享标记：「10人餐+8人餐（搭建）」→ ['10人餐（搭建）', '8人餐（搭建）']
+        （标记在行尾，视为所有套餐统一）
+      · 每套餐各自标记：「10人餐搭建+3人餐不搭建」→ ['10人餐搭建', '3人餐不搭建']
+        （每段自带标记，互不污染，3人餐不会再被误标成搭建）
 
     ⚠️ 只按「真正的并列分隔符」拆，绝不能拆：
        - '10人餐×2'      （× 后面是份数，不是第二个套餐）
        - '3-4人餐'       （- 是人数区间）
-    拆之前先把「（搭建）/（不搭建）」这类服务标记摘出来，拆完再给每段补回去，
-    否则后半段会丢掉搭建信息。
     """
     s = (line or "").strip()
     if not s:
         return []
-    m = re.search(r"[（(]\s*(搭建|不搭建|自提|外送|不自理)\s*[）)]", s)
-    tag = ("（%s）" % m.group(1)) if m else ""
+    # 行尾的整体标记（如「10人餐+8人餐（搭建）」里的（搭建））→ 视为整行共享
+    m = re.search(r"[（(]\s*(搭建|不搭建|自提|外送|不自理)\s*[）)]\s*$", s)
+    shared_tag = ("（%s）" % m.group(1)) if m else ""
     body = (s[:m.start()] if m else s)
     parts = [p.strip() for p in re.split(r"[+＋，,、]+", body) if p and p.strip()]
     if len(parts) <= 1:
@@ -317,8 +322,12 @@ def _split_pkg_segments(line):
         return [s]
     out = []
     for p in parts:
-        # 只有带「N人」的段才是套餐；其余（如"加菜"）原样留着，_match_package_line 会返回 None
-        out.append((p + (" " + tag if tag else "")) if re.search(r"\d+\s*人", p) else p)
+        # 段内自带标记（如「10人餐搭建」「3人餐不搭建」）→ 原样保留，互不串味；
+        # 否则补上整行共享标记（若有）。不带「N人」的段（如"加菜"）原样留着。
+        if re.search(r"(搭建|不搭建|自提|外送|不自理)", p):
+            out.append(p)
+        else:
+            out.append(p + (shared_tag if shared_tag else ""))
     return out
 
 

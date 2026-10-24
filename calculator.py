@@ -19,10 +19,14 @@ def now_cst():
     return datetime.datetime.now(CST)
 
 
-def calc_order_tool_needs(order_id):
+def calc_order_tool_needs(order_id, only_setup=False):
     """只算某单需要的装备（套餐配的装备 + 备注追加的），**不依赖可用量**。
     单独抽出来是为了让"占用统计"能调用它而不会与 get_available_tool_stock() 递归。
     返回 {tool_id: {"total": n, "per_package": x, "order_qty": k}}
+
+    only_setup=True 时只累加「需要搭建」的套餐装备（order_packages.setup_flag=1），
+    用于搭建装备表——混单（10人餐搭建+3人餐不搭建）只算搭建部分的天幕/桌椅炉，
+    避免把半包套餐的天幕也算进去多带。默认 False=全部套餐（备餐/占用统计用）。
     """
     tool_demand = {}
     with get_db() as conn:
@@ -32,8 +36,11 @@ def calc_order_tool_needs(order_id):
         if not row:
             return {}
         raw_text = row["raw_text"] or ""
-        cur.execute("SELECT package_id, quantity FROM order_packages WHERE order_id = ?", (order_id,))
+        cur.execute("SELECT package_id, quantity, setup_flag FROM order_packages WHERE order_id = ?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
+        # 搭建装备表：只算搭建套餐
+        if only_setup:
+            pkgs = [p for p in pkgs if p.get("setup_flag") == 1]
 
         for pk in pkgs:
             cur.execute("""

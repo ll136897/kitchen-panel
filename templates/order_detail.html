@@ -191,13 +191,23 @@ function showRawOrder(){
   const t = ((o.raw_text || '') + '').trim();
   document.getElementById('rawText').textContent = t || '（该订单没有保留原始录入文本）';
   const diff = document.getElementById('rawDiff');
-  // 原单里的搭建字样：先判「不搭建」，否则判「搭建」
-  const rawSetup = /不搭建/.test(t) ? 0 : (/搭建/.test(t) ? 1 : null);
+  // 原单里的搭建字样：同时含「搭建」和「不搭建」= 混单（部分套餐搭建、部分半包），
+  // 此时只要系统解析结果含搭建（=1）即视为一致，不误报。
+  const rawHasBuild = /搭建/.test(t);
+  const rawHasNo = /不搭建/.test(t);
+  let rawSetup;
+  if(rawHasBuild && rawHasNo) rawSetup = 'mixed';
+  else if(rawHasNo) rawSetup = 0;
+  else if(rawHasBuild) rawSetup = 1;
+  else rawSetup = null;
   const parsed = o.setup_flag;
   if(rawSetup !== null){
-    const rawLabel = rawSetup === 1 ? '搭建' : '不搭建';
+    const rawLabel = rawSetup === 'mixed' ? '混合（部分搭建/部分半包）' : (rawSetup === 1 ? '搭建' : '不搭建');
     const parsedLabel = parsed === 1 ? '搭建' : (parsed === 0 ? '不搭建' : '未判定');
-    if(String(rawSetup) !== String(parsed)){
+    let mismatch;
+    if(rawSetup === 'mixed') mismatch = (parsed !== 1);   // 混单至少含一个搭建 → 解析应为 1
+    else mismatch = (String(rawSetup) !== String(parsed));
+    if(mismatch){
       diff.className = 'raw-diff warn';
       diff.style.display = 'block';
       diff.textContent = '⚠️ 不一致：原单写了「' + rawLabel + '」，但系统解析为「' + parsedLabel + '」，请核对。';
@@ -239,7 +249,7 @@ function loadDetail(){
       ${(o.discount ? `<div class="cell"><div class="k">🏷 优惠</div><div class="v" style="color:#c0392b">${o.discount>0?'-':'+'}¥${Math.abs(o.discount)}</div></div>` : '')}
       <div class="cell"><div class="k">🔒 押金</div><div class="v">¥${o.deposit||0} (${depMap[o.deposit_status]||'-'})</div></div>
       <div class="cell"><div class="k">💳 货款</div><div class="v">${payMap[o.payment_status]||'-'}</div></div>
-      <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>`${p.pkg_name}×${p.quantity}`).join('， ')||'-'}</div></div>
+      <div class="cell"><div class="k">🍱 套餐</div><div class="v">${(o.packages||[]).map(p=>{const sf=(p.pkg_setup!=null?p.pkg_setup:p.setup_flag);const tag=sf===1?'（搭建）':(sf===0?'（半包）':'');return `${p.pkg_name||''}×${p.quantity}${tag}`;}).join('， ')||'-'}</div></div>
       ${(o.setup_time ? `<div class="cell"><div class="k">🛠 搭建时间</div><div class="v">${o.setup_time}</div></div>` : '')}
       <div class="cell"><div class="k">🧾 记账</div><div class="v" style="font-size:13px">${(o.menu_name||((o.packages&&o.packages[0])?o.packages[0].pkg_name:'')||'-')}${o.setup_flag===1?' · 搭建':(o.setup_flag===0?' · 不搭建':'')}${o.delivery_fee?' · 配送¥'+o.delivery_fee:''}${o.delivery_person?' · '+o.delivery_person:''}${o.source?' · '+o.source:''}</div></div>
       <div class="cell"><div class="k">📋 状态</div><div class="v">${stMap[o.status]||o.status}</div></div>
