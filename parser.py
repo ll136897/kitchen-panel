@@ -198,7 +198,7 @@ def parse_order_text(raw_text):
         # 容忍字段名前有少量多余前缀（例如"对吧预约时间:9.25 17.00"），
         # 前缀不含冒号、最多 6 个字符，避免误吞其它内容。
         # 「客户姓名」是「联系人」的同义写法（微信确认文本里两种都有）
-        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|客户姓名|联系人|联系电话|金额|押金|用餐时间|搭建时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
+        m = re.match(r"^[^:：]{0,6}?(预约时间|预约项目|预约地址|地址|客户姓名|联系人|联系电话|金额|押金|用餐时间|搭建时间|收餐时间|备注)\s*[:：]\s*(.*)$", ln)
         if m:
             # 保存上一个字段
             if current_key is not None:
@@ -240,7 +240,7 @@ def parse_order_text(raw_text):
                         result["booking_time"] = _build_time(m.group(2), m.group(3), m.group(4), None, None)
         elif key == "预约项目":
             result["package_lines"] = value_lines
-        elif key == "预约地址":
+        elif key in ("预约地址", "地址"):
             result["address"] = value
         elif key in ("联系人", "客户姓名"):
             result["contact_name"] = value
