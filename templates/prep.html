@@ -246,6 +246,14 @@
   .bline2{font-size:12px;color:#3a2c20;margin-top:1px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bline3{font-size:11px;color:#6b5d52;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bnote{color:#c0392b;font-weight:700}
+  /* 原录入订单：默认收起，只占一行摘要，不占版面；点开才显示原文 */
+  .raw-drop{margin:0 12px 10px;font-size:13px}
+  .raw-drop>summary{cursor:pointer;color:var(--primary);font-weight:700;padding:5px 0;user-select:none;list-style:none}
+  .raw-drop>summary::-webkit-details-marker{display:none}
+  .raw-drop>summary:before{content:'▸ '}
+  .raw-drop[open]>summary:before{content:'▾ '}
+  .raw-drop pre{white-space:pre-wrap;word-break:break-all;background:#faf5ed;color:#6b5b4a;
+    border-radius:8px;padding:8px 10px;margin:4px 0 0;font-family:inherit;font-size:12.5px;line-height:1.5}
 
   /* 顶部摘要条 */
   .summary-bar{
@@ -884,7 +892,7 @@ function renderFocusHeader(o){
     else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
   }
   const t = orderTimeOf(o) || '';
-  const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
+  const pkgs = fmtPkgs(o).replace(/×/g,'·').replace(/ /g,'·');
   el.innerHTML = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   sub.innerHTML = `👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}` +
     (o.note && o.note!=='无' ? ` · 📝 ${o.note}` : '') +
@@ -972,9 +980,22 @@ function urgBadge(u){
 
 // ===== 简略备餐表（白板式）：按 时间/套餐/地点/出餐/送达 分组，送/出 直接打勾 =====
 function boardTime(o){ return ((o.meal_time||o.booking_time||'')+'').trim(); }
-function boardPkgTxt(o){
-  return (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ') || '套餐未记';
+// 套餐简略格式：单套餐的区间档（如 2-3人餐）取「人数上限」显示「3人餐」；
+// 多套餐（混单）保留完整名称不缩写（搭建/半包要逐项看清）。
+function pkgShort(name){
+  return (name||'').replace(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/g, '$2人餐');
 }
+function fmtPkgs(o){
+  const pkgs = o.packages || [];
+  if(!pkgs.length) return '套餐未记录';
+  if(pkgs.length === 1){
+    const p = pkgs[0];
+    return pkgShort(p.name) + (p.quantity>1 ? '×'+p.quantity : '');
+  }
+  return pkgs.map(p=>`${p.name||''}${p.quantity>1?'×'+p.quantity:''}`).join(' ');
+}
+function boardPkgTxt(o){ return fmtPkgs(o); }
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function boardPeople(o){
   let n=0;
   (o.packages||[]).forEach(p=>{ n += (p.people||0)*(p.quantity||1); });
@@ -1119,7 +1140,7 @@ function render(){
   });
   d.orders = orders;
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
-    const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+    const pkgs = fmtPkgs(o);
     // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
     const oDate = o.booking_date || '';
     const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
@@ -1314,7 +1335,7 @@ function renderByOrder(){
     } else {
       dateLabel = t || '待定';
     }
-    const pkgsTxt = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+    const pkgsTxt = fmtPkgs(o);
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
       <h3 style="margin:0">🍱 ${pkgsTxt||'套餐未记录'} · 📍 ${o.address||'—'} · 📅 ${dateLabel} · 👤 ${o.contact_name||'—'}</h3>
       <span>
@@ -1322,7 +1343,7 @@ function renderByOrder(){
         <button class="check-all-btn" onclick="doConsume(${o.id})" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#8e44ad;color:#fff;cursor:pointer;font-weight:700">📦 出库</button>
         <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
       </span>
-    </div><div class="muted" style="padding:16px">加载中...</div></div>`;
+    </div><details class="raw-drop"><summary>📄 原录入订单</summary><pre>${esc(o.own_raw_text || o.raw_text || '—')}</pre></details><div class="muted" style="padding:16px">加载中...</div></div>`;
   }).join('');
   d.orders.forEach(o=>{
     fetch('/api/orders/'+o.id+'/requirements').then(r=>r.json()).then(res=>{
@@ -1388,7 +1409,7 @@ function openOrderSheet(oid){
     else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
   }
   const t = orderTimeOf(o);
-  const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' · ');
+  const pkgs = fmtPkgs(o).replace(/×/g,'·').replace(/ /g,'·');
   document.getElementById('osTitle').textContent = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   document.getElementById('osBody').innerHTML =
     `<div class="os-sum">👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}</div>` +

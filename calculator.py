@@ -1100,10 +1100,10 @@ def calc_merged_prep(order_ids):
         cur = conn.cursor()
         for oid in order_ids:
             cur.execute("""
-                SELECT id, booking_date, booking_time, meal_time, address, contact_name,
-                       contact_phone, amount, status, note, delivered, served,
-                       created_by, created_by_name
-                FROM orders WHERE id = ?
+            SELECT id, booking_date, booking_time, meal_time, address, contact_name,
+                   contact_phone, amount, status, note, delivered, served,
+                   created_by, created_by_name, raw_text
+            FROM orders WHERE id = ?
             """, (oid,))
             r = cur.fetchone()
             if not r:
@@ -1116,6 +1116,14 @@ def calc_merged_prep(order_ids):
                 WHERE op.order_id = ?
             """, (oid,))
             o["packages"] = [dict(x) for x in cur.fetchall()]
+            # 备餐「按订单」视图要显示"原录入订单"原文：用 own_raw_block 切出本单片段，
+            # 避免批量粘贴多单时把别人的原文也带出来。
+            try:
+                from parser import own_raw_block as _orb
+                o["own_raw_text"] = _orb(o.get("raw_text"), o.get("contact_name"),
+                                         o.get("contact_phone"), o.get("amount"), o.get("address"))
+            except Exception:
+                o["own_raw_text"] = o.get("raw_text") or ""
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 
