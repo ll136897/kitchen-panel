@@ -1812,8 +1812,8 @@ def list_orders():
         o["packages"] = [dict(r) for r in pkgs]
         # 订单级 setup_flag 优先用「各套餐标记汇总」：任一搭建=搭建（混单 10人餐搭建+3人餐不搭建 判为搭建）；
         # 全部不搭建=不搭建；都为空才退回价格推导。这样混单不会被 raw_text 里的「不搭建」误判成不搭建。
+        _flags = [r["pkg_setup"] for r in pkgs]
         if o.get("setup_flag") is None:
-            _flags = [r["pkg_setup"] for r in pkgs]
             if any(f == 1 for f in _flags):
                 o["setup_flag"] = 1
             elif _flags and all(f == 0 for f in _flags if f is not None) and all(f is not None for f in _flags):
@@ -1824,6 +1824,13 @@ def list_orders():
                 g_setup, _g_fee, _why = _guess_setup_and_fee(
                     db, price_total, pkg_qty, o.get("amount"), o.get("address"), o.get("note"), o.get("raw_text"))
                 o["setup_flag"] = g_setup  # 仅用于前端展示；库里 setup_flag 已由原始文字(搭建/不搭建)回填，这里只读不写
+        # 套餐级筛选标记：任一搭建=可命中「搭建」筛选；任一半包=可命中「不搭建」筛选（混单两个都命中）。
+        # 供前端「搭建/不搭建」筛选把混单同时归进两边，而不是只归一边。
+        o["has_setup"] = any(f == 1 for f in _flags)
+        o["has_nosetup"] = any(f == 0 for f in _flags)
+        if not _flags:  # 套餐没解析出标记，退回订单级
+            o["has_setup"] = (o.get("setup_flag") == 1)
+            o["has_nosetup"] = (o.get("setup_flag") == 0)
     deleted_count = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE deleted_at IS NOT NULL").fetchone()[0]
     return jsonify({"ok": True, "data": orders, "deleted_count": deleted_count})
@@ -4386,6 +4393,7 @@ def finance_profit_overview():
     _params = list(_sp) + list(_stp)
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
                          extra_clause=_clause, extra_params=_params)
+    _annotate_setup_flags(g.db, ov.get("orders", []))
     return jsonify({"ok": True, "data": ov})
 
 
@@ -4401,7 +4409,31 @@ def finance_period_real_profit():
     _params = list(_sp) + list(_stp)
     ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
                             extra_clause=_clause, extra_params=_params)
+    _annotate_setup_flags(g.db, ov.get("orders", []))
     return jsonify({"ok": True, "data": ov})
+
+
+def _annotate_setup_flags(db, orders):
+    """给财务页订单补「是否含搭建/含半包」套餐级标记，供「搭建/不搭建」筛选把混单同时归进两边。
+    纯展示字段，不动 profit.py 的成本计算；无套餐解析结果时退回订单级 setup（与列表接口同口径）。"""
+    ids = [o.get("id") for o in orders if o.get("id")]
+    if not ids:
+        return
+    ph = ",".join("?" * len(ids))
+    cur = db.cursor()
+    rows = cur.execute(
+        f"SELECT order_id, setup_flag FROM order_packages WHERE order_id IN ({ph})", ids
+    ).fetchall()
+    m = {}
+    for r in rows:
+        m.setdefault(r["order_id"], []).append(r["setup_flag"])
+    for o in orders:
+        flags = m.get(o.get("id"), [])
+        o["has_setup"] = any(f == 1 for f in flags)
+        o["has_nosetup"] = any(f == 0 for f in flags)
+        if not flags:  # 套餐没解析出标记，退回订单级
+            o["has_setup"] = (o.get("setup") == 1)
+            o["has_nosetup"] = (o.get("setup") == 0)
 
 
 # ===== 门店支出台账（2026-10-08）=====

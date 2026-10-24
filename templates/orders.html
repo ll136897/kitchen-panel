@@ -104,6 +104,7 @@
   .st-badge{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;line-height:1;white-space:nowrap}
   .st-badge.setup{background:#e7f6ec;color:#1b7a43;border:1px solid #b7e3c6}
   .st-badge.nosetup{background:#f3f1ee;color:#7a7066;border:1px solid #e3ded7}
+  .st-badge.mixed{background:#fff4e0;color:#b4690e;border:1px solid #f0c98a}
   .st-badge.unknown{display:none}
   /* 卡片头部右侧：搭建/不搭建徽标 + 归属 + 状态 同一行，空间不够才换行 */
   .oh-right{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
@@ -277,23 +278,36 @@ function statusLabel(s){
   };
   return map[s] || ['未知','tag-gray'];
 }
-// 搭建 / 不搭建 徽标：手工填过 setup_flag 的优先，否则用列表接口已推导好的值（与导出同口径）
+// 搭建 / 不搭建 / 混单 徽标：按套餐级标记（has_setup/has_nosetup）决定。
+// 混单=同时含搭建与半包，单独显示「混单」徽标，并能在两个筛选里都命中。
 function setupBadge(o){
-  const f = o.setup_flag;
-  if(f !== 1 && f !== 0) return `<span class="st-badge unknown"></span>`;  // 未知：不显示、不可点
-  const isSetup = (f === 1);
+  const hs = !!o.has_setup, hn = !!o.has_nosetup;
+  if(!hs && !hn) return `<span class="st-badge unknown"></span>`;  // 未知：不显示、不可点
+  if(hs && hn){
+    const active = (String(filterSetup)==='1' || String(filterSetup)==='0');
+    const title = active ? '✓ 已筛混单（含搭建+半包）· 点击取消' : '点击筛出含搭建与半包的混单';
+    return `<span class="st-badge mixed clickable${active?' active':''}" title="${title}" onclick="clickSetupChip(${o.id})">🏕️+🚫 混单</span>`;
+  }
+  const isSetup = hs;
   const t = isSetup ? '搭建' : '不搭建';
-  const active = (String(filterSetup) === String(f));
+  const active = (String(filterSetup) === String(isSetup?1:0));
   const title = active ? `✓ 已筛「${t}」单 · 点击取消` : `点击筛出所有「${t}」单`;
   return `<span class="st-badge ${isSetup?'setup':'nosetup'} clickable${active?' active':''}" title="${title}" onclick="clickSetupChip(${o.id})">${isSetup?'🏕️ 搭建':'🚫 不搭建'}</span>`;
 }
-// 点卡片上的搭建/不搭建徽标 → 按该类型筛选；再点一次 = 取消（与归属标签同口径）
-function setupKey(o){ const f = o.setup_flag; return (f===1||f===0) ? f : null; }
+// 点卡片上的搭建/不搭建/混单徽标 → 按对应类型筛选；再点一次 = 取消（与归属标签同口径）
+function setupKey(o){
+  if(o.has_setup && o.has_nosetup) return 'mixed';
+  if(o.has_setup) return 1;
+  if(o.has_nosetup) return 0;
+  return null;
+}
 function clickSetupChip(oid){
   const o = allOrders.find(x=>x.id===oid) || {};
   const k = setupKey(o);
   if(k===null) return;
-  setOrderSetup(String(filterSetup) === String(k) ? '' : k);
+  // 混单默认切到「搭建」筛选（再点徽标可切到「不搭建」）；纯搭建/半包切到对应值
+  const target = (k==='mixed') ? '1' : String(k);
+  setOrderSetup(String(filterSetup) === target ? '' : target);
 }
 function setOrderSetup(v){ filterSetup = v; renderOrders(); }
 function cardClass(s){ return s in {pending:1,preparing:1,done:1,cancelled:1} ? s : ''; }
@@ -743,7 +757,8 @@ function renderOrders(){
   // 注：归属筛选已由后端 /api/orders?by= 处理（见 loadOrders），此处不再做内存过滤，
   // 避免与备餐页行为不一致、以及"前端假过滤但 KPI 仍显示全量"的数字对不上。
   if(filterSetup !== ''){
-    scope = scope.filter(o=> String(setupKey(o)) === String(filterSetup));
+    // 套餐级筛选：搭建=含任一搭建套餐；不搭建=含任一半包套餐；混单两个都命中
+    scope = scope.filter(o=> filterSetup==='1' ? !!o.has_setup : !!o.has_nosetup);
   }
   if(filterText){
     const q = filterText.toLowerCase();
@@ -1055,7 +1070,7 @@ async function openPrepModal(id){
 function closePrepModal(){ document.getElementById('prepModal').classList.remove('show'); }
 function prepReqHtml(req, o){
   const pkgs = (o.packages||[]);
-  const pkgHtml = pkgs.length ? pkgs.map(p=>`<span class="chip pkg">${escHtml(p.name)} · ${p.people||'?'}人 × ${p.quantity}${o.setup_flag?'（搭建）':''}</span>`).join(' ') : '<span class="muted">无套餐</span>';
+  const pkgHtml = pkgs.length ? pkgs.map(p=>`<span class="chip pkg">${escHtml(p.name)} · ${p.people||'?'}人 × ${p.quantity}${p.pkg_setup===1?'（搭建）':(p.pkg_setup===0?'（半包）':'')}</span>`).join(' ') : '<span class="muted">无套餐</span>';
   const ings = req.ingredients||[];
   const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 素菜',side:'🥗 小菜',sauce:'🧂 小料',drink:'🎁 赠品',staple:'🍚 主食',other:'📦 其他',packaging:'📦 食材包装',utensil:'🍱 客户餐具'};
   const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#666',other:'#666',packaging:'#d35400',utensil:'#8e44ad'};

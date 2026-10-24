@@ -169,6 +169,7 @@
     padding:0 5px;border-radius:999px;font-size:11px;line-height:1;white-space:nowrap}
   .st-ic.setup{background:#e7f6ec;border:1px solid #b7e3c6}
   .st-ic.nosetup{background:#f3f1ee;border:1px solid #e3ded7}
+  .st-ic.mixed{background:#fff4e0;border:1px solid #f0c98a}
   .st-ic.unknown{display:none}
   /* 显示时 JS 设 display:flex。
      ⚠️ 宽度必须**钉死**为 min(92vw,440px)，不许用 width:max-content / 自适应——
@@ -1245,11 +1246,12 @@ function custNameHtml(o){
   const nm = kpiEsc(o.contact_name || '-');
   return `<span class="cust-pop" onclick="toggleRawPop(${o.id}, event)" title="${nm}（点一下看原始订单记录）">${nm}</span>`;
 }
-// 搭建图标：搭建=🏕️绿（要收搭建费）、不搭建=🚫灰（半包不收），未判定不显示
+// 搭建图标：搭建=🏕️绿（要收搭建费）、不搭建=🚫灰（半包不收）、混单=🏕️🚫橙（两边都筛得到），未判定不显示
 function setupIcon(o){
-  const f = o.setup;
-  if(f !== 1 && f !== 0) return '<span class="st-ic unknown"></span>';
-  return f === 1
+  const hs = !!o.has_setup, hn = !!o.has_nosetup;
+  if(!hs && !hn) return '<span class="st-ic unknown"></span>';
+  if(hs && hn) return '<span class="st-ic mixed" title="混单（含搭建+半包，搭建/不搭建筛选都能命中）">🏕️🚫</span>';
+  return hs
     ? '<span class="st-ic setup" title="搭建（收搭建费）">🏕️</span>'
     : '<span class="st-ic nosetup" title="不搭建（半包，不收搭建费）">🚫</span>';
 }
@@ -1567,7 +1569,8 @@ function cycleMgSetup(){
 }
 function mgFiltered(list){
   if(mgSetup === null) return list;
-  return list.filter(o=> o.setup === mgSetup);
+  // 套餐级筛选：搭建=含任一搭建套餐；不搭建=含任一半包套餐；混单两个都命中
+  return list.filter(o=> mgSetup===1 ? !!o.has_setup : !!o.has_nosetup);
 }
 function kpiMargin(){
   const os = ordersOf(), t = totOf();
