@@ -36,12 +36,47 @@ def calc_order_tool_needs(order_id, only_setup=False):
         if not row:
             return {}
         raw_text = row["raw_text"] or ""
-        cur.execute("SELECT package_id, quantity, setup_flag FROM order_packages WHERE order_id = ?", (order_id,))
+        cur.execute("SELECT package_id, quantity, setup_flag, people FROM order_packages WHERE order_id = ?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
         # 搭建装备表：只算搭建套餐
         if only_setup:
             pkgs = [p for p in pkgs if p.get("setup_flag") == 1]
 
+        # 天幕/蛋卷桌/椅子：按「人数规则」在搭建套餐上计算（混单只计搭建单，不搭建套餐不带这三项）。
+        # 说明：这些规则此前只在单套餐成本页(calc_*_package)生效，订单级装备表/占用统计漏用了，这里补齐。
+        cur.execute("SELECT id, name FROM tools")
+        _tid = {r["name"]: r["id"] for r in cur.fetchall()}
+        TM, TBL, CHAIR = _tid.get("天幕"), _tid.get("蛋卷桌"), _tid.get("椅子")
+        setup_pkgs = [p for p in pkgs if p.get("setup_flag") == 1]
+
+        def _tm_qty(people):
+            # ≤10人餐1顶；13人(>10)默认2顶（额外情况可在备注写「1天幕」覆盖为1）
+            return 1 if (people or 0) <= 10 else 2
+
+        def _table_qty(people):
+            # 3/4人餐1个，6/8人餐2个，10人餐3个（即 ceil(people/4)）
+            return max(1, (people + 3) // 4)
+
+        for pk in setup_pkgs:
+            people = pk.get("people") or 0
+            qty = pk.get("quantity") or 1
+            if TM is not None:
+                d = tool_demand.setdefault(TM, {"total": 0, "per_package": 0, "order_qty": 0})
+                d["total"] += _tm_qty(people) * qty
+                d["per_package"] = _tm_qty(people)
+                d["order_qty"] += qty
+            if TBL is not None:
+                d = tool_demand.setdefault(TBL, {"total": 0, "per_package": 0, "order_qty": 0})
+                d["total"] += _table_qty(people) * qty
+                d["per_package"] = _table_qty(people)
+                d["order_qty"] += qty
+            if CHAIR is not None:
+                d = tool_demand.setdefault(CHAIR, {"total": 0, "per_package": 0, "order_qty": 0})
+                d["total"] += people * qty
+                d["per_package"] = people
+                d["order_qty"] += qty
+
+        # 其余工具（卡式炉/烤盘/燃气罐/夹子/剪刀等）：按套餐 package_tools 现有配置累加
         for pk in pkgs:
             cur.execute("""
                 SELECT pt.per_package, t.id, t.name
@@ -50,6 +85,8 @@ def calc_order_tool_needs(order_id, only_setup=False):
                 WHERE pt.package_id = ?
             """, (pk["package_id"],))
             for r in cur.fetchall():
+                if r["id"] in (TM, TBL, CHAIR):
+                    continue  # 这三项已按人数规则算
                 amount = r["per_package"] * pk["quantity"]
                 if r["id"] not in tool_demand:
                     tool_demand[r["id"]] = {"total": 0, "per_package": r["per_package"], "order_qty": 0}

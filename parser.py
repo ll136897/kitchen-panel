@@ -507,16 +507,17 @@ def _parse_extra_tools(note):
     for seg in segments:
         events = []
         for m in num_re.finditer(seg):
-            events.append((m.start(), 'num', _num_from_str(m.group(1))))
+            events.append((m.start(), 'num', _num_from_str(m.group(1)), m.end()))
         for name, std in pairs:
             for m in re.finditer(re.escape(name), seg):
-                events.append((m.start(), 'tool', (name, std)))
+                events.append((m.start(), 'tool', (name, std), m.end()))
         events.sort(key=lambda e: e[0])
         num = None
         ptr = 0                      # 上一个事件结束位置
-        for pos, typ, val in events:
+        for pos, typ, val, end in events:
             if typ == 'num':
                 num = val
+                ptr = max(ptr, end)  # 前进到数字结束位置，避免多位数字(如"10")残留到 gap 里
             elif typ == 'tool':
                 name, std = val
                 gap = seg[ptr:pos]
@@ -535,7 +536,7 @@ def _parse_extra_tools(note):
                     # 无数字但有"配/带/拿/加/备/要+物品" → 默认1
                     if re.search(r"(配|带|拿|加|备|要)\S{0,3}?" + re.escape(name), seg):
                         result[std] = {"qty": 1, "mode": _detect_mode(seg)}
-            ptr = pos + (len(val) if typ == 'tool' else 1)
+            ptr = max(ptr, end)
     return result
 
 
