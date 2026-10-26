@@ -169,10 +169,11 @@ def _setup_from_text(text):
     return None
 
 
-def _order_setup(db, o, cfg):
+def _order_setup(db, o, cfg, pkgs=None):
     """搭建判定（0/1）：手工 setup_flag 优先；否则按价格推导。
     规则与 app._guess_setup_and_fee 一致——半包(金额≈正价−搭建费)即不搭建。
-    无正价信息时保守返回 0（不搭建），避免误收搭建费。"""
+    无正价信息时保守返回 0（不搭建），避免误收搭建费。
+    pkgs：批量预取时传入本单套餐列表，避免再查库。"""
     sf = o.get("setup_flag")
     if sf is not None:
         return 1 if sf == 1 else 0
@@ -192,13 +193,17 @@ def _order_setup(db, o, cfg):
     address = (o.get("address") or "")
     amount = float(o.get("amount") or 0)
     note = (o.get("note") or "")
-    row = db.execute(
-        """SELECT COALESCE(SUM(COALESCE(op.price, p.price) * op.quantity), 0) AS pt,
-                  COALESCE(SUM(op.quantity), 0) AS qty
-           FROM order_packages op LEFT JOIN packages p ON p.id = op.package_id
-           WHERE op.order_id = ?""", (o.get("id"),)).fetchone()
-    total = float(row["pt"] or 0)
-    qty = int(row["qty"] or 1) or 1
+    if pkgs is not None:
+        total = float(sum(((r.get("price") if r.get("price") is not None else r.get("pkg_price") or 0) * (r.get("quantity") or 0)) for r in pkgs) or 0)
+        qty = int(sum(r.get("quantity") or 0 for r in pkgs) or 1) or 1
+    else:
+        row = db.execute(
+            """SELECT COALESCE(SUM(COALESCE(op.price, p.price) * op.quantity), 0) AS pt,
+                      COALESCE(SUM(op.quantity), 0) AS qty
+               FROM order_packages op LEFT JOIN packages p ON p.id = op.package_id
+               WHERE op.order_id = ?""", (o.get("id"),)).fetchone()
+        total = float(row["pt"] or 0)
+        qty = int(row["qty"] or 1) or 1
     if total <= 0:
         return 0
     place = match_place(address, cfg)
@@ -234,43 +239,59 @@ def _delivery_cost(o, setup):
 
 
 # ---------- 成本明细 ----------
-def _food_cost(db, oid):
+def _food_cost(db, oid, o=None, pkgs=None, dishes=None):
     """食材成本 = 套餐食材净需求×单价 + 单点菜品报价。
 
     套餐食材净需求（含备注加菜 set/add + 换菜份数换算）走 calculator.calc_order_ingredient_net，
     与备餐页共用同一函数，保证财务成本与备餐用量口径一致（换菜前成本虚高/换入漏算的问题消除）。
     单点菜品按菜品报价另算，保持原口径。
+    o/pkgs/dishes：批量预取时传入，避免逐单查库（未传则按原逻辑查）。
     """
     cur = db.cursor()
-    from calculator import calc_order_ingredient_net
-    net = calc_order_ingredient_net(oid)
+    from calculator import (calc_order_ingredient_net, _ING_BY_ID, _CALC_PRIMED,
+                            _DISH, _DISH_ING)
+    net = calc_order_ingredient_net(oid, _order=o, _pkgs=pkgs)
     cost = 0.0
     for ing_id, info in net.items():
-        r = cur.execute("SELECT COALESCE(cost,0) AS c FROM ingredients WHERE id=?", (ing_id,)).fetchone()
-        cost += float(info["total"]) * float((r["c"] if r else 0) or 0)
+        if _CALC_PRIMED and ing_id in _ING_BY_ID:
+            c = float(_ING_BY_ID[ing_id].get("cost") or 0)
+        else:
+            r = cur.execute("SELECT COALESCE(cost,0) AS c FROM ingredients WHERE id=?", (ing_id,)).fetchone()
+            c = float((r["c"] if r else 0) or 0)
+        cost += float(info["total"]) * c
     # 单点菜品：按菜品报价（保持原口径，不与食材净量混算）
-    dishes = cur.execute("""
-        SELECT od.quantity, d.id AS dish_id, COALESCE(d.cost,0) AS dish_cost
-        FROM order_dishes od LEFT JOIN dishes d ON od.dish_id = d.id
-        WHERE od.order_id = ?
-    """, (oid,)).fetchall()
+    if dishes is None:
+        dishes = cur.execute("SELECT od.quantity, od.dish_id FROM order_dishes od WHERE od.order_id = ?", (oid,)).fetchall()
     for d in dishes:
-        unit = float(d["dish_cost"] or 0)
-        if unit <= 0 and d["dish_id"]:
-            r = cur.execute("""
-                SELECT COALESCE(SUM(di.amount * COALESCE(i.cost,0)),0) AS c
-                FROM dish_ingredients di JOIN ingredients i ON di.ingredient_id = i.id
-                WHERE di.dish_id = ?
-            """, (d["dish_id"],)).fetchone()
-            unit = float(r["c"] or 0)
-        cost += unit * float(d["quantity"] or 0)
+        dish_id = d["dish_id"]
+        qty = float(d.get("quantity") or 0)
+        if _CALC_PRIMED and dish_id in _DISH:
+            unit = float(_DISH[dish_id].get("cost") or 0)
+            if unit <= 0:
+                unit = float(sum((amt * float(_ING_BY_ID.get(iid, {}).get("cost", 0) or 0))
+                                 for amt, iid in _DISH_ING.get(dish_id, [])) or 0)
+        else:
+            r = cur.execute("SELECT COALESCE(d.cost,0) AS c FROM dishes d WHERE d.id=?", (dish_id,)).fetchone()
+            unit = float((r["c"] if r else 0) or 0)
+            if unit <= 0 and dish_id:
+                rr = cur.execute("""
+                    SELECT COALESCE(SUM(di.amount * COALESCE(i.cost,0)),0) AS c
+                    FROM dish_ingredients di JOIN ingredients i ON di.ingredient_id = i.id
+                    WHERE di.dish_id = ?
+                """, (dish_id,)).fetchone()
+                unit = float((rr["c"] if rr else 0) or 0)
+        cost += unit * qty
     return round(cost, 2)
 
 
 
-def _overrides(db, oid):
-    """该单手工设过的成本项：{kind: row} + 其他项列表"""
-    rows = db.execute("SELECT * FROM order_costs WHERE order_id=? ORDER BY id", (oid,)).fetchall()
+def _overrides(db, oid, costs=None):
+    """该单手工设过的成本项：{kind: row} + 其他项列表。
+    costs：批量预取时传入本单 order_costs 列表，避免再查库。"""
+    if costs is None:
+        rows = db.execute("SELECT * FROM order_costs WHERE order_id=? ORDER BY id", (oid,)).fetchall()
+    else:
+        rows = costs
     fixed, extras = {}, []
     for r in rows:
         d = dict(r)
@@ -281,23 +302,29 @@ def _overrides(db, oid):
     return fixed, extras
 
 
-def _auto_items(db, oid, cfg, setup=None):
+def _auto_items(db, oid, cfg, setup=None, o=None, pkgs=None, dishes=None):
     """自动算出的成本项（未手工覆盖前的默认值）。
     搭建费：仅搭建(全包)单征收；不搭建(半包/自送)一律不计。
-    配送费：仅不搭建单、且为平台配送时计（自提/老板送=0）。"""
+    配送费：仅不搭建单、且为平台配送时计（自提/老板送=0）。
+    o/pkgs/dishes：批量预取时传入，避免逐单查库（未传则按原逻辑查）。"""
     cur = db.cursor()
-    o = cur.execute("SELECT address, setup_flag, delivery_person, delivery_fee FROM orders WHERE id=?", (oid,)).fetchone()
-    o = dict(o) if o else {}
+    if o is None:
+        o = cur.execute("SELECT address, setup_flag, delivery_person, delivery_fee FROM orders WHERE id=?", (oid,)).fetchone()
+        o = dict(o) if o else {}
     address = (o.get("address") or "") or ""
-    r = cur.execute("""
-        SELECT COALESCE(SUM(op.quantity),0) AS qty, COALESCE(SUM(op.people),0) AS people
-        FROM order_packages op WHERE op.order_id=?
-    """, (oid,)).fetchone()
+    if pkgs is None:
+        r = cur.execute("""
+            SELECT COALESCE(SUM(op.quantity),0) AS qty, COALESCE(SUM(op.people),0) AS people
+            FROM order_packages op WHERE op.order_id=?
+        """, (oid,)).fetchone()
+    else:
+        r = {"qty": sum(x.get("quantity") or 0 for x in pkgs),
+             "people": sum(x.get("people") or 0 for x in pkgs)}
     place = match_place(address, cfg)
     out_price = float((place or {}).get("outsource") if place else cfg.get("default_outsource", 100) or 0)
     units = outsource_units(r["people"], r["qty"], cfg.get("people_per_unit", 10))
     if setup is None:
-        setup = _order_setup(db, o, cfg)
+        setup = _order_setup(db, o, cfg, pkgs=pkgs)
     d = cfg.get("defaults", {})
     # 打包切配人工：首单 + 每多一个"单"（单价更低，单越大越省）
     l_first = float(cfg.get("labor_first", 40) or 0)
@@ -315,7 +342,7 @@ def _auto_items(db, oid, cfg, setup=None):
     # —— 配送费：仅不搭建单、且为平台配送；自提/老板送=0 ——
     fuel_amount, fuel_detail = _delivery_cost(o, setup)
     return {
-        "food": {"amount": _food_cost(db, oid)},
+        "food": {"amount": _food_cost(db, oid, o=o, pkgs=pkgs, dishes=dishes)},
         "outsource": {"amount": outsource_amount, "qty": units, "unit_price": out_price,
                       "detail": outsource_detail},
         "fuel": {"amount": fuel_amount, "detail": fuel_detail},
@@ -324,18 +351,31 @@ def _auto_items(db, oid, cfg, setup=None):
     }
 
 
-def order_profit(db, oid, cfg=None):
-    """单笔订单的完整利润账"""
+def order_profit(db, oid, cfg=None, bulk=None):
+    """单笔订单的完整利润账。
+    bulk：period_overview 批量预取的 {orders, pkgs, costs, dishes, month_counts}，
+          传入后本函数零额外查库（仅字典查表），大幅降低全量计算耗时；不传则按原逻辑查。"""
     cfg = cfg or get_config(db)
     cur = db.cursor()
-    o = cur.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        return None
-    o = dict(o)
+    if bulk is not None:
+        o = bulk["orders"].get(oid)
+        if not o:
+            return None
+        _pkgs = bulk["pkgs"].get(oid, [])
+        _costs = bulk["costs"].get(oid, [])
+        _dishes = bulk["dishes"].get(oid, [])
+    else:
+        o = cur.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+        if not o:
+            return None
+        o = dict(o)
+        _pkgs = None
+        _costs = None
+        _dishes = None
     revenue = float(o.get("amount") or 0)
-    setup = _order_setup(db, o, cfg)
-    auto = _auto_items(db, oid, cfg, setup=setup)
-    fixed, extras = _overrides(db, oid)
+    setup = _order_setup(db, o, cfg, pkgs=_pkgs)
+    auto = _auto_items(db, oid, cfg, setup=setup, o=o, pkgs=_pkgs, dishes=_dishes)
+    fixed, extras = _overrides(db, oid, costs=_costs)
 
     items, cost_total = [], 0.0
     for kind in ("food", "outsource", "fuel", "labor", "consume"):
@@ -373,12 +413,18 @@ def order_profit(db, oid, cfg=None):
     cost_total = round(cost_total, 2)
     cash_profit = round(revenue - cost_total, 2)
     # 配送费是代收代付（收多少基本付给搭建师傅多少）→ 算真实毛利率时从收入里扣掉，作分母
-    _dv = cur.execute("""
-        SELECT COALESCE(SUM((p.price - p.base_price) * op.quantity),0) AS dv
-        FROM order_packages op JOIN packages p ON op.package_id = p.id
-        WHERE op.order_id = ?
-    """, (oid,)).fetchone()
-    delivery_passthrough = round(float(_dv["dv"] or 0), 2)
+    if bulk is not None:
+        delivery_passthrough = round(float(sum(
+            ((r.get("price") if r.get("price") is not None else r.get("pkg_price") or 0)
+             - (r.get("pkg_base_price") or 0)) * (r.get("quantity") or 0)
+            for r in _pkgs)) or 0, 2)
+    else:
+        _dv = cur.execute("""
+            SELECT COALESCE(SUM((p.price - p.base_price) * op.quantity),0) AS dv
+            FROM order_packages op JOIN packages p ON op.package_id = p.id
+            WHERE op.order_id = ?
+        """, (oid,)).fetchone()
+        delivery_passthrough = round(float(_dv["dv"] or 0), 2)
     margin_base = round(revenue - delivery_passthrough, 2)
     margin = round(cash_profit / margin_base * 100, 1) if margin_base > 0 else 0.0
     # 固定开销摊销
@@ -386,12 +432,16 @@ def order_profit(db, oid, cfg=None):
     per_month = float(cfg.get("fixed_orders_per_month", 0) or 0)
     if fixed_monthly > 0:
         if per_month <= 0:
-            row = cur.execute("""
-                SELECT COUNT(*) AS c FROM orders
-                WHERE deleted_at IS NULL AND status!='cancelled'
-                  AND substr(booking_date,1,7) = substr(COALESCE(?, datetime('now','localtime')),1,7)
-            """, (o.get("booking_date"),)).fetchone()
-            per_month = float(row["c"] or 1) or 1.0
+            if bulk is not None:
+                _ym = (o.get("booking_date") or "")[:7]
+                per_month = float(bulk["month_counts"].get(_ym, 1) or 1)
+            else:
+                row = cur.execute("""
+                    SELECT COUNT(*) AS c FROM orders
+                    WHERE deleted_at IS NULL AND status!='cancelled'
+                      AND substr(booking_date,1,7) = substr(COALESCE(?, datetime('now','localtime')),1,7)
+                """, (o.get("booking_date"),)).fetchone()
+                per_month = float(row["c"] or 1) or 1.0
         fixed_alloc = round(fixed_monthly / per_month, 2)
     else:
         fixed_alloc = 0.0
@@ -406,11 +456,14 @@ def order_profit(db, oid, cfg=None):
         level = "ok"
 
     # 这单**原始录入信息**：财务页改成本时要能对着看，免得改错单（2026-10-14）
-    _pkgs = cur.execute("""
-        SELECT op.quantity, op.people, op.price, op.setup_flag, p.name AS pkg_name
-        FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
-        WHERE op.order_id = ? ORDER BY op.id
-    """, (oid,)).fetchall()
+    if bulk is not None:
+        _pkgs_info = _pkgs
+    else:
+        _pkgs_info = cur.execute("""
+            SELECT op.quantity, op.people, op.price, op.setup_flag, p.name AS pkg_name
+            FROM order_packages op LEFT JOIN packages p ON op.package_id = p.id
+            WHERE op.order_id = ? ORDER BY op.id
+        """, (oid,)).fetchall()
     order_info = {
         "order_id": oid,
         "contact_name": o.get("contact_name") or "",
@@ -433,7 +486,7 @@ def order_profit(db, oid, cfg=None):
                       "people": dict(_p).get("people"),
                       "quantity": dict(_p).get("quantity"),
                       "price": dict(_p).get("price"),
-                      "setup_flag": dict(_p).get("setup_flag")} for _p in _pkgs],
+                      "setup_flag": dict(_p).get("setup_flag")} for _p in _pkgs_info],
     }
 
     return {
@@ -471,6 +524,35 @@ def order_profit(db, oid, cfg=None):
 
 
 # ---------- 期间汇总 ----------
+def _build_profit_bulk(db, oids):
+    """一次性批量预取指定订单的全部关联数据与参考表，供 period_overview / period_real_profit
+    在循环内用字典查表代替逐单查库（消除 N+1）。返回 dict：
+      orders: {oid: 全字段行}
+      pkgs:   {oid: [order_packages 行(含 pkg_name/pkg_base_price/pkg_price)]}
+      costs:  {oid: [order_costs 行]}
+      dishes: {oid: [order_dishes 行]}
+      month_counts: {ym: 当月有效订单数}（供固定开销摊销，与逐单查库结果一致）。"""
+    if not oids:
+        return {"orders": {}, "pkgs": {}, "costs": {}, "dishes": {}, "month_counts": {}}
+    ph = ",".join("?" * len(oids))
+    orders = {r["id"]: dict(r) for r in db.execute("SELECT * FROM orders WHERE id IN (%s)" % ph, oids)}
+    pkgs = {}
+    for r in db.execute(
+        "SELECT op.*, p.base_price AS pkg_base_price, p.price AS pkg_price, p.name AS pkg_name "
+        "FROM order_packages op LEFT JOIN packages p ON p.id = op.package_id WHERE op.order_id IN (%s)" % ph, oids):
+        pkgs.setdefault(r["order_id"], []).append(dict(r))
+    costs = {}
+    for r in db.execute("SELECT * FROM order_costs WHERE order_id IN (%s)" % ph, oids):
+        costs.setdefault(r["order_id"], []).append(dict(r))
+    dishes = {}
+    for r in db.execute("SELECT * FROM order_dishes WHERE order_id IN (%s)" % ph, oids):
+        dishes.setdefault(r["order_id"], []).append(dict(r))
+    mc = {}
+    for r in db.execute("SELECT substr(booking_date,1,7) ym, COUNT(*) c FROM orders WHERE deleted_at IS NULL AND status!='cancelled' GROUP BY ym"):
+        mc[r["ym"]] = r["c"]
+    return {"orders": orders, "pkgs": pkgs, "costs": costs, "dishes": dishes, "month_counts": mc}
+
+
 def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
     """期间利润汇总：现金口径 + 含固定开销摊销口径
     extra_clause/extra_params：额外过滤（如按"归属" by= 筛选），直接拼进 WHERE。
@@ -490,6 +572,11 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
         params.extend(extra_params)
     rows = cur.execute("SELECT o.id, o.created_by, u.name AS created_by_name FROM orders o LEFT JOIN users u ON u.id=o.created_by WHERE %s ORDER BY o.booking_date DESC, o.id DESC" % clause,
                        params).fetchall()
+    # 批量预取：一次性把所有订单关联数据与参考表装进内存，逐单计算改走字典查表
+    # （消除 N+1，免费实例上全量计算从十几秒降到亚秒级）
+    from calculator import prime_calc_cache, clear_calc_cache
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows])
+    prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
                        "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
@@ -497,7 +584,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
                        "fixed_alloc": 0.0}
     by_kind = {}
     for r in rows:
-        p = order_profit(db, r["id"], cfg)
+        p = order_profit(db, r["id"], cfg, bulk=bulk)
         if not p:
             continue
         food = next((i["amount"] for i in p["items"] if i["kind"] == "food"), 0.0)
@@ -542,6 +629,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
             "fixed_alloc": p.get("fixed_alloc", 0.0),
             "by_kind": bk,                      # 这一单的成本分项（供"成本明细"逐单展开）
         })
+    clear_calc_cache()
     tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
     tot["order_cnt"] = len(orders)
     tot["by_kind"] = {k: round(v, 2) for k, v in by_kind.items()}
@@ -619,6 +707,10 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
         d = r["booking_date"] or ""
         cnt_by_date[d] = cnt_by_date.get(d, 0) + 1
 
+    # 批量预取：消除 N+1，免费实例上全量计算从十几秒降到亚秒级
+    from calculator import prime_calc_cache, clear_calc_cache
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows])
+    prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
                        "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
@@ -628,7 +720,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
     labor_days = set()
     order_days = set()
     for r in rows:
-        p = order_profit(db, r["id"], cfg)
+        p = order_profit(db, r["id"], cfg, bulk=bulk)
         if not p:
             continue
         date = p["booking_date"]
@@ -716,6 +808,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
     tot["labor_days"] = len(labor_days)
     tot["order_days"] = len(order_days)
     tot["labor_missing"] = len(order_days - labor_days)
+    clear_calc_cache()
     return {"totals": tot, "orders": orders,
             "config_used": {"places": cfg.get("places"), "defaults": cfg.get("defaults"),
                             "people_per_unit": cfg.get("people_per_unit"),
