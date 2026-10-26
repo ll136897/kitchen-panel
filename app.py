@@ -618,10 +618,12 @@ def auth_guard():
     g.cur_user = user
     # 角色不够（按等级比：staff 1 < partner 2 < boss 3）
     if ROLE_LEVEL.get(user["role"], 0) < ROLE_LEVEL.get(need, 1):
-        if path.startswith("/api/"):
-            if need == "boss":
-                # 原数据/配置：不回"无权限"（免得对方在界面上感觉出分等级），直接当不存在
+        # 老板专属（账号页/原数据/配置）：不回"无权限"（免得对方在界面上感觉出分等级），直接当不存在
+        if need == "boss":
+            if path.startswith("/api/"):
                 return jsonify({"ok": False, "msg": "未找到"}), 404
+            return "未找到", 404
+        if path.startswith("/api/"):
             return jsonify({"ok": False, "msg": "无权限：该操作仅老板/合伙人可用"}), 403
         return "无权限：该页面仅老板/合伙人可访问", 403
 
