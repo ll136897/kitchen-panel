@@ -51,7 +51,7 @@ def _extract_package_label(raw_text, packages=None):
     label = ""
     if rt:
         m = _re.search(
-            r"预约项目[:：]?\s*(.*?)(?=预约地址|用餐时间|联系人|联系电话|金额|押金|备注|预约时间|\Z)",
+            r"预约项目[:：]?\s*(.*?)(?=预约地址|地址|客户姓名|客户|收餐时间|用餐时间|联系人|联系电话|金额|押金|备注|预约时间|\Z)",
             rt, _re.S)
         seg = (m.group(1) if m else rt).strip()
         # 去掉每行的（搭建）/（不搭建）/（半包）等后缀，只留套餐名
