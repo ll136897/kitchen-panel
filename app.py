@@ -295,6 +295,43 @@ def _fix_pkg_setup_flags():
     return fixed
 
 
+def _fix_empty_addresses():
+    """一次性数据修复：补全「录入时地址没被解析出来」的历史订单（幂等）。
+
+    背景：早期 parser 只认「预约地址:」前缀，不认纯「地址:」（万娅 321 那单写的是
+    纯「地址:青龙湖二期」），导致 address 字段留空。后果：财务/订单按地址分组时
+    这单归不到「青龙湖」，区域统计也缺这一单。
+
+    做法：启动时对所有 address 为空的单，用当前 parser 现解析 raw_text 取地址补全。
+    parser 现已支持纯「地址:」前缀，所以 321 会被正确补成「青龙湖二期」；而仅仅是
+    联系人行里含「地址」二字、本就没填地址的单（如 240/248/251/254）不会被误填。
+    幂等：只在「parser 能解析出非空地址 且 库里为空」时更新；补完再跑不动。
+    """
+    from parser import parse_order_text
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, raw_text, address FROM orders WHERE deleted_at IS NULL "
+        "AND (address IS NULL OR TRIM(address)='')"
+    ).fetchall()
+    fixed = []
+    for r in rows:
+        if not r["raw_text"]:
+            continue
+        parsed = parse_order_text(r["raw_text"])
+        addr = (parsed.get("address") or "").strip()
+        if addr and addr != (r["address"] or "").strip():
+            db.execute("UPDATE orders SET address=? WHERE id=?", (addr, r["id"]))
+            fixed.append((r["id"], addr))
+    if fixed:
+        db.commit()
+        try:
+            from db_backup import mark_write
+            mark_write()  # 改动后立即推 GitHub，避免下次启动又被旧镜像覆盖
+        except Exception:
+            pass
+    return fixed
+
+
 # ===== 一次性数据修复：补回被漏掉的套餐 =====
 # 背景：解析器曾把「10人餐+8人餐」只当成 10 人餐（只取了第一个数字），第二个套餐被整个丢掉。
 # 后果：18 人的单只按 10 人入库 → 食材/搭建费/人工全都少算（搭建费 200 只收了 100）。
@@ -317,6 +354,14 @@ try:
         print("[init] 已修正套餐搭建标记：%s" % _fixed2)
 except Exception as _e:
     print(f"[init] fix_pkg_setup_flags skipped: {_e}")
+
+# ===== 一次性数据修复：补全空地址（早期 parser 只认"预约地址"漏掉纯"地址"）=====
+try:
+    _fixed3 = _fix_empty_addresses()
+    if _fixed3:
+        print("[init] 已补全空地址：%s" % _fixed3)
+except Exception as _e:
+    print(f"[init] fix_empty_addresses skipped: {_e}")
 
 # 启动定时备份（10分钟）
 try:
