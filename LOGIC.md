@@ -212,3 +212,16 @@
     并比对"原单 vs 系统"搭建状态（一致/不一致/混单）。与财务页成本明细的 `.raw-pop` 同一套实现，
     JS 自包含（`orawToggle/orawRender`，用 `escHtml` 转义，`/api/orders/<id>/detail` 取 own_raw_text）。
   - 本节第三条、第十一条、去筛选规则同步固化；`predeploy_check.py` 顺手修了 GitHub 不通时崩溃的坑。
+- 2026-10-26（329 又变回 13人餐 + 简略表更紧凑）：
+  - **用户报**：329 明明已改 10人餐（且 pkgs_manual=1），过一阵又变回 13人餐。
+  - **根因**：Render 免费实例休眠后重启，容器从「部署镜像」重建，镜像里的 kitchen.db 是上次部署时的旧版
+    （329=13人餐、pkgs_manual=0）；`db_backup.restore_from_github` 旧逻辑用「本地有订单就跳过恢复」守卫，
+    于是镜像里的旧库被当成"有效本地库"跳过 GitHub 实时备份 → 手改和 pkgs_manual 标记一起被旧镜像覆盖。
+    （GitHub 实时备份里 329 仍是 13人餐，因为旧镜像库被 worker 重新 push 回 GitHub，覆盖了之前那次 10人餐编辑。）
+  - **修法**：`db_backup.restore_from_github` 改为「优先用 GitHub 实时备份」——只要备份有效就用它替换本地；
+    仅当 GitHub 备份订单数**明显少于**本地（说明本地更新）时才保留本地。这样手改过的单（push 到 GitHub 后）
+    在休眠重启后能从 GitHub 恢复，不再被旧镜像冲掉。`pkgs_manual` 跳过逻辑（上条）仍保留作第二道防线。
+  - **简略表更紧凑**：`prep.html` 的 `renderBoard` 去掉了「档内按套餐规格」的小标题行
+    （`🍱 3人餐 · 1单 / 3人`，`.bsub`），订单仍按规格聚在一起、只删标题行，省垂直空间。
+  - **用户侧动作**：部署后请在订单页把 329 重新存成单包 10人餐一次（这次存完会 push 到 GitHub，
+    且新恢复逻辑保证休眠重启后能从 GitHub 找回，永久保住）。
