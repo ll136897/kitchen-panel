@@ -1,14 +1,1 @@
-[2026-10-26T09:10:08.999392 UTC] request /api/analytics/overview
-Traceback (most recent call last):
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 880, in full_dispatch_request
-    rv = self.dispatch_request()
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 865, in dispatch_request
-    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-  File "/opt/render/project/src/app.py", line 5441, in analytics_overview
-    hours.sort(key=lambda x: int(x["name"].replace("点", "") or 0))
-    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/render/project/src/app.py", line 5441, in <lambda>
-    hours.sort(key=lambda x: int(x["name"].replace("点", "") or 0))
-                             ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-ValueError: invalid literal for int() with base 10: '（未填）'
+worker(pid=61) 启动成功，app import OK
