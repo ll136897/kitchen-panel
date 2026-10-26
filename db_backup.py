@@ -129,13 +129,30 @@ def _local_has_data():
         return False
 
 
+def _local_order_count():
+    """本地数据库当前订单数（用来判断 GitHub 备份是否比本地更新）。"""
+    if not os.path.exists(DB_PATH):
+        return 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        n = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        conn.close()
+        return n
+    except Exception:
+        return 0
+
+
 def restore_from_github():
-    """从 GitHub 拉取 kitchen.db 恢复（本地已有订单数据时跳过，避免旧备份覆盖新数据）"""
+    """从 GitHub 拉取 kitchen.db 恢复（GitHub 备份才是最新真相源）。
+
+    ⚠️ 旧逻辑：本地"已有订单"就跳过恢复 → 免费实例休眠重启时，容器从部署镜像重建，
+    镜像里的 kitchen.db 是"上次部署时"的旧版（用户手改的订单、pkgs_manual 标记都没了），
+    此时本地"有订单"却仍是旧数据，导致手改（如 329 改 10人餐）被旧镜像覆盖、且永远恢复不回来。
+    新逻辑：只要 GitHub 备份存在且有效，就优先用 GitHub 的（它才是实时最新）；
+    仅当 GitHub 备份订单数明显少于本地时，才保留本地（防用更旧备份覆盖更新本地）。
+    """
     if not GITHUB_TOKEN:
         print("[restore] 未设置 GITHUB_TOKEN，跳过")
-        return False
-    if _local_has_data():
-        print("[restore] 本地已有订单数据，跳过恢复（避免用旧备份覆盖新数据）")
         return False
     info = _github_api("GET", "")
     if not info:
@@ -166,9 +183,17 @@ def restore_from_github():
         try:
             conn = sqlite3.connect(tmp_path)
             conn.execute("PRAGMA integrity_check")
+            g_orders = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
             conn.close()
         except Exception as e:
             print(f"[restore] 备份文件损坏: {e}")
+            os.remove(tmp_path)
+            return False
+
+        # 仅在 GitHub 备份比本地"明显更旧"时才放弃恢复，避免旧备份覆盖更新本地
+        l_orders = _local_order_count()
+        if l_orders and g_orders < l_orders:
+            print(f"[restore] 本地订单数({l_orders}) > GitHub({g_orders})，保留本地，跳过恢复")
             os.remove(tmp_path)
             return False
 
@@ -176,7 +201,7 @@ def restore_from_github():
         if os.path.exists(DB_PATH):
             os.remove(DB_PATH)
         os.rename(tmp_path, DB_PATH)
-        print(f"[restore] 已从 GitHub 恢复数据库 ({len(data)} bytes)")
+        print(f"[restore] 已从 GitHub 恢复数据库 ({len(data)} bytes, {g_orders} 单)")
         return True
     except Exception as e:
         print(f"[restore] 恢复失败: {e}")
