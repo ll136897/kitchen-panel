@@ -131,7 +131,12 @@
 - 归属只用「刘 / 孙」；「刘和牛」是店名非人名。
 - 套餐是订单/备餐页首要信息，排在地址前；加维度不加版面（小徽标塞单元格，不增行列）。
 - ⚠️ **财务表「套餐」列钉死 `max-width:9em`+省略号（hover 看全名）**：列宽只由正常套餐名决定，绝不让**极少数异常长套餐名**把整张表的列宽拉变形、挤占其它 9 成正常行的空间（2026-10-26 万娅 321 单引发：套餐名被误塞成整段订单文字，整列超屏、每行留白）。正常套餐名（如「10人餐」「10人餐×2」）都放得下；多套餐仍按 `.pkg-2` 各占一排。
-- ⚠️ **财务重接口（`/api/finance/profit-overview`、`/api/finance/period-real-profit`）加 10s 内存缓存**：免费实例 CPU/磁盘受限、每次全量重算数百单需数秒，加缓存后命中即毫秒级返回；数据变更后最多 10s 自动刷新（2026-10-26 用户反馈全量加载十几秒）。缓存仅在进程内、实例重启后首次访问仍会重算（冷启动不可避免，靠保活/SECRET_KEY 缓解）。
+- ⚠️ **财务重接口性能（两层优化，2026-10-26 用户反馈"全部"来回切仍 15 秒）**：
+  - **根因**：`period_overview` 对 291 单**逐单串行 `order_profit`**，每单又各自 N+1 查库（`calc_order_ingredient_net` 按套餐逐个查 `package_ingredients`、再对**每种食材**查 `ingredients.cost`、换菜按名字查、外加 `order_costs`/`order_packages`/`orders` 冗余查询）→ 累计上万次查询；本地 1.1s，Render 免费实例慢盘放大到 15s。
+  - **修法（不改任何计算口径，只换数据源）**：`period_overview`/`period_real_profit` 开头**一次性批量预取**全部关联数据与参考表（ingredients / package_ingredients / dishes / dish_ingredients / order_packages / order_costs / order_dishes）进内存字典，给 `order_profit`/`_food_cost`/`calc_order_ingredient_net` 加 `bulk=`/`_order=`/`_pkgs=` 可选参数（默认行为不变，备餐页等单调用路径仍走原查询）。全量计算本地 1.1s→0.28s；Render 因查询往返被消除，降幅远大于本地。
+  - **再加 120s 进程内响应缓存**（原 10s 太短，用户"来回测"易跨过窗口踩冷算）：key=完整 URL（不同日期范围各算各的）。命中间隔内毫秒级返回。
+  - **缓存失效**：`teardown_request` 钩子对 `POST/PUT/DELETE/PATCH` 且路径命中 `/api/orders|/api/finance/expense|/api/finance/order|/api/cost|/api/ingredients|/api/config|/api/update-settings|/config` 的请求，**写入成功后清空财务缓存**，保证改单/改成本/记支出后下次读即时刷新（最多 120s 兜底）。
+  - ⚠️ 任何"提速改动"都必须先本地跑"改前 vs 改后利润汇总对比"确认金额**逐单完全一致**再上（本改动已验证 291 单 0 处不一致）。
 - **备餐页简略表（board）约定**（2026-10-24 用户反馈后定）：
   - 备餐状态用**左侧一条细色条**（`.bstat`，5px）+ 行底色表示：未备=灰、已备=绿+淡绿行底；
     点击色条切换 `pending ↔ preparing`（走 `PATCH /api/orders/<id>`）。
