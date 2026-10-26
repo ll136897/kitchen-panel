@@ -144,13 +144,15 @@
   .kpi-tbl{width:100%;border-collapse:collapse;font-size:12px}
   .kpi-tbl th{text-align:left;color:var(--muted);font-weight:600;font-size:10px;padding:5px 4px;border-bottom:1px solid var(--border-l);white-space:nowrap}
   .kpi-tbl td{padding:6px 4px;border-bottom:1px dashed #f0e9df;white-space:nowrap}
-  .kpi-tbl td.pkg-cell{color:#5b4a3a;font-weight:600;white-space:nowrap}
+  .kpi-tbl td.pkg-cell{color:#5b4a3a;font-weight:600;white-space:nowrap;max-width:9em;overflow:hidden;text-overflow:ellipsis}
   .tbl-profit td.pkg-cell{color:#5b4a3a;font-weight:600}
   /* 套餐：单套餐（含同套餐多份，如「10人餐×2」）必须一行，不占多余版面；
      只有「两个不同套餐」这种极少数（如 10人餐×1 6人餐×1）才折成两排 */
   /* 多套餐：每个套餐全称各占一排（去掉 + 号），每排 nowrap——绝不允许一个套餐名被从中间断开。
-     ⚠️ 这里不能限 max-width：限宽会让 nowrap 的套餐名溢出；列宽由"最长那一个套餐名"自然决定 */
-  .kpi-tbl td.pkg-cell.pkg-2,.tbl-profit td.pkg-cell.pkg-2{white-space:normal;line-height:1.3}
+     单套餐列宽钉 9em + 超出省略号：正常套餐名（如「10人餐」「10人餐×2」）都放得下、整列不撑爆；
+     万一哪单套餐名异常超长（如录入把地址/客户名误当成套餐），只截断这一格、hover 看全名，
+     绝不让一条异常数据把整张表的列宽拉变形、挤占其它 9 成正常行的空间。 */
+  .kpi-tbl td.pkg-cell.pkg-2,.tbl-profit td.pkg-cell.pkg-2{white-space:normal;line-height:1.3;max-width:none;overflow:visible}
   .kpi-tbl td.pkg-cell .pk,.tbl-profit td.pkg-cell .pk{display:block;white-space:nowrap;line-height:1.3}
   /* 归属人：客户名旁的小标签（不新增列，不增加版面） */
   .who-tag{display:inline-block;font-size:11px;font-weight:700;line-height:1;padding:2px 6px;border-radius:999px;margin-left:4px;vertical-align:middle}
@@ -1221,21 +1223,23 @@ function pkgParts(label){
 //  · 单套餐（含 10人餐×2 这种同套餐多份）→ 一行显示，不折行
 //  · 多套餐（如 10人餐+3人餐）→ 去掉 + 号，每个套餐**全称各占一排**，且每排 nowrap 不许被断开
 function pkgCellHtml(o){
-  const parts = pkgParts(o.package_label);
+  const full = o.package_label || '-';
+  const parts = pkgParts(full);
   if(parts.length <= 1){
-    return `<td class="pkg-cell">${kpiEsc(o.package_label||'-')}</td>`;
+    return `<td class="pkg-cell" title="${kpiEsc(full)}">${kpiEsc(full)}</td>`;
   }
-  return `<td class="pkg-cell pkg-2">`
+  return `<td class="pkg-cell pkg-2" title="${kpiEsc(full)}">`
        + parts.map(p=>`<span class="pk">${kpiEsc(p)}</span>`).join('')
        + `</td>`;
 }
 // 每单赚多少表（利润表）用同样规则，但那张表不走 kpiEsc 转义
 function pkgCellRaw(o){
-  const parts = pkgParts(o.package_label);
+  const full = o.package_label || '-';
+  const parts = pkgParts(full);
   if(parts.length <= 1){
-    return `<td class="pkg-cell">${o.package_label||'-'}</td>`;
+    return `<td class="pkg-cell" title="${kpiEsc(full)}">${full}</td>`;
   }
-  return `<td class="pkg-cell pkg-2">`
+  return `<td class="pkg-cell pkg-2" title="${kpiEsc(full)}">`
        + parts.map(p=>`<span class="pk">${p}</span>`).join('')
        + `</td>`;
 }
