@@ -357,56 +357,93 @@ def calc_prep_urgency(order):
     return {"level": level, "minutes_to_prep": diff_min, "label": label}
 
 
-def calc_order_ingredient_net(order_id):
+# ============ 财务批量预取缓存（period_overview 单次请求内 prime，消除逐单 N+1）============
+_PKG_ING_CACHE = {}      # package_id -> [ {per_package, portion_count, cost_only, id(=ingredient_id)} ]
+_ING_BY_ID = {}          # ingredient id -> {id, name, cost, unit, category}
+_DISH = {}               # dish id -> {id, name, cost}
+_DISH_ING = {}           # dish id -> [ (amount, ingredient_id) ]
+_CALC_PRIMED = False
+
+def prime_calc_cache(db):
+    """一次性把所有"慢速参考表"装进内存字典，供本请求内所有订单复用；未 prime 时走原查询。"""
+    global _PKG_ING_CACHE, _ING_BY_ID, _DISH, _DISH_ING, _CALC_PRIMED
+    cur = db.cursor()
+    _ING_BY_ID = {r["id"]: dict(r) for r in cur.execute("SELECT id, name, cost, unit, category FROM ingredients")}
+    _PKG_ING_CACHE = {}
+    for r in cur.execute("SELECT package_id, per_package, portion_count, cost_only, ingredient_id FROM package_ingredients"):
+        d = dict(r); d["id"] = d["ingredient_id"]
+        _PKG_ING_CACHE.setdefault(r["package_id"], []).append(d)
+    _DISH = {r["id"]: dict(r) for r in cur.execute("SELECT id, name, cost FROM dishes")}
+    _DISH_ING = {}
+    for r in cur.execute("SELECT dish_id, amount, ingredient_id FROM dish_ingredients"):
+        _DISH_ING.setdefault(r["dish_id"], []).append((r["amount"], r["ingredient_id"]))
+    _CALC_PRIMED = True
+
+def clear_calc_cache():
+    global _PKG_ING_CACHE, _ING_BY_ID, _DISH, _DISH_ING, _CALC_PRIMED
+    _PKG_ING_CACHE = {}; _ING_BY_ID = {}; _DISH = {}; _DISH_ING = {}; _CALC_PRIMED = False
+
+
+def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
     """订单『套餐食材』净需求（备餐页与成本页共用的单一真相源）。
 
     包含：套餐固定配量×份数 + 备注加菜(set覆盖/add增量) + 换菜(份数换算)。
     不含：单点菜品(order_dishes)——备餐端展开成食材量、成本端按菜品报价，口径不同各自处理。
+    _order / _pkgs 为批量预取时传入，避免逐单查库（未传则按原逻辑查）。
 
     返回 {ing_id: {total, per_package, order_qty, portion_count, total_portions,
                    cost_only, swapped_in, swapped_out}}。
     total 为换菜/加菜生效后的净用量（克/个）。
     """
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
-        pkgs = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT raw_text, note, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
-        row = cur.fetchone()
-        raw_text = row["raw_text"] if row else ""
-        note_now = (row["note"] or "").strip() if row else ""
-        _cname = row["contact_name"] if row else ""
-        _cphone = row["contact_phone"] if row else ""
-        _amt = row["amount"] if row else None
-        _addr = row["address"] if row else ""
+    if _pkgs is None:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
+            _pkgs = [dict(r) for r in cur.fetchall()]
+    pkgs = _pkgs
+    if _order is None:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT raw_text, note, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
+            row = cur.fetchone()
+            _order = dict(row) if row else {}
+    raw_text = _order.get("raw_text") or ""
+    note_now = (_order.get("note") or "").strip()
+    _cname = _order.get("contact_name") or ""
+    _cphone = _order.get("contact_phone") or ""
+    _amt = _order.get("amount")
+    _addr = _order.get("address") or ""
 
     ing_demand = {}
-    with get_db() as conn:
-        cur = conn.cursor()
-        for pk in pkgs:
-            cur.execute("""
-                SELECT pi.per_package, pi.portion_count, pi.cost_only, i.id
-                FROM package_ingredients pi
-                JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
-            """, (pk["package_id"],))
-            for r in cur.fetchall():
-                amount = r["per_package"] * pk["quantity"]
-                pc = r["portion_count"] or 1
-                iid = r["id"]
-                if iid not in ing_demand:
-                    ing_demand[iid] = {"total": 0, "per_package": r["per_package"],
-                                       "order_qty": 0, "portion_count": pc,
-                                       "total_portions": 0, "cost_only": bool(r["cost_only"])}
-                ing_demand[iid]["total"] += amount
-                # per_package/portion_count 取用量最大的套餐作为代表
-                if amount > ing_demand[iid]["per_package"] * ing_demand[iid]["order_qty"]:
-                    ing_demand[iid]["per_package"] = r["per_package"]
-                    ing_demand[iid]["portion_count"] = pc
-                ing_demand[iid]["order_qty"] += pk["quantity"]
-                ing_demand[iid]["total_portions"] += pc * pk["quantity"]
-                if r["cost_only"]:
-                    ing_demand[iid]["cost_only"] = True
+    for pk in pkgs:
+        _rows = _PKG_ING_CACHE.get(pk["package_id"]) if _CALC_PRIMED else None
+        if _rows is None:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT pi.per_package, pi.portion_count, pi.cost_only, i.id
+                    FROM package_ingredients pi
+                    JOIN ingredients i ON pi.ingredient_id = i.id
+                    WHERE pi.package_id = ?
+                """, (pk["package_id"],))
+                _rows = cur.fetchall()
+        for r in _rows:
+            amount = r["per_package"] * pk["quantity"]
+            pc = r["portion_count"] or 1
+            iid = r["id"]
+            if iid not in ing_demand:
+                ing_demand[iid] = {"total": 0, "per_package": r["per_package"],
+                                   "order_qty": 0, "portion_count": pc,
+                                   "total_portions": 0, "cost_only": bool(r["cost_only"])}
+            ing_demand[iid]["total"] += amount
+            # per_package/portion_count 取用量最大的套餐作为代表
+            if amount > ing_demand[iid]["per_package"] * ing_demand[iid]["order_qty"]:
+                ing_demand[iid]["per_package"] = r["per_package"]
+                ing_demand[iid]["portion_count"] = pc
+            ing_demand[iid]["order_qty"] += pk["quantity"]
+            ing_demand[iid]["total_portions"] += pc * pk["quantity"]
+            if r["cost_only"]:
+                ing_demand[iid]["cost_only"] = True
 
     # 备注加菜 + 换菜（与下方 calc_order_requirements / preview 同一套算法，避免分叉）
     from parser import parse_order_text, match_extra_ingredients_to_db, own_raw_block
