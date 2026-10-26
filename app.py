@@ -5438,7 +5438,12 @@ def analytics_overview():
 
     places = dist(lambda x: x["address"])
     hours = dist(lambda x: (x["hour"] + "点") if x["hour"] else "", 8)
-    hours.sort(key=lambda x: int(x["name"].replace("点", "") or 0))
+    def _hour_key(x):
+        try:
+            return int(x["name"].replace("点", "") or 0)
+        except Exception:
+            return 99                      # 时段「未填」排最后，不转数字避免 500
+    hours.sort(key=_hour_key)
     WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     weekdays = dist(lambda x: (WD[to_date(x["date"]).weekday()] if to_date(x["date"]) else ""), 7)
     weekdays.sort(key=lambda x: WD.index(x["name"]) if x["name"] in WD else 9)
