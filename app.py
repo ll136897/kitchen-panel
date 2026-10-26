@@ -4559,7 +4559,7 @@ def finance_period_real_profit():
 # ---- 财务重接口内存缓存：避免每次全量重算数百单（免费实例 CPU/磁盘受限，每次数秒）----
 import time as _t
 _FIN_CACHE = {}
-_FIN_CACHE_TTL = 10  # 秒：财务数据非秒级变化，10s 内复用结果；改数据后最多 10s 刷新
+_FIN_CACHE_TTL = 120  # 秒：财务数据非秒级变化，2 分钟内复用结果；改数据后在写入入口显式失效，最多 2 分钟自动刷新
 def _fin_cache_get(key):
     v = _FIN_CACHE.get(key)
     if v and (_t.time() - v[0]) < _FIN_CACHE_TTL:
@@ -4569,6 +4569,22 @@ def _fin_cache_put(key, payload):
     _FIN_CACHE[key] = (_t.time(), payload)
 def _fin_cache_invalidate():
     _FIN_CACHE.clear()
+
+
+# 任一"会影响利润的写入"成功后，让财务缓存失效——下次读实时重算，最多 2 分钟自动刷新兜底。
+# 集中在 teardown 一处处理，避免漏改各写入接口；只读(GET)不触发。
+_FIN_INVALIDATE_PREFIXES = ("/api/orders", "/api/finance/expense", "/api/finance/order",
+                            "/api/cost", "/api/ingredients", "/api/config",
+                            "/api/update-settings", "/config")
+@app.teardown_request
+def _fin_cache_invalidate_on_write(_exc):
+    try:
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            p = request.path or ""
+            if any(p.startswith(x) for x in _FIN_INVALIDATE_PREFIXES):
+                _fin_cache_invalidate()
+    except Exception:
+        pass
 
 
 def _annotate_setup_flags(db, orders):
