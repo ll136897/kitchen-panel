@@ -259,9 +259,7 @@
   .bstat.on{background:#27ae60 !important;box-shadow:0 0 0 1px #1b7a43 inset}
   /* 套餐人数放大：备餐最关心先备哪份、哪些能一起备 → 人数做主视觉 */
   .bnum{font-size:16px;font-weight:900;color:#c0562f;padding:0 1px}
-  /* 档内的「套餐规格」小标题：相同规格放一起，标明几单/几人（可一起备） */
-  .bsub{font-size:11px;color:#7a6247;font-weight:800;margin:7px 0 3px;padding-left:3px;
-    border-left:3px solid #e0d3bf}
+  /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
@@ -1170,15 +1168,15 @@ function renderBoard(orders){
     });
     const specArr = [...specMap.entries()].sort((a,b)=>
       (parseInt(a[0])||0) - (parseInt(b[0])||0));      // 规格从小到大，先备小份
-    html += specArr.map(([sk,sub])=>{
+    let inner = '';
+    specArr.forEach(([sk,sub])=>{
       sub.sort((a,b)=>{
         const ta = boardPrepTime(a)||'99:99', tb = boardPrepTime(b)||'99:99';
         return ta < tb ? -1 : ta > tb ? 1 : 0;         // 组内按备餐时间先后
       });
-      const sppl = sub.reduce((s,o)=>s+boardPeople(o),0);
-      return `<div class="bsub">🍱 ${sk} · ${sub.length}单 / ${sppl}人</div>` +
-             `<div class="bgrid">` + sub.map(rowHtml).join('') + `</div>`;
-    }).join('');
+      inner += sub.map(rowHtml).join('');              // 不再为每种规格插一行小标题（太占空间）；同规格仍挨在一起
+    });
+    html += `<div class="bgrid">${inner}</div>`;
     return html;
   }).join('');
 }
