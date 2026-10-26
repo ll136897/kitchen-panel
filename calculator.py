@@ -63,11 +63,12 @@ def calc_order_tool_needs(order_id, only_setup=False):
     tool_demand = {}
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT raw_text FROM orders WHERE id = ?", (order_id,))
+        cur.execute("SELECT raw_text, note FROM orders WHERE id = ?", (order_id,))
         row = cur.fetchone()
         if not row:
             return {}
         raw_text = row["raw_text"] or ""
+        note_now = (row["note"] or "").strip()
         cur.execute("SELECT package_id, quantity, setup_flag, people FROM order_packages WHERE order_id = ?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
         # 搭建装备表：只算搭建套餐
@@ -114,8 +115,15 @@ def calc_order_tool_needs(order_id, only_setup=False):
                 tool_demand[r["id"]]["order_qty"] += pk["quantity"]
 
         # 备注解析出的追加装备（"多拿2个天幕"等）
+        # ⚠️ 2026-10-25 修：用户在订单页改过备注(note)后**以 note 为准**——raw_text 是
+        # "原始录入信息"、永不更新，直接用它解析会把用户删掉的装备又算回来。
+        # （329 实测：套餐已改成10人餐、备注改成"12份餐具;12把椅子"，天幕却仍按原文的
+        # "2天幕"覆盖成 2 顶。录入时 note 由原文备注行同步而来，没改时两者解析结果一致）
         parsed = parse_order_text(raw_text)
         extra = parsed.get("extra_tools", {})
+        if note_now and note_now != "无":
+            from parser import _parse_extra_tools
+            extra = _parse_extra_tools(note_now)
         for tname, info in extra.items():
             qty = info["qty"] if isinstance(info, dict) else info
             mode = info.get("mode", "set") if isinstance(info, dict) else "set"   # 缺省=总数（用户确认的大多数情况）
@@ -363,9 +371,10 @@ def calc_order_ingredient_net(order_id):
         cur = conn.cursor()
         cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
         pkgs = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT raw_text, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
+        cur.execute("SELECT raw_text, note, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
         row = cur.fetchone()
         raw_text = row["raw_text"] if row else ""
+        note_now = (row["note"] or "").strip() if row else ""
         _cname = row["contact_name"] if row else ""
         _cphone = row["contact_phone"] if row else ""
         _amt = row["amount"] if row else None
@@ -405,6 +414,13 @@ def calc_order_ingredient_net(order_id):
     # 否则会把别人的加菜/换菜算到这单头上（串单坑）。
     own = own_raw_block(raw_text, _cname, _cphone, _amt, _addr)
     parsed = parse_order_text(own or raw_text)
+    # ⚠️ 2026-10-25 修：用户在订单页改过备注(note)后，加菜/换菜**以 note 为准**——
+    # raw_text 是"原始录入信息"永不更新，直接用它解析会把用户删掉的加菜又算回来。
+    # （329 实测：备注改成"12份餐具;12把椅子"后，原文备注行的加菜仍在生效）
+    if note_now and note_now != "无":
+        from parser import _parse_extra_ingredients, _parse_dish_swaps
+        parsed["extra_ingredients"] = _parse_extra_ingredients(note_now)
+        parsed["dish_swaps"] = _parse_dish_swaps(note_now)
     for ei in match_extra_ingredients_to_db(parsed.get("extra_ingredients", [])):
         iid = ei.get("matched_id")
         if not iid:
@@ -1185,10 +1201,16 @@ def calc_merged_prep(order_ids):
                                          o.get("contact_phone"), o.get("amount"), o.get("address"))
             except Exception:
                 o["own_raw_text"] = o.get("raw_text") or ""
-            # 备注要点：换菜/加菜写在原文里，简略表要能一眼看到（否则等于"备注被省略"）
+            # 备注要点：换菜/加菜写在备注里，简略表要能一眼看到（否则等于"备注被省略"）
+            # ⚠️ 2026-10-25 修：用户改过备注(note)后以 note 为准——raw_text 是原始录入信息，
+            # 不更新；直接用原文解析会显示用户已删掉的换菜/加菜徽标。
             try:
                 from parser import parse_order_text as _pot
                 _pp = _pot(o.get("own_raw_text") or "") or {}
+                _note = (o.get("note") or "").strip()
+                if _note and _note != "无":
+                    from parser import _parse_extra_ingredients as _pei, _parse_dish_swaps as _pds
+                    _pp = {"extra_ingredients": _pei(_note), "dish_swaps": _pds(_note)}
                 o["has_swap"] = bool(_pp.get("dish_swaps"))
                 o["has_extra"] = bool(_pp.get("extra_ingredients"))
             except Exception:

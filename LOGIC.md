@@ -46,6 +46,15 @@
 
 - 天幕 / 蛋卷桌 / 椅子 **仅搭建套餐计入**（`setup_flag==1`）；不搭建（半包）套餐不带这三项。
 - 备注写「X天幕 / X桌子 / X椅子」会**覆盖**计算值（parser `extra_tools`，已修多位数覆盖，如 `10椅子`）。
+- ⚠️ **备注追加项以 `note` 字段为准（2026-10-25 修，329 引出）**：装备/加菜/换菜的「追加项」从 `note` 字段解析，
+  **不再**从 `raw_text` 解析。`raw_text` 是「原始录入信息」永不更新，用户改过备注后用原文解析会把已删的项算回来
+  （329 实测：套餐改 10人餐、备注改"12份餐具;12把椅子"后，天幕仍按原文"2天幕"算成 2 顶）。
+  录入时 note 由原文备注行同步而来，没改时两者一致；改后以手改 note 为准。
+  涉及函数：`calc_order_tool_needs`(extra_tools)、`calc_order_ingredient_net`(extra_ingredients/dish_swaps)、
+  `calc_merged_prep`(has_swap/has_extra 徽标)。`raw_text` 仍只用于**显示原始录入浮层**（`/api/orders/<id>/detail` 的 own_raw_text）。
+- ⚠️ **用户在订单页手改套餐 → `pkgs_manual=1` 标记（2026-10-25 修，329 引出）**：`orders.pkgs_manual=1` 的单，
+  两个启动修复 `_fix_missing_packages` / `_fix_pkg_setup_flags` **整体跳过**（手改优先于原文解析）。
+  否则每次重启会把用户手改的套餐按原文"13人餐"又拆回"10人餐+3人餐"覆盖掉。改套餐只走 `edit_order` 接口。
 - 其余装备（卡式炉/烤盘/燃气罐/夹子/剪刀）在 `calc_order_tool_needs` 里仍按 `package_tools` 表配置累加；
   若将来也要统一成「按人数配」，改 `tool_qty_by_people` 并让 `calc_order_tool_needs` 的那段也走它。
 
@@ -191,3 +200,15 @@
   - **修根子**：`calc_order_tool_needs` 天幕/蛋卷桌从「按套餐个数累加」改为
     「按整单搭建部分总人数算一次」（第二条已固化）。修前「4人餐×3」=12人会算成 3顶/4张，
     修后 2顶/3张。本地 326/329 脏数据已由 `_fix_pkg_setup_flags` 修过，部署后线上自愈。
+- 2026-10-25（329 手改被启动修复覆盖 + 订单页加原始录入浮层）：
+  - **用户报**：329 明明在订单页改成了「10人餐」、备注改成「12份餐具」，改了两三次每次重启后又变回「13人餐」。
+    根因：①`raw_text` 仍是"13人餐"，`_fix_missing_packages` 每次启动按原文"补漏"把套餐拆回 10+3 覆盖手改；
+    ②装备/加菜从 `raw_text` 解析，用户改 note 不生效，天幕仍按原文"2天幕"。
+  - **修法**：新增 `orders.pkgs_manual` 字段；`edit_order` 传 packages 时置 1；`_fix_missing_packages` /
+    `_fix_pkg_setup_flags` 跳过 `pkgs_manual=1` 的单；装备/加菜/换菜/徽标一律改从 `note` 解析（raw_text 仅用于显示原始浮层）。
+  - **329 数据修复**：库里直接改单包 10人餐、`pkgs_manual=1`、amount=758、note="12份餐具;12把椅子"。
+    修后 329 天幕=1、椅子=12，与用户手改意图一致。
+  - **订单页加「📄原单」浮层**：每张订单卡片新增"📄原单"按钮，点击弹 `.raw-pop` 显示该单 `raw_text` 原始录入，
+    并比对"原单 vs 系统"搭建状态（一致/不一致/混单）。与财务页成本明细的 `.raw-pop` 同一套实现，
+    JS 自包含（`orawToggle/orawRender`，用 `escHtml` 转义，`/api/orders/<id>/detail` 取 own_raw_text）。
+  - 本节第三条、第十一条、去筛选规则同步固化；`predeploy_check.py` 顺手修了 GitHub 不通时崩溃的坑。

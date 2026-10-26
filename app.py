@@ -153,6 +153,8 @@ def _fix_missing_packages():
 
     只补不删：重新解析原文，若人数比库里多，就按新结果重建 order_packages（保留原有单价）。
     幂等——补完之后新解析人数 == 库里人数，再跑也不会动。
+    ⚠️ pkgs_manual=1（用户在订单页手改过套餐）的单**跳过**：手改优先于原文解析，
+    否则用户把「13人餐」改成「10人餐」后，每次启动又按原文拆回 10+3（2026-10-25 实测）。
     返回被修复的订单 id 列表。
     """
     from parser import parse_order_text, match_packages_in_db, own_raw_block
@@ -160,7 +162,8 @@ def _fix_missing_packages():
     fixed = []
     rows = db.execute(
         "SELECT id, contact_name, contact_phone, amount, address, raw_text FROM orders "
-        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> ''"
+        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> '' "
+        "AND COALESCE(pkgs_manual,0)=0"
     ).fetchall()
     for r in rows:
         oid = r["id"]
@@ -242,6 +245,7 @@ def _fix_pkg_setup_flags():
     会被全部标成搭建 → 备餐页显示成「3人餐（搭建）」，与实际不符、有误导。
     做法：重新解析原文（先切出本单段），按每套餐 service_type 修正 order_packages.setup_flag。
     只动「原文明确写了（搭建）/（不搭建）」的套餐；原文没标的一律不动，避免改坏。
+    ⚠️ pkgs_manual=1（用户手改过套餐）的单**跳过**：手改的 setup_flag 优先，不被原文覆盖。
     返回被修正的订单 id 列表。
     """
     from parser import parse_order_text, match_packages_in_db, own_raw_block
@@ -249,7 +253,8 @@ def _fix_pkg_setup_flags():
     fixed = []
     rows = db.execute(
         "SELECT id, contact_name, contact_phone, amount, address, raw_text FROM orders "
-        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> ''"
+        "WHERE deleted_at IS NULL AND status != 'cancelled' AND raw_text IS NOT NULL AND TRIM(raw_text) <> '' "
+        "AND COALESCE(pkgs_manual,0)=0"
     ).fetchall()
     for r in rows:
         oid = r["id"]
@@ -2065,6 +2070,9 @@ def edit_order(oid):
         for pid, people, qty, price, sf in rows:
             cur.execute("INSERT INTO order_packages (order_id, package_id, people, quantity, price, setup_flag) "
                         "VALUES (?,?,?,?,?,?)", (oid, pid, people, qty, price, sf))
+        # 人工改过套餐 → 打标记，让启动幂等修复（_fix_missing_packages/_fix_pkg_setup_flags）
+        # 跳过这单：否则用户把「13人餐」手改「10人餐」后，下次启动又按原文拆回 10+3（2026-10-25 实测）
+        cur.execute("UPDATE orders SET pkgs_manual=1 WHERE id=?", (oid,))
 
     db.commit()
     return jsonify({"ok": True, "msg": "已保存"})

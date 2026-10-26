@@ -155,6 +155,24 @@
     .order-list .btn-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch}
     .order-list .btn-row .btn{flex:0 0 auto;white-space:nowrap}
   }
+  /* 原始录入信息浮层（2026-10-25 新增，与财务页成本明细的 .raw-pop 同一套实现）：
+     ⚠️ 宽度必须钉死 min(92vw,440px)，不许 width:max-content——超长地址一行能顶穿右边框 */
+  .raw-pop{position:fixed;z-index:9999;display:none;width:min(92vw,440px);
+    max-height:calc(100vh - 16px);flex-direction:column;
+    background:#fff;border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 10px 28px rgba(0,0,0,.16);padding:10px 12px}
+  .raw-pop .rp-hd{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    font-weight:800;color:#5b4a3a;font-size:12px;margin-bottom:6px}
+  .raw-pop .rp-x{cursor:pointer;color:#aaa;font-weight:400;font-size:13px}
+  .raw-pop .rp-x:hover{color:#c0392b}
+  /* 三重保证不横向超框：min-width:0 + overflow:auto + break-all/anywhere */
+  .raw-pop .rp-body{white-space:pre-wrap;word-break:break-all;overflow-wrap:anywhere;
+    flex:1 1 auto;min-height:0;min-width:0;overflow:auto;
+    color:#3a2f26;background:#fbf8f4;border:1px dashed #efe6d9;border-radius:6px;padding:8px;font-size:12px;line-height:1.55}
+  .raw-pop .rp-tip{color:#9c8f80;font-size:11px;margin-top:6px}
+  .raw-pop .rp-chk{margin-top:8px;font-size:12px;border-radius:6px;padding:5px 8px;line-height:1.4}
+  .raw-pop .rp-chk.ok{background:#eaf6ec;color:#2f7d32}
+  .raw-pop .rp-chk.no{background:#fdecea;color:#c0392b}
 </style>
 </head>
 <body>
@@ -731,6 +749,7 @@ function buildCard(o, isAnchor){
         <button class="btn btn-sm btn-danger" onclick="purgeOrder(${o.id},'${o.contact_name||''}')">🔥 彻底删除</button>
       ` : `<span class="lock-note">🔒 这单不是你归属的，只能看</span>`) : `
       <button class="btn btn-sm" onclick="viewReq(${o.id})">📊 备餐需求</button>
+      <button class="btn btn-sm" style="background:#fff7e6;color:#b8860b;border:1px solid #ffe0a3" onclick="orawToggle(${o.id}, event)">📄 原单</button>
       <button class="btn btn-sm" style="background:#27ae60;color:#fff" onclick="window.open('/orders/${o.id}/ticket','_blank')">🖨 出餐单</button>
       <button class="btn btn-sm" style="background:#c0392b;color:#fff" onclick="openPrepModal(${o.id})">🍱 备餐核对</button>
       ${canTouch(o) ? `
@@ -1078,6 +1097,102 @@ autoSync(loadOrders, 60000);
 
 // ===== 备餐表核对弹窗：订单列表页点「🍱 备餐核对」原地弹出，不再整页跳到备餐页简略表 =====
 function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ===== 原始录入信息浮层（2026-10-25 新增，与财务页成本明细 .raw-pop 同一套实现）=====
+// 点每张订单卡片的「📄原单」→ 弹该单 raw_text 原始录入，可核对"原单与系统是否一致"。
+let orawPopOid=null, orawPopAnchor=null; const orawPopCache={};
+function orawEnsure(){
+  let el=document.getElementById('oRawPop');
+  if(el) return el;
+  el=document.createElement('div'); el.id='oRawPop'; el.className='raw-pop';
+  el.onclick=function(e){ e.stopPropagation(); };
+  document.body.appendChild(el); return el;
+}
+function orawSetupFromText(t){
+  if(!t) return null;
+  if(/不搭建/.test(t)) return 0;       // 先判"不搭建"，否则会被"搭建"吃掉
+  if(/搭建/.test(t)) return 1;
+  return null;
+}
+function orawClose(){
+  const el=document.getElementById('oRawPop');
+  if(el) el.style.display='none';
+  orawPopOid=null;
+}
+function orawPlace(anchor){
+  const el=orawEnsure(); const pad=8, vw=window.innerWidth, vh=window.innerHeight;
+  let top=0,left=0;
+  if(anchor && anchor.getBoundingClientRect){
+    const r=anchor.getBoundingClientRect();
+    left=Math.min(r.left, vw-el.offsetWidth-pad); left=Math.max(pad,left);
+    top=r.bottom+4;
+    if(top+el.offsetHeight>vh-pad) top=r.top-el.offsetHeight-4;   // 下方放不下翻上方
+  }
+  // 上下都放不下（原文很长）时夹在视口内，宁可遮一点也不让内容跑出屏幕
+  top=Math.min(Math.max(pad,top), Math.max(pad, vh-el.offsetHeight-pad));
+  el.style.left=left+'px'; el.style.top=top+'px';
+}
+function orawToggle(oid, ev){
+  if(ev) ev.stopPropagation();
+  const el=orawEnsure();
+  const anchor=ev && ev.currentTarget;
+  if(orawPopOid===oid && el.style.display!=='none'){ orawClose(); return; }
+  orawPopOid=oid; orawPopAnchor=anchor||null;
+  el.innerHTML='<div class="rp-hd">📄 原始录入信息<span class="rp-x">✕</span></div><div class="rp-tip">读取中…</div>';
+  el.style.display='flex'; orawPlace(anchor);
+  const xp=el.querySelector('.rp-x'); if(xp) xp.onclick=function(e){ e.stopPropagation(); orawClose(); };
+  const done=()=>{ if(orawPopOid===oid) orawRender(oid); };
+  if(orawPopCache[oid]){ done(); return; }
+  fetch('/api/orders/'+oid+'/detail').then(r=>r.json()).then(d=>{
+    const o=(d&&d.ok&&d.data)?d.data:{};
+    // 优先用「只属于这一单」的原文片段：批量录入时整段原文混着别人的单，直接显示会是错的
+    const pkgs=o.packages||[];
+    const hs=pkgs.some(p=>p.setup_flag===1), hn=pkgs.some(p=>p.setup_flag===0);
+    orawPopCache[oid]={raw_text:o.own_raw_text||o.raw_text||'',
+                       setup_flag:(o.setup_flag===0||o.setup_flag===1)?o.setup_flag:null,
+                       has_setup:hs, has_nosetup:hn};
+    done();
+  }).catch(()=>{ orawPopCache[oid]={raw_text:'(读取失败，请重试)', setup_flag:null, has_setup:false, has_nosetup:false}; done(); });
+}
+function orawRender(oid){
+  const el=orawEnsure();
+  const c=orawPopCache[oid]||{raw_text:'', setup_flag:null, has_setup:false, has_nosetup:false};
+  const raw=(c.raw_text||'').trim();
+  const fromText=orawSetupFromText(raw);
+  let chk='';
+  // 套餐级优先：混单（含搭建+半包）直接判定为混单，不走"整段文字判不搭建"的误判逻辑
+  if(c.has_setup && c.has_nosetup){
+    chk=`<div class="rp-chk ok">✅ 已识别为「混单」：含搭建套餐 + 半包套餐</div>`;
+  } else if(fromText!==null){
+    const sys=c.setup_flag;
+    if(sys===null||sys===undefined){
+      chk=`<div class="rp-chk">⚠️ 系统没判定出搭建状态，建议核对</div>`;
+    }else if(fromText===sys){
+      chk=`<div class="rp-chk ok">✅ 原单与系统一致：${fromText?'搭建':'不搭建'}</div>`;
+    }else{
+      chk=`<div class="rp-chk no">⚠️ 不一致：原单写「${fromText?'搭建':'不搭建'}」，系统判定「${sys?'搭建':'不搭建'}」，请核对</div>`;
+    }
+  }
+  el.innerHTML='<div class="rp-hd">📄 原始录入信息<span class="rp-x">✕</span></div>'
+    + (raw?`<div class="rp-body">${escHtml(raw)}</div>`:'<div class="rp-tip">这单没有留存原始录入文字</div>')
+    + chk + '<div class="rp-tip">点别处可关闭</div>';
+  const xp=el.querySelector('.rp-x'); if(xp) xp.onclick=function(e){ e.stopPropagation(); orawClose(); };
+  orawPlace(orawPopAnchor);
+}
+// 点别处关闭 + Esc 关闭 + resize 关闭
+document.addEventListener('click', function(e){
+  const el=document.getElementById('oRawPop');
+  if(!el || el.style.display==='none') return;
+  if(el.contains(e.target)) return;
+  orawClose();
+});
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') orawClose(); });
+window.addEventListener('resize', orawClose);
+window.addEventListener('scroll', function(e){
+  const el=document.getElementById('oRawPop');
+  if(el && el.style.display!=='none' && e.target && el.contains(e.target)) return;
+  orawClose();
+}, true);
 async function openPrepModal(id){
   const o = allOrders.find(x=>x.id===id) || {};
   const body = document.getElementById('prepModalBody');

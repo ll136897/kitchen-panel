@@ -272,6 +272,12 @@ def init_db():
         # 与用餐时间区分开，解析后落库，避免录入时填了却看不到。
         if "setup_time" not in cols:
             cur.execute("ALTER TABLE orders ADD COLUMN setup_time TEXT")
+        # 套餐被人工改过（2026-10-25）：用户在订单页手动改过套餐明细后置 1。
+        # 作用：让 _fix_missing_packages/_fix_pkg_setup_flags 这类"启动幂等修复"跳过该单——
+        # 否则用户把「13人餐」手改成「10人餐」后，启动修复按原文重新解析又拆回 10+3，
+        # 手改每次都被覆盖（用户实测"改了两三次还是13人餐"）。
+        if "pkgs_manual" not in cols:
+            cur.execute("ALTER TABLE orders ADD COLUMN pkgs_manual INTEGER NOT NULL DEFAULT 0")
         # 销售流水表 / 记账口径（2026-10-10）：这几个字段是"导出记账表"和"算真实到手"用的
         #   menu_name       —— 套餐名(展示用)：备餐表按内部套餐拆料，但记账只写一个名字（如"16人餐"）
         #   setup_flag      —— 是否搭建 1/0（NULL=没填）
