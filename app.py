@@ -4524,9 +4524,14 @@ def finance_profit_overview():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _ck = "po:" + request.url
+    _cached = _fin_cache_get(_ck)
+    if _cached is not None:
+        return jsonify(_cached)
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
                          extra_clause=_clause, extra_params=_params)
     _annotate_setup_flags(g.db, ov.get("orders", []))
+    _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
 
 
@@ -4540,10 +4545,30 @@ def finance_period_real_profit():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _ck = "prp:" + request.url
+    _cached = _fin_cache_get(_ck)
+    if _cached is not None:
+        return jsonify(_cached)
     ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
                             extra_clause=_clause, extra_params=_params)
     _annotate_setup_flags(g.db, ov.get("orders", []))
+    _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
+
+
+# ---- 财务重接口内存缓存：避免每次全量重算数百单（免费实例 CPU/磁盘受限，每次数秒）----
+import time as _t
+_FIN_CACHE = {}
+_FIN_CACHE_TTL = 10  # 秒：财务数据非秒级变化，10s 内复用结果；改数据后最多 10s 刷新
+def _fin_cache_get(key):
+    v = _FIN_CACHE.get(key)
+    if v and (_t.time() - v[0]) < _FIN_CACHE_TTL:
+        return v[1]
+    return None
+def _fin_cache_put(key, payload):
+    _FIN_CACHE[key] = (_t.time(), payload)
+def _fin_cache_invalidate():
+    _FIN_CACHE.clear()
 
 
 def _annotate_setup_flags(db, orders):
