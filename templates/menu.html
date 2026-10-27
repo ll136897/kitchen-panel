@@ -563,12 +563,14 @@ function downloadFile(url){
 
 // ===== 刷新特效 =====
 let cateringData = null;  // 当前生成的方案，供保存用
+let cateringExcluded = new Set();  // 配餐器中被客户排除(自带)的装备名集合，生成时回传后端
 const CAT_COLOR = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',
   side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',other:'#666',
   packaging:'#d35400',utensil:'#8e44ad',tool:'#4a4a4a',meat:'#8e1e1a'};
 
 function openCatering(){
   document.getElementById('cateringModal').style.display='block';
+  cateringExcluded = new Set();  // 每次打开弹窗清空排除项，避免上次残留
   // 总餐标 ↔ 人均 双向联动：填一个自动算另一个
   const pe = document.getElementById('cat_people');
   const be = document.getElementById('cat_budget');
@@ -656,6 +658,7 @@ function generateCatering(){
     if(cutting>0) body.cutting_labor = cutting;
   }
 
+  body.exclude_tools = [...cateringExcluded];  // 客户自带/排除的装备一并回传（两种模式都生效）
   fetch('/api/catering/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)})
     .then(r=>r.json()).then(res=>{
@@ -691,10 +694,16 @@ function renderCatering(d){
       <td style="text-align:center">${it.cost_only?'损耗':'备餐'}</td>
     </tr>`;
   }).join('');
-  const toolRows = d.tools.map(t=>`<tr>
-    <td>${t.name}</td><td style="text-align:right">${t.per_package}</td>
+  const toolRows = d.tools.map((t,idx)=>`<tr>
+    <td>${t.name}</td>
+    <td style="text-align:right">${t.per_package}</td>
     <td style="text-align:right">${t.stock}</td>
-    <td style="text-align:right;color:${t.shortage>0?'#c0392b':'#27ae60'}">${t.shortage>0?'缺 '+t.shortage:'✓'}</td>
+    <td style="text-align:center">
+      <label style="font-size:12px;cursor:pointer;user-select:none;color:#666">
+        <input type="checkbox" ${t.excluded?'checked':''} onchange="toggleCateringExclude(${idx}, this.checked)"> 排除
+      </label>
+    </td>
+    <td style="text-align:center;color:${t.excluded?'#888':(t.shortage>0?'#c0392b':'#27ae60')}">${t.excluded?'已排除':(t.shortage>0?'缺 '+t.shortage:'✓')}</td>
   </tr>`).join('');
 
   const healthColor = s.is_healthy ? '#27ae60' : '#c0392b';
@@ -779,13 +788,22 @@ function renderCatering(d){
         <th style="text-align:left;padding:6px">工具</th>
         <th style="text-align:right;padding:6px">需要</th>
         <th style="text-align:right;padding:6px">库存</th>
-        <th style="text-align:right;padding:6px">状态</th>
+        <th style="text-align:center;padding:6px">排除</th>
+        <th style="text-align:center;padding:6px">状态</th>
       </tr></thead>
       <tbody>${toolRows}</tbody>
     </table>
+    <div style="font-size:11px;color:#888;margin-top:4px">勾选「排除」= 客户自带该装备，重新生成后不计入需求与租赁，成本同步下降。</div>
   `;
   document.getElementById('cat_pkgname').value = `定制${s.people}人¥${s.budget}`;
   document.getElementById('cateringSaveBox').style.display='block';
+}
+
+function toggleCateringExclude(idx, checked){
+  const t = cateringData && cateringData.tools[idx];
+  if(!t) return;
+  if(checked) cateringExcluded.add(t.name); else cateringExcluded.delete(t.name);
+  generateCatering();  // 重新生成：排除后不计入需求与租赁，成本同步重算
 }
 
 function saveCatering(){
@@ -801,7 +819,8 @@ function saveCatering(){
       kitchen_labor: s.kitchen_labor,
       delivery_labor: s.delivery_labor,
       ingredients: cateringData.ingredients,
-      tools: cateringData.tools
+      // 被排除(客户自带)的装备不写入套餐，避免带 0 用量行污染数据
+      tools: cateringData.tools.filter(t=>!t.excluded)
     })})
     .then(r=>r.json()).then(res=>{
       if(!res.ok){ alert(res.msg||'保存失败'); return; }

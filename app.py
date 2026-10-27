@@ -3380,9 +3380,14 @@ def catering_suggest():
         result = build_template_menu(people, total, per_person, kitchen_labor, delivery_labor,
                                      template=tpl, is_setup=is_setup, address=address,
                                      scale_percent=scale_percent, cutting_labor=cutting_labor,
-                                     include_depreciation=include_depreciation)
+                                     include_depreciation=include_depreciation,
+                                     exclude_tools=data.get("exclude_tools"))
     else:
-        result = _cs(people, total, per_person, kitchen_labor, delivery_labor)
+        result = _cs(people, total, per_person, kitchen_labor, delivery_labor,
+                     is_setup=is_setup, address=address,
+                     include_depreciation=include_depreciation,
+                     exclude_tools=data.get("exclude_tools"),
+                     scale_percent=scale_percent)
     return jsonify(result)
 
 

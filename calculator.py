@@ -1525,16 +1525,19 @@ def standard_template_from_10():
             "min_per_person_g": {}, "per_person_unit": {"奶香小馒头": mantou_pp}}
 
 
-def tool_rent_breakdown(people, db=None, include_depreciation=False):
+def tool_rent_breakdown(people, db=None, include_depreciation=False, exclude_tools=None):
     """装备租赁/折旧成本（默认租、按库存缺口租；折旧=租金×10% 默认不计，可一键计入）。
     租金单价：天幕30/顶、蛋卷桌20/张、椅子10/把、卡式炉+烤盘一套15。
-    返回 {rental, depreciation(已算但未计入), detail:[{name,need,stock,shortage,rent_unit,rent,depreciation}]}。
+    exclude_tools: 客户自带/排除的装备名集合——被排除的不计租赁、不进需求（need=0）。
+    返回 {rental, depreciation(已算但未计入), detail:[{name,need,stock,shortage,rent_unit,rent,depreciation,excluded}]}。
     """
+    import math
     db = db or get_db()
     cur = db.cursor()
     tmap = {r["name"]: dict(r) for r in cur.execute("SELECT id,name,stock,threshold,cost FROM tools")}
     RENT = {"天幕": 30, "蛋卷桌": 20, "椅子": 10}
-    need = {n: tool_qty_by_people(n, people) for n in ("天幕", "蛋卷桌", "椅子", "卡式炉", "烤盘")}
+    ex = set(exclude_tools or [])
+    need = {n: (0 if n in ex else tool_qty_by_people(n, people)) for n in ("天幕", "蛋卷桌", "椅子", "卡式炉", "烤盘")}
     detail, rental, depre = [], 0.0, 0.0
     for n, ru in RENT.items():
         q = need[n]; stock = tmap.get(n, {}).get("stock", 0)
@@ -1543,7 +1546,8 @@ def tool_rent_breakdown(people, db=None, include_depreciation=False):
         dep = round(owned * ru * 0.1, 2)
         depre += dep
         detail.append({"name": n, "need": q, "stock": stock, "shortage": shortage,
-                       "rent_unit": ru, "rent": round(shortage * ru, 2), "depreciation": dep})
+                       "rent_unit": ru, "rent": round(shortage * ru, 2), "depreciation": dep,
+                       "excluded": n in ex})
     # 卡式炉+烤盘 按套计（一套15）
     set_need = min(need["卡式炉"], need["烤盘"])
     set_stock = min(tmap.get("卡式炉", {}).get("stock", 0), tmap.get("烤盘", {}).get("stock", 0))
@@ -1552,13 +1556,106 @@ def tool_rent_breakdown(people, db=None, include_depreciation=False):
     set_dep = round(set_owned * 15 * 0.1, 2); depre += set_dep
     detail.append({"name": "卡式炉+烤盘(套)", "need": set_need, "stock": set_stock,
                    "shortage": set_short, "rent_unit": 15, "rent": round(set_short * 15, 2),
-                   "depreciation": set_dep})
+                   "depreciation": set_dep, "excluded": ("卡式炉" in ex or "烤盘" in ex)})
     return {"rental": round(rental, 2), "depreciation": round(depre, 2), "detail": detail}
+
+
+def catering_cost_units(people):
+    """餐配『单』定义（用户 2026-10-27 确认）：三桌为正常搭建一单。
+    桌数 = ceil(人/4)；单 = ceil(桌/3)。例：320人=80桌÷3=27单。
+    切配人工 / 搭建回收 均按此『单』计（取代旧的人均10人一单）。"""
+    import math
+    tables = math.ceil(people / 4.0)
+    units = max(1, math.ceil(tables / 3.0))
+    return tables, units
+
+
+def catering_cutting_labor(people, override=None):
+    """后厨切配人工（与财务口径一致，单位改为三桌一单）：首单 ¥40，每多一单 +¥25。
+    override 为 None 或 0（前端空值）时按三桌一单自动估算，成本永不为空；>0 用填的值。"""
+    import math
+    if override is not None and override != 0:
+        try:
+            return round(float(override), 2)
+        except (TypeError, ValueError):
+            pass
+    _, units = catering_cost_units(people)
+    return round(40 + 25 * (units - 1), 2)
+
+
+def _recompute_ing(it):
+    """同步重算某食材的份数/份量/小计（克重变动后必须调，否则出现『64份却50g』）。"""
+    if it["unit"] == "g":
+        it["portion_count"] = max(1, round(it["per_package"] / 200))
+    else:
+        it["portion_count"] = max(1, round(it["per_package"]))
+    it["portion_size"] = round(it["per_package"] / max(1, it["portion_count"]), 1)
+    it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+
+
+def _fit_to_budget(ings, ceiling):
+    """低价优先份量策略（老板视角）：人均出价极低时，优先保证每份克重够吃，其次才是菜品种类。
+    超预算→把最贵的肉(牛/猪/鸡)克重换成便宜的素菜/小菜(1:1保体积)，既降成本又保饱腹；
+    贵肉换光仍超→才压缩总份量（最后手段）。返回 warnings 列表。"""
+    import math
+    warnings = []
+    def food():
+        return round(sum(x["sub_total"] for x in ings), 2)
+    for _ in range(300):
+        if food() <= ceiling:
+            break
+        meats = [x for x in ings if x["category"] in ("beef", "pork", "chicken")
+                 and x["unit"] == "g" and x["per_package"] > 0 and not x["cost_only"]]
+        if not meats:
+            warnings.append("⚠️ 贵肉已换光仍超成本上限，已压缩总份量（客户可能不够吃，建议提餐标）")
+            for x in ings:
+                if x["unit"] == "g":
+                    x["per_package"] = round(x["per_package"] * 0.9 / 10) * 10
+                    _recompute_ing(x)
+            if food() <= ceiling:
+                break
+            continue
+        meats.sort(key=lambda x: -x["cost"])
+        veg = [x for x in ings if x["category"] in ("vegetable", "side")
+               and x["unit"] == "g" and x["cost"] > 0]
+        if not veg:
+            break
+        veg.sort(key=lambda x: x["cost"])
+        meat, v = meats[0], veg[0]
+        over = food() - ceiling
+        save_per_g = max(0.1, meat["cost"] - v["cost"])
+        move = min(meat["per_package"], max(50, math.ceil(over / save_per_g / 50) * 50))
+        if move <= 0:
+            break
+        meat["per_package"] -= move
+        v["per_package"] += move
+        _recompute_ing(meat)
+        _recompute_ing(v)
+    return warnings
+
+
+def _fill_to_min_food(ings, min_food):
+    """高餐标时食材占比过低→用便宜素菜/小菜补到 min_food，保证客户够吃（不被贵肉撑爆成本）。"""
+    import math
+    def food():
+        return round(sum(x["sub_total"] for x in ings), 2)
+    guard = 0
+    while food() < min_food and guard < 300:
+        guard += 1
+        veg = [x for x in ings if x["category"] in ("vegetable", "side")
+               and x["unit"] == "g" and x["cost"] > 0]
+        if not veg:
+            break
+        veg.sort(key=lambda x: x["cost"])
+        v = veg[0]
+        add = min(500, max(50, math.ceil((min_food - food()) / v["cost"] / 50) * 50))
+        v["per_package"] += add
+        _recompute_ing(v)
 
 
 def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, delivery_labor=0,
                         template=None, is_setup=False, address=None, scale_percent=100,
-                        cutting_labor=None, include_depreciation=False):
+                        cutting_labor=None, include_depreciation=False, exclude_tools=None):
     """基于『标准人均克重模板』生成菜单（与 catering_suggest 互补，不绑任何套餐）：
     - 模板每类人均克重以 10人餐 为基准骨架；scale_percent(1%-200%) 控制新菜单为基准的几成
     - 每类从该类食材池按成本升序选最便宜的 2-3 道凑满克重（主菜占60%、其余点缀，不堆一种最便宜的）
@@ -1581,6 +1678,7 @@ def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, 
     per = {c: max(0, float(base.get(c, 0) or 0) * scale) for c in
            ("beef", "pork", "chicken", "vegetable", "side", "sauce", "drink")}
     target_margin = float(template.get("target_margin", 0.50) or 0.50)
+    cost_ceiling = round(total_budget * (1 - target_margin), 2)   # 总成本上限 = 餐标×(1-目标利润率)
     cats = [c for c in per if per[c] > 0]
 
     db = get_db()
@@ -1645,10 +1743,8 @@ def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, 
                 "sub_total": round(mqty * mcost, 2),
             })
 
-    food_cost = round(sum(x["sub_total"] for x in ingredients), 2)
-
-    # —— 统一利润口径（与财务页 order_profit / _auto_items 一致）——
-    units = max(1, math.ceil(people / 10.0))
+    # —— 非食材成本（与财务统一口径）：搭建回收/配送 + 切配人工(三桌一单) + 装备租赁/折旧 ——
+    tables, units = catering_cost_units(people)
     out_price = _template_outsource_price(db)
     if is_setup:
         extra_name = "搭建回收"
@@ -1658,41 +1754,38 @@ def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, 
         extra_name = "配送成本"
         extra_cost = round(get_delivery_cost_avg(address, db), 2)
         extra_detail = _delivery_source(address, db)
-    # 切配人工：默认 40，多单 +25/单（labor_first/labor_per_unit，与财务一致）
-    cutting = float(cutting_labor) if cutting_labor is not None else round(40 + 25 * (units - 1), 2)
-
-    # 装备租赁：默认只算库存缺口（按租金租）；折旧=租金×10% 默认不计（include_depreciation 才计入）
-    rent = tool_rent_breakdown(people, db, include_depreciation=include_depreciation)
+    # 切配人工：三桌一单（首单40，每多一单+25）；手动填了用填的，否则自动估，成本永不为空
+    cutting = catering_cutting_labor(people, override=cutting_labor)
+    # 装备租赁：默认只算库存缺口（按租金租）；折旧=租金×10% 默认不计；排除项不计
+    rent = tool_rent_breakdown(people, db, include_depreciation=include_depreciation, exclude_tools=exclude_tools)
     rental_cost = rent["rental"]
     depreciation = rent["depreciation"] if include_depreciation else 0.0
+
+    # 食材成本上限（留给食材的空间）= 总成本上限 − 非食材成本
+    non_food = round(extra_cost + cutting + rental_cost + depreciation, 2)
+    food_ceiling = max(0, round(cost_ceiling - non_food, 2))
+
+    # 低价优先份量：超预算把贵肉换便宜素菜保饱腹；高餐标补便宜素菜防不够吃
+    food_cost = round(sum(x["sub_total"] for x in ingredients), 2)
+    suggestions = _fit_to_budget(ingredients, food_ceiling)
+    _fill_to_min_food(ingredients, round(total_budget * 0.30))
+    food_cost = round(sum(x["sub_total"] for x in ingredients), 2)
 
     total_cost = round(food_cost + extra_cost + cutting + rental_cost + depreciation, 2)
     margin = round(total_budget - total_cost, 2)
     margin_pct = round(margin / total_budget * 100, 1) if total_budget else 0
-    cost_ceiling = round(total_budget * (1 - target_margin), 2)   # 成本上限 = 餐标×(1-目标利润率)
     is_ok = total_cost <= cost_ceiling
 
-    # 不达标：列出最贵菜 + 同池更便宜替代可省多少
-    suggestions = []
-    if not is_ok:
-        for x in sorted(ingredients, key=lambda z: -z["sub_total"])[:5]:
-            c = x["category"]
-            alts = [a for a in by_cat.get(c, []) if a["id"] != x["ing_id"] and a["cost"] < x["cost"]]
-            if alts:
-                cheaper = alts[0]
-                save = round(x["per_package"] * (x["cost"] - cheaper["cost"]), 2)
-                suggestions.append("把「%s」换成「%s」可省 ¥%.2f/%d人" % (x["name"], cheaper["name"], save, people))
-            else:
-                suggestions.append("「%s」已是%s类最便宜，无法再降——只能减克重或提高餐标" % (x["name"], c))
-
-    # 工具按人数配（与现有配餐器同一口径）
+    # 工具按人数配（与现有配餐器同一口径）；客户排除的装备不计需求
     cur.execute("SELECT id,name,stock,threshold,cost FROM tools")
     all_tools = [dict(r) for r in cur.fetchall()]
+    ex = set(exclude_tools or [])
     tool_list = []
     for t in all_tools:
-        qty = tool_qty_by_people(t["name"], people)
+        excluded = t["name"] in ex
+        qty = 0 if excluded else tool_qty_by_people(t["name"], people)
         tool_list.append({"id": t["id"], "name": t["name"], "per_package": qty,
-                          "stock": t["stock"], "shortage": max(0, qty - t["stock"])})
+                          "stock": t["stock"], "shortage": max(0, qty - t["stock"]), "excluded": excluded})
 
     meat_weight = sum(x["per_package"] for x in ingredients if x["category"] in ("beef", "pork", "chicken"))
     return {
@@ -1710,6 +1803,8 @@ def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, 
                 "food_cost": food_cost,
                 "extra_name": extra_name, "extra_cost": extra_cost, "extra_detail": extra_detail,
                 "cutting_labor": cutting,
+                "kitchen_labor": float(kitchen_labor or 0),
+                "delivery_labor": float(delivery_labor or 0),
                 "rental_cost": rental_cost,
                 "depreciation": depreciation,
                 "include_depreciation": bool(include_depreciation),
@@ -1728,13 +1823,14 @@ def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, 
     }
 
 
-def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, delivery_labor=0):
-    """餐标配餐器：返回建议方案（食材列表+工具+成本摘要）
-    people: 人数
-    total_budget: 总餐标（元）
-    per_person: 可选人均餐标，优先于 total_budget/people
-    kitchen_labor: 后厨兼职人工成本（每单固定）
-    delivery_labor: 配送兼职人工成本（每单固定）
+def catering_suggest(people, total_budget, per_person=None, kitchen_labor=None,
+                     delivery_labor=0, is_setup=False, address=None,
+                     include_depreciation=False, exclude_tools=None,
+                     scale_percent=100):
+    """餐标配餐器（绑套餐模式）：按最接近套餐缩放，并补齐与模板模式一致的全成本口径。
+    成本永不为空：食材 + 搭建回收[仅搭建]/配送成本[仅不搭建] + 切配人工(三桌一单,自动估) + 装备租赁 + 折旧。
+    低价策略：人均出价极低时，优先保证每份克重(够吃)，其次才是菜品种类——超预算先砍最贵的肉(牛/猪)，
+    把克重让给便宜的素菜/小菜填饱，而非把每份饿成几十克。
     """
     import math
     if per_person is not None:
@@ -1805,9 +1901,10 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
     if not best_pkg:
         return {"ok": False, "msg": "无有效套餐可参考"}
 
-    # 3. 按人数比例缩放（按基准套餐的 max_people 缩放）
+    # 3. 按人数比例缩放（可叠加 scale_percent 调人均克重比例）
     base_people = best_pkg["max_people"]
     ratio = people / base_people
+    scale = max(0.5, min(2.0, float(scale_percent or 100) / 100.0))
 
     # 聚合同名食材（可能多次出现，如生菜有 cost_only=0 和 =1）
     ing_map = {}
@@ -1820,10 +1917,10 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
                 "category": ing["category"], "cost_only": ing["cost_only"] or 0,
                 "per_package": 0, "portion_count": 0
             }
-        ing_map[key]["per_package"] += ing["per_package"] * ratio
-        ing_map[key]["portion_count"] += ing["portion_count"] * ratio
+        ing_map[key]["per_package"] += ing["per_package"] * ratio * scale
+        ing_map[key]["portion_count"] += ing["portion_count"] * ratio * scale
 
-    # 4. 数值取整：重量类保留 10g 精度，份数类向上取整
+    # 4. 数值取整 + 份量重算（克重变动后必须同步重算份数，否则出现『64份却50g』）
     for key, it in ing_map.items():
         if it["unit"] == "g":
             it["per_package"] = round(it["per_package"] / 10) * 10
@@ -1831,129 +1928,88 @@ def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, del
             it["per_package"] = math.ceil(it["per_package"])
         else:
             it["per_package"] = round(it["per_package"], 1)
-        # 份数取整（不能出现 3.2 份）
-        it["portion_count"] = math.ceil(it["portion_count"]) if it["portion_count"] > 0 else 0
-        # 克数 = 总量 ÷ 份数
-        it["portion_size"] = round(it["per_package"] / max(1, it["portion_count"]), 2) if it["portion_count"] else 0
-        it["sub_total"] = round(it["per_package"] * it["cost"], 2)
+        _recompute_ing(it)
 
-    # 5. 成本校验：食材成本目标 28-35%（扣除人工后的合理区间）
-    # 人工成本（后厨+配送）固定，先扣出来再校验食材
-    labor_cost = round(float(kitchen_labor or 0) + float(delivery_labor or 0), 2)
-    total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
-    # 食材目标区间 = 餐标 × [28%, 35%]（留出人工空间）
-    target_low = total_budget * 0.28
-    target_high = total_budget * 0.35
-    warnings = []
+    # 5. 全成本口径（与模板模式/财务页一致）：成本永不为空
+    target_margin = 0.40
+    cost_ceiling = round(total_budget * (1 - target_margin), 2)
+    tables, units = catering_cost_units(people)
+    cutting = catering_cutting_labor(people, override=kitchen_labor)   # 三桌一单，自动估，成本非空
+    delivery_cost = round(float(delivery_labor or 0), 2)
+    if is_setup:
+        extra_name = "搭建回收"
+        out_price = _template_outsource_price(db)
+        extra_cost = round(units * out_price, 2)
+        extra_detail = "%d单 × ¥%g（默认场地搭建价）" % (units, out_price)
+    else:
+        extra_name = "配送成本"
+        extra_cost = round(get_delivery_cost_avg(address, db), 2)
+        extra_detail = _delivery_source(address, db)
+    rent = tool_rent_breakdown(people, db, include_depreciation=include_depreciation, exclude_tools=exclude_tools)
+    rental_cost = rent["rental"]
+    depreciation = rent["depreciation"] if include_depreciation else 0.0
 
-    # 超预算：按高价到低价顺序减牛肉（每 50g 一档）
-    def _adjust_beef(delta_g):
-        beef_items = sorted([it for it in ing_map.values()
-                              if it["category"] in ("meat", "beef")
-                              and "牛" in it["name"]
-                              and it["unit"] == "g"],
-                             key=lambda x: -x["cost"])
-        for it in beef_items:
-            if delta_g == 0:
-                break
-            change = min(delta_g, max(0, it["per_package"] - 50))
-            it["per_package"] -= change
-            it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-            delta_g -= change
-        return delta_g
+    # 食材预算空间 = 总成本上限 − 非食材成本
+    non_food = round(extra_cost + cutting + rental_cost + depreciation + delivery_cost, 2)
+    food_ceiling = max(0, round(cost_ceiling - non_food, 2))
 
-    # 不够预算：直接给所有肉类按 cost 比例增加克数，快速拉高成本
-    def _add_filler(delta_budget):
-        if delta_budget <= 0:
-            return 0
-        # 所有按g计价的食材，按 cost 从高到低
-        all_g_items = sorted([it for it in ing_map.values()
-                              if it["unit"] == "g" and it["cost"] > 0],
-                             key=lambda x: -x["cost"])
-        # 贵的先来（牛肉>猪肉>鸡肉>蘸料>蔬菜）
-        for it in all_g_items:
-            if delta_budget <= 0:
-                break
-            # 计算这一元素最多能加多少，直到补完缺口或加 1000g 上限
-            max_g = min(int(delta_budget / it["cost"] / 50) * 50, 1000)
-            if max_g >= 50:
-                it["per_package"] += max_g
-                it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-                delta_budget -= max_g * it["cost"]
-        # 最后补主食（馒头/土豆）
-        if delta_budget > 0:
-            for it in ing_map.values():
-                if delta_budget <= 0: break
-                if ("馒头" in it["name"] or "土豆" in it["name"]) and it["cost"] > 0:
-                    if it["unit"] == "个":
-                        add = min(math.ceil(delta_budget / it["cost"]), 20)
-                        it["per_package"] += add
-                        it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-                        delta_budget -= add * it["cost"]
-                    elif it["unit"] == "g":
-                        add = min(int(delta_budget / it["cost"] / 50) * 50, 2000)
-                        if add >= 50:
-                            it["per_package"] += add
-                            it["sub_total"] = round(it["per_package"] * it["cost"], 2)
-                            delta_budget -= add * it["cost"]
-        return delta_budget
+    # 低价优先份量：超预算把贵肉换便宜素菜保饱腹；高餐标补便宜素菜防不够吃
+    ings = list(ing_map.values())
+    warnings = _fit_to_budget(ings, food_ceiling)
+    _fill_to_min_food(ings, round(total_budget * 0.30))
+    food_cost = round(sum(it["sub_total"] for it in ings), 2)
 
-    if total_cost > target_high:
-        excess = total_cost - target_high
-        # 按牛肉 cost 降序，减 50g 一档
-        delta_g = int(excess / 0.1)  # 粗算每 100g 牛肉约 10 元
-        remaining = _adjust_beef(delta_g)
-        total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
-        if total_cost > target_high:
-            warnings.append(f"成本 ¥{total_cost} 仍超上限 ¥{target_high:.0f}，建议手动减项")
-    elif total_cost < target_low:
-        shortage = target_low - total_cost
-        _add_filler(shortage)
-        total_cost = round(sum(it["sub_total"] for it in ing_map.values()), 2)
-        if total_cost < target_low:
-            warnings.append(f"成本 ¥{total_cost} 低于目标 ¥{target_low:.0f}，可加牛肉提档")
+    total_cost = round(food_cost + extra_cost + cutting + rental_cost + depreciation + delivery_cost, 2)
+    margin = round(total_budget - total_cost, 2)
+    margin_pct = round(margin / total_budget * 100, 1) if total_budget else 0
+    is_ok = total_cost <= cost_ceiling
 
-    # 6. 工具按人数配
+    # 6. 工具按人数配（客户排除的装备不计需求）
     cur.execute("SELECT id, name, stock, threshold, cost FROM tools")
     all_tools = [dict(r) for r in cur.fetchall()]
+    ex = set(exclude_tools or [])
     tool_list = []
     for t in all_tools:
-        n = t["name"]
-        qty = tool_qty_by_people(n, people)  # 统一走单一口径，避免和订单装备表各算各的
+        excluded = t["name"] in ex
+        qty = 0 if excluded else tool_qty_by_people(t["name"], people)
         tool_list.append({
-            "id": t["id"], "name": n, "per_package": qty,
-            "stock": t["stock"], "shortage": max(0, qty - t["stock"])
+            "id": t["id"], "name": t["name"], "per_package": qty,
+            "stock": t["stock"], "shortage": max(0, qty - t["stock"]), "excluded": excluded
         })
 
     # 7. 摘要
-    meat_weight = sum(it["per_package"] for it in ing_map.values()
+    meat_weight = sum(it["per_package"] for it in ings
                       if it["category"] in ("meat", "beef", "pork", "chicken")
                       and it["unit"] == "g" and not it["cost_only"])
-    # 最终成本 = 食材 + 人工
-    final_cost = round(total_cost + labor_cost, 2)
-    final_margin = round(total_budget - final_cost, 2)
     return {
         "ok": True,
         "data": {
             "base_package": best_pkg["name"],
             "base_people": base_people,
             "ratio": round(ratio, 2),
-            "ingredients": list(ing_map.values()),
+            "scale_percent": int(round(scale * 100)),
+            "ingredients": ings,
             "tools": tool_list,
             "summary": {
                 "people": people,
                 "budget": total_budget,
                 "per_person": round(total_budget / people, 2),
-                "food_cost": total_cost,              # 食材成本
-                "kitchen_labor": float(kitchen_labor or 0),  # 后厨人工
-                "delivery_labor": float(delivery_labor or 0),# 配送人工
-                "labor_cost": labor_cost,            # 人工合计
-                "total_cost": final_cost,            # 总成本=食材+人工
-                "margin": final_margin,              # 毛利=餐标-总成本
-                "margin_pct": round(final_margin / total_budget * 100, 1),
+                "food_cost": food_cost,
+                "extra_name": extra_name, "extra_cost": extra_cost, "extra_detail": extra_detail,
+                "kitchen_labor": float(kitchen_labor or 0),
+                "cutting_labor": cutting,
+                "delivery_labor": delivery_cost,
+                "rental_cost": rental_cost,
+                "depreciation": depreciation,
+                "include_depreciation": bool(include_depreciation),
+                "rent_detail": rent["detail"],
+                "total_cost": total_cost,
+                "margin": margin,
+                "margin_pct": margin_pct,
                 "meat_weight_per_person": round(meat_weight / people),
-                "target_cost_range": [round(target_low), round(target_high)],
-                "is_healthy": target_low <= total_cost <= target_high,
+                "cost_ceiling": cost_ceiling,
+                "is_healthy": is_ok,
+                "target_margin": target_margin,
             },
             "warnings": warnings,
         }
