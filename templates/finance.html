@@ -708,13 +708,13 @@
 <script>
 const PAY_LABEL = {paid:'已收', unpaid:'未收', partial:'部分'};
 const DEP_LABEL = {pending:'待退', returned:'已退', forfeited:'扣留'};
-const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',meat:'肉类',other:'其他',tool:'工具'};
+const CAT_LABEL = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'酒水',packaging:'包装',utensil:'餐具',staple:'主食',meat:'肉类',other:'其他',tool:'工具'};
 
 // ===== 统一排序口径：全站都跟菜单页一致（2026-10-14）=====
-// 以前财务页有自己的一套分类顺序（两套顺序口径不一），造成"菜单页一种顺序、
+// 以前财务页有自己的一套分类顺序（主食位置就不一样），造成"菜单页一种顺序、
 // 财务页另一种"，对照起来很累。现在分类顺序、分类内固定顺序都直接对齐菜单页
 // （templates/menu.html 的 CAT_ORDER / FIXED_ORDER），两处必须保持一致。
-const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
 const FIXED_ORDER = [
   ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
   ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
