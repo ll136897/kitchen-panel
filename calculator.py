@@ -24,8 +24,8 @@ def tool_qty_by_people(name, people):
 
     所有页面/功能（订单装备表、占用统计、搭建装备表、餐标配餐器 catering_suggest）
     算天幕/蛋卷桌/椅子/炉/盘/罐/夹/剪 时【必须】调本函数，禁止在某个页面或函数里再写一套 if/elif。
-    规则由用户 2026-10-24 确认：
-      天幕  : ≤10人=1顶，>10人(如13人)=2顶
+    规则由用户 2026-10-24 确认、2026-10-27 修正天幕：
+      天幕  : 3桌一顶 → ceil(ceil(人/4)/3)（320人=80桌÷3=27顶）
       蛋卷桌: 3/4人=1，6/8人=2，10人=3  → 即 max(1, ceil(people/4))
       椅子  : =人数（仅搭建套餐计入，见 calc_order_tool_needs）
       卡式炉/烤盘: ceil(people/4)；燃气罐: ceil(people/4)+1（多备1）；夹子/剪刀: ceil(people/8)
@@ -37,7 +37,8 @@ def tool_qty_by_people(name, people):
     """
     p = people or 0
     if name == "天幕":
-        return 1 if p <= 10 else 2
+        # 3桌一顶：蛋卷桌=ceil(人/4)，天幕=ceil(桌数/3)。320人=80桌÷3=27顶。
+        return ((p + 3) // 4 + 2) // 3
     if name == "蛋卷桌":
         return max(1, (p + 3) // 4)
     if name == "椅子":
@@ -357,56 +358,93 @@ def calc_prep_urgency(order):
     return {"level": level, "minutes_to_prep": diff_min, "label": label}
 
 
-def calc_order_ingredient_net(order_id):
+# ============ 财务批量预取缓存（period_overview 单次请求内 prime，消除逐单 N+1）============
+_PKG_ING_CACHE = {}      # package_id -> [ {per_package, portion_count, cost_only, id(=ingredient_id)} ]
+_ING_BY_ID = {}          # ingredient id -> {id, name, cost, unit, category}
+_DISH = {}               # dish id -> {id, name, cost}
+_DISH_ING = {}           # dish id -> [ (amount, ingredient_id) ]
+_CALC_PRIMED = False
+
+def prime_calc_cache(db):
+    """一次性把所有"慢速参考表"装进内存字典，供本请求内所有订单复用；未 prime 时走原查询。"""
+    global _PKG_ING_CACHE, _ING_BY_ID, _DISH, _DISH_ING, _CALC_PRIMED
+    cur = db.cursor()
+    _ING_BY_ID = {r["id"]: dict(r) for r in cur.execute("SELECT id, name, cost, unit, category FROM ingredients")}
+    _PKG_ING_CACHE = {}
+    for r in cur.execute("SELECT package_id, per_package, portion_count, cost_only, ingredient_id FROM package_ingredients"):
+        d = dict(r); d["id"] = d["ingredient_id"]
+        _PKG_ING_CACHE.setdefault(r["package_id"], []).append(d)
+    _DISH = {r["id"]: dict(r) for r in cur.execute("SELECT id, name, cost FROM dishes")}
+    _DISH_ING = {}
+    for r in cur.execute("SELECT dish_id, amount, ingredient_id FROM dish_ingredients"):
+        _DISH_ING.setdefault(r["dish_id"], []).append((r["amount"], r["ingredient_id"]))
+    _CALC_PRIMED = True
+
+def clear_calc_cache():
+    global _PKG_ING_CACHE, _ING_BY_ID, _DISH, _DISH_ING, _CALC_PRIMED
+    _PKG_ING_CACHE = {}; _ING_BY_ID = {}; _DISH = {}; _DISH_ING = {}; _CALC_PRIMED = False
+
+
+def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
     """订单『套餐食材』净需求（备餐页与成本页共用的单一真相源）。
 
     包含：套餐固定配量×份数 + 备注加菜(set覆盖/add增量) + 换菜(份数换算)。
     不含：单点菜品(order_dishes)——备餐端展开成食材量、成本端按菜品报价，口径不同各自处理。
+    _order / _pkgs 为批量预取时传入，避免逐单查库（未传则按原逻辑查）。
 
     返回 {ing_id: {total, per_package, order_qty, portion_count, total_portions,
                    cost_only, swapped_in, swapped_out}}。
     total 为换菜/加菜生效后的净用量（克/个）。
     """
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
-        pkgs = [dict(r) for r in cur.fetchall()]
-        cur.execute("SELECT raw_text, note, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
-        row = cur.fetchone()
-        raw_text = row["raw_text"] if row else ""
-        note_now = (row["note"] or "").strip() if row else ""
-        _cname = row["contact_name"] if row else ""
-        _cphone = row["contact_phone"] if row else ""
-        _amt = row["amount"] if row else None
-        _addr = row["address"] if row else ""
+    if _pkgs is None:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
+            _pkgs = [dict(r) for r in cur.fetchall()]
+    pkgs = _pkgs
+    if _order is None:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT raw_text, note, contact_name, contact_phone, amount, address FROM orders WHERE id=?", (order_id,))
+            row = cur.fetchone()
+            _order = dict(row) if row else {}
+    raw_text = _order.get("raw_text") or ""
+    note_now = (_order.get("note") or "").strip()
+    _cname = _order.get("contact_name") or ""
+    _cphone = _order.get("contact_phone") or ""
+    _amt = _order.get("amount")
+    _addr = _order.get("address") or ""
 
     ing_demand = {}
-    with get_db() as conn:
-        cur = conn.cursor()
-        for pk in pkgs:
-            cur.execute("""
-                SELECT pi.per_package, pi.portion_count, pi.cost_only, i.id
-                FROM package_ingredients pi
-                JOIN ingredients i ON pi.ingredient_id = i.id
-                WHERE pi.package_id = ?
-            """, (pk["package_id"],))
-            for r in cur.fetchall():
-                amount = r["per_package"] * pk["quantity"]
-                pc = r["portion_count"] or 1
-                iid = r["id"]
-                if iid not in ing_demand:
-                    ing_demand[iid] = {"total": 0, "per_package": r["per_package"],
-                                       "order_qty": 0, "portion_count": pc,
-                                       "total_portions": 0, "cost_only": bool(r["cost_only"])}
-                ing_demand[iid]["total"] += amount
-                # per_package/portion_count 取用量最大的套餐作为代表
-                if amount > ing_demand[iid]["per_package"] * ing_demand[iid]["order_qty"]:
-                    ing_demand[iid]["per_package"] = r["per_package"]
-                    ing_demand[iid]["portion_count"] = pc
-                ing_demand[iid]["order_qty"] += pk["quantity"]
-                ing_demand[iid]["total_portions"] += pc * pk["quantity"]
-                if r["cost_only"]:
-                    ing_demand[iid]["cost_only"] = True
+    for pk in pkgs:
+        _rows = _PKG_ING_CACHE.get(pk["package_id"]) if _CALC_PRIMED else None
+        if _rows is None:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT pi.per_package, pi.portion_count, pi.cost_only, i.id
+                    FROM package_ingredients pi
+                    JOIN ingredients i ON pi.ingredient_id = i.id
+                    WHERE pi.package_id = ?
+                """, (pk["package_id"],))
+                _rows = cur.fetchall()
+        for r in _rows:
+            amount = r["per_package"] * pk["quantity"]
+            pc = r["portion_count"] or 1
+            iid = r["id"]
+            if iid not in ing_demand:
+                ing_demand[iid] = {"total": 0, "per_package": r["per_package"],
+                                   "order_qty": 0, "portion_count": pc,
+                                   "total_portions": 0, "cost_only": bool(r["cost_only"])}
+            ing_demand[iid]["total"] += amount
+            # per_package/portion_count 取用量最大的套餐作为代表
+            if amount > ing_demand[iid]["per_package"] * ing_demand[iid]["order_qty"]:
+                ing_demand[iid]["per_package"] = r["per_package"]
+                ing_demand[iid]["portion_count"] = pc
+            ing_demand[iid]["order_qty"] += pk["quantity"]
+            ing_demand[iid]["total_portions"] += pc * pk["quantity"]
+            if r["cost_only"]:
+                ing_demand[iid]["cost_only"] = True
 
     # 备注加菜 + 换菜（与下方 calc_order_requirements / preview 同一套算法，避免分叉）
     from parser import parse_order_text, match_extra_ingredients_to_db, own_raw_block
@@ -1007,7 +1045,7 @@ def preview_parse(raw_text):
 
 # 食材分类展示顺序与中文名（用户要求：牛肉、猪肉、鸡肉、蔬菜、小料）
 # 注：packaging/utensil 不在主表展示，单独拎出到包装核对区和餐具核对区
-CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "side", "sauce", "drink", "packaging", "utensil", "staple", "other", "tool"]
+CATEGORY_ORDER = ["beef", "pork", "chicken", "vegetable", "side", "sauce", "drink", "packaging", "utensil", "other", "tool"]
 CATEGORY_LABEL = {
     "beef": "🥩 牛肉",
     "pork": "🥓 猪肉",
@@ -1018,7 +1056,6 @@ CATEGORY_LABEL = {
     "drink": "🎁 赠品",
     "packaging": "📦 食材包装",
     "utensil": "🍱 客户餐具",
-    "staple": "🍚 主食",
     "other": "📦 其他",
     "tool": "🔧 工具",
 }
@@ -1030,8 +1067,8 @@ UTENSIL_CATEGORY = "utensil"
 # 工具分类
 TOOL_CATEGORY = "tool"
 
-# 小料类：不再合并，side/sauce/staple/drink 各自独立分类显示
-# （与菜单页 CAT_ORDER 一致：素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具）
+# 小料类：不再合并，side/sauce/drink 各自独立分类显示
+# （与菜单页 CAT_ORDER 一致：素菜→小菜→小料→赠品→食材包装→客户餐具→其他→工具）
 SAUCE_LIKE_CATS = set()
 
 
@@ -1379,6 +1416,317 @@ def calc_merged_prep(order_ids):
 # 2. 按人数比例缩放 package_ingredients
 # 3. 成本校验（目标 38-45%）：超了减高价牛肉，不够加饱腹菜
 # 4. 工具按人数配：椅子=人数，炉子=ceil(人数/4)
+
+def _subcat(name, cat):
+    """细分肉类的统一口径（与 menu.html 前端 subcategorize 一致）。"""
+    if '馒头' in name:
+        return 'vegetable'
+    if cat != 'meat':
+        return cat
+    if '小肠' in name:
+        return 'beef'
+    if any(k in name for k in ['牛', '肥牛', '牛肋', '牛骰', '安格斯']):
+        return 'beef'
+    if any(k in name for k in ['鸡', '鸡翅', '鸡腿', '郡肝', '掌中宝', '脚筋']):
+        return 'chicken'
+    if any(k in name for k in ['猪', '五花', '香猪', '松板', '梅花', '风味肠', '肠']):
+        return 'pork'
+    return 'beef'
+
+
+def _get_setting(key, default, db=None):
+    db = db or get_db()
+    try:
+        row = db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        if row and row["value"] not in (None, ""):
+            return float(row["value"])
+    except Exception:
+        pass
+    return default
+
+
+def _template_outsource_price(db=None):
+    """默认场地搭建回收单价（与财务页 default_outsource 一致），无地址时取。"""
+    return _get_setting("default_outsource", 100, db)
+
+
+def get_delivery_cost_avg(address=None, db=None):
+    """已填配送成本（order_costs.kind='fuel'）的均价；不同地址不同价。
+    优先级：指定地址历史均值 → 全局已填均值 → 设置项 default_fuel_cost（默认20）兜底。"""
+    db = db or get_db()
+    cur = db.cursor()
+    rows = cur.execute("""SELECT oc.amount, o.address FROM order_costs oc
+                          JOIN orders o ON o.id=oc.order_id WHERE oc.kind='fuel'""").fetchall()
+    if not rows:
+        return float(_get_setting("default_fuel_cost", 20, db))
+    by_addr = {}
+    for r in rows:
+        a = (r["address"] or "").strip()
+        by_addr.setdefault(a, []).append(float(r["amount"]))
+    if address:
+        addr = (address or "").strip()
+        if addr and addr in by_addr:
+            return round(sum(by_addr[addr]) / len(by_addr[addr]), 2)
+        try:
+            from addresses import canonical_address
+            can = canonical_address(addr)
+            if can and can in by_addr:
+                return round(sum(by_addr[can]) / len(by_addr[can]), 2)
+        except Exception:
+            pass
+    allv = [v for vs in by_addr.values() for v in vs]
+    return round(sum(allv) / len(allv), 2)
+
+
+def _delivery_source(address, db=None):
+    """说明配送成本取值来源（用于前端展示）。"""
+    db = db or get_db()
+    cur = db.cursor()
+    rows = cur.execute("""SELECT oc.amount, o.address FROM order_costs oc
+                          JOIN orders o ON o.id=oc.order_id WHERE oc.kind='fuel'""").fetchall()
+    if not rows:
+        return "未填（兜底¥20）"
+    by_addr = {}
+    for r in rows:
+        a = (r["address"] or "").strip()
+        by_addr.setdefault(a, []).append(float(r["amount"]))
+    if address:
+        addr = (address or "").strip()
+        if addr and addr in by_addr:
+            return "该地址历史均价"
+        try:
+            from addresses import canonical_address
+            can = canonical_address(addr)
+            if can and can in by_addr:
+                return "该地址历史均价"
+        except Exception:
+            pass
+    return "全局已填均价"
+
+
+def standard_template_from_10():
+    """以 9-10人餐 为基准的人均克重模板（取该套餐 max_people 归一）。"""
+    db = get_db(); cur = db.cursor()
+    pkg = cur.execute("SELECT id, max_people FROM packages WHERE name LIKE '%9-10%' OR max_people=10 ORDER BY max_people DESC LIMIT 1").fetchone()
+    if not pkg:
+        pkg = cur.execute("SELECT id, max_people FROM packages ORDER BY max_people DESC LIMIT 1").fetchone()
+    pid, people = pkg["id"], max(1, pkg["max_people"])
+    per = {}
+    for c in ("beef", "pork", "chicken", "vegetable", "side", "sauce", "drink"):
+        rows = cur.execute("""SELECT i.name, i.unit, pi.per_package, i.category FROM package_ingredients pi
+                               JOIN ingredients i ON pi.ingredient_id=i.id WHERE pi.package_id=?""", (pid,)).fetchall()
+        g = sum(r["per_package"] for r in rows if _subcat(r["name"], r["category"]) == c and r["unit"] in ("g", "ml"))
+        if g > 0:
+            per[c] = round(g / people)
+    # 馒头（奶香小馒头）按个/人计（16个/10人 ≈ 1.6个/人），归素菜维度，不在 g 池里
+    mt = cur.execute("SELECT name, unit, per_package FROM package_ingredients pi JOIN ingredients i ON pi.ingredient_id=i.id WHERE pi.package_id=? AND i.name LIKE '%馒头%' LIMIT 1", (pid,)).fetchone()
+    mantou_pp = round(mt["per_package"] / people, 1) if mt else 1.6
+    return {"per_person_g": per, "target_margin": 0.50, "scale_percent": 100,
+            "min_per_person_g": {}, "per_person_unit": {"奶香小馒头": mantou_pp}}
+
+
+def tool_rent_breakdown(people, db=None, include_depreciation=False):
+    """装备租赁/折旧成本（默认租、按库存缺口租；折旧=租金×10% 默认不计，可一键计入）。
+    租金单价：天幕30/顶、蛋卷桌20/张、椅子10/把、卡式炉+烤盘一套15。
+    返回 {rental, depreciation(已算但未计入), detail:[{name,need,stock,shortage,rent_unit,rent,depreciation}]}。
+    """
+    db = db or get_db()
+    cur = db.cursor()
+    tmap = {r["name"]: dict(r) for r in cur.execute("SELECT id,name,stock,threshold,cost FROM tools")}
+    RENT = {"天幕": 30, "蛋卷桌": 20, "椅子": 10}
+    need = {n: tool_qty_by_people(n, people) for n in ("天幕", "蛋卷桌", "椅子", "卡式炉", "烤盘")}
+    detail, rental, depre = [], 0.0, 0.0
+    for n, ru in RENT.items():
+        q = need[n]; stock = tmap.get(n, {}).get("stock", 0)
+        shortage = max(0, q - stock); owned = min(q, stock)
+        rental += shortage * ru
+        dep = round(owned * ru * 0.1, 2)
+        depre += dep
+        detail.append({"name": n, "need": q, "stock": stock, "shortage": shortage,
+                       "rent_unit": ru, "rent": round(shortage * ru, 2), "depreciation": dep})
+    # 卡式炉+烤盘 按套计（一套15）
+    set_need = min(need["卡式炉"], need["烤盘"])
+    set_stock = min(tmap.get("卡式炉", {}).get("stock", 0), tmap.get("烤盘", {}).get("stock", 0))
+    set_short = max(0, set_need - set_stock); set_owned = min(set_need, set_stock)
+    rental += set_short * 15
+    set_dep = round(set_owned * 15 * 0.1, 2); depre += set_dep
+    detail.append({"name": "卡式炉+烤盘(套)", "need": set_need, "stock": set_stock,
+                   "shortage": set_short, "rent_unit": 15, "rent": round(set_short * 15, 2),
+                   "depreciation": set_dep})
+    return {"rental": round(rental, 2), "depreciation": round(depre, 2), "detail": detail}
+
+
+def build_template_menu(people, total_budget, per_person=None, kitchen_labor=0, delivery_labor=0,
+                        template=None, is_setup=False, address=None, scale_percent=100,
+                        cutting_labor=None, include_depreciation=False):
+    """基于『标准人均克重模板』生成菜单（与 catering_suggest 互补，不绑任何套餐）：
+    - 模板每类人均克重以 10人餐 为基准骨架；scale_percent(1%-200%) 控制新菜单为基准的几成
+    - 每类从该类食材池按成本升序选最便宜的 2-3 道凑满克重（主菜占60%、其余点缀，不堆一种最便宜的）
+    - 利润按与财务页『统一口径』计算：
+        总成本 = 食材 + (搭建回收[仅搭建] OR 配送成本[仅不搭建]) + 切配人工(默认40，多单+25/单)
+        毛利 = 餐标 - 总成本；利润率 = 毛利/餐标
+        配送成本未填时按『已填配送成本均价』取（不同地址不同价，无匹配用全局均价，再无则¥20兜底）
+    - 以 target_margin 为达标线；不达标诚实列出『换更便宜的菜可省多少』
+    """
+    import math
+    if per_person is not None:
+        total_budget = per_person * people
+    if people <= 0 or total_budget <= 0:
+        return {"ok": False, "msg": "人数和餐标必须大于0"}
+    if not template:
+        return {"ok": False, "msg": "未配置标准人均克重模板"}
+
+    base = template.get("per_person_g", {}) or {}
+    scale = max(1, min(200, float(scale_percent or 100))) / 100.0
+    per = {c: max(0, float(base.get(c, 0) or 0) * scale) for c in
+           ("beef", "pork", "chicken", "vegetable", "side", "sauce", "drink")}
+    target_margin = float(template.get("target_margin", 0.50) or 0.50)
+    cats = [c for c in per if per[c] > 0]
+
+    db = get_db()
+    cur = db.cursor()
+    # 食材池：按 g 计价、有成本、排除包装/餐具/工具
+    cur.execute("""SELECT id,name,unit,cost,category FROM ingredients
+                   WHERE unit='g' AND cost>0 AND category NOT IN ('packaging','utensil','tool')""")
+    pool = [dict(r) for r in cur.fetchall()]
+    by_cat = {}
+    for it in pool:
+        by_cat.setdefault(_subcat(it["name"], it["category"]), []).append(it)
+    for c in by_cat:
+        by_cat[c].sort(key=lambda x: x["cost"])   # 成本低→高
+
+    ingredients = []
+    for cat in cats:
+        total_g = per[cat] * people
+        if total_g <= 0:
+            continue
+        cands = by_cat.get(cat, [])
+        if not cands:
+            continue
+        pick = cands[:min(3, len(cands))]          # 取该类最便宜的 2-3 道
+        n = len(pick)
+        if n == 1:
+            assign = [total_g]
+        else:
+            # 最便宜的菜占 60%（主菜压成本），其余平分 40%（点缀/丰富度，避免只堆一种）
+            first = min(total_g, round(total_g * 0.6 / 10) * 10)
+            rest = total_g - first
+            assign = [first] + [rest // (n - 1)] * (n - 1)
+            assign[1] += rest - assign[1] * (n - 1)
+        is_gift = (cat == "drink")                 # 赠品/饮料不计成本
+        for i, it in enumerate(pick):
+            g = assign[i]
+            if g <= 0:
+                continue
+            unit_cost = 0 if is_gift else it["cost"]
+            ingredients.append({
+                "ing_id": it["id"], "name": it["name"], "unit": "g",
+                "cost": it["cost"], "category": cat, "cost_only": 1 if is_gift else 0,
+                "per_package": g,
+                "portion_count": max(1, round(g / 200)),
+                "portion_size": round(g / max(1, round(g / 200)), 1),
+                "sub_total": round(g * unit_cost, 2),
+            })
+
+    # 馒头（奶香小馒头）按个/人计，归素菜维度（用户指定 馒头归素菜，不单列主食分类）
+    pp_unit = template.get("per_person_unit", {}) or {}
+    mt_key = next((k for k in pp_unit if "馒头" in k), None)
+    if mt_key:
+        mrow = cur.execute("SELECT id,name,unit,cost FROM ingredients WHERE name LIKE ? LIMIT 1",
+                           ("%" + mt_key + "%",)).fetchone()
+        if mrow:
+            mqty = max(1, round(pp_unit[mt_key] * people))
+            mcost = mrow["cost"] or 0
+            ingredients.append({
+                "ing_id": mrow["id"], "name": mrow["name"], "unit": "个",
+                "cost": mcost, "category": "vegetable", "cost_only": 0,
+                "per_package": mqty,
+                "portion_count": mqty, "portion_size": 1,
+                "sub_total": round(mqty * mcost, 2),
+            })
+
+    food_cost = round(sum(x["sub_total"] for x in ingredients), 2)
+
+    # —— 统一利润口径（与财务页 order_profit / _auto_items 一致）——
+    units = max(1, math.ceil(people / 10.0))
+    out_price = _template_outsource_price(db)
+    if is_setup:
+        extra_name = "搭建回收"
+        extra_cost = round(units * out_price, 2)
+        extra_detail = "%d单 × ¥%g（默认场地搭建价）" % (units, out_price)
+    else:
+        extra_name = "配送成本"
+        extra_cost = round(get_delivery_cost_avg(address, db), 2)
+        extra_detail = _delivery_source(address, db)
+    # 切配人工：默认 40，多单 +25/单（labor_first/labor_per_unit，与财务一致）
+    cutting = float(cutting_labor) if cutting_labor is not None else round(40 + 25 * (units - 1), 2)
+
+    # 装备租赁：默认只算库存缺口（按租金租）；折旧=租金×10% 默认不计（include_depreciation 才计入）
+    rent = tool_rent_breakdown(people, db, include_depreciation=include_depreciation)
+    rental_cost = rent["rental"]
+    depreciation = rent["depreciation"] if include_depreciation else 0.0
+
+    total_cost = round(food_cost + extra_cost + cutting + rental_cost + depreciation, 2)
+    margin = round(total_budget - total_cost, 2)
+    margin_pct = round(margin / total_budget * 100, 1) if total_budget else 0
+    cost_ceiling = round(total_budget * (1 - target_margin), 2)   # 成本上限 = 餐标×(1-目标利润率)
+    is_ok = total_cost <= cost_ceiling
+
+    # 不达标：列出最贵菜 + 同池更便宜替代可省多少
+    suggestions = []
+    if not is_ok:
+        for x in sorted(ingredients, key=lambda z: -z["sub_total"])[:5]:
+            c = x["category"]
+            alts = [a for a in by_cat.get(c, []) if a["id"] != x["ing_id"] and a["cost"] < x["cost"]]
+            if alts:
+                cheaper = alts[0]
+                save = round(x["per_package"] * (x["cost"] - cheaper["cost"]), 2)
+                suggestions.append("把「%s」换成「%s」可省 ¥%.2f/%d人" % (x["name"], cheaper["name"], save, people))
+            else:
+                suggestions.append("「%s」已是%s类最便宜，无法再降——只能减克重或提高餐标" % (x["name"], c))
+
+    # 工具按人数配（与现有配餐器同一口径）
+    cur.execute("SELECT id,name,stock,threshold,cost FROM tools")
+    all_tools = [dict(r) for r in cur.fetchall()]
+    tool_list = []
+    for t in all_tools:
+        qty = tool_qty_by_people(t["name"], people)
+        tool_list.append({"id": t["id"], "name": t["name"], "per_package": qty,
+                          "stock": t["stock"], "shortage": max(0, qty - t["stock"])})
+
+    meat_weight = sum(x["per_package"] for x in ingredients if x["category"] in ("beef", "pork", "chicken"))
+    return {
+        "ok": True,
+        "data": {
+            "base_package": "标准人均克重模板（10人餐基准）",
+            "base_people": people,
+            "ratio": round(scale, 2),
+            "scale_percent": int(round(scale * 100)),
+            "is_setup": bool(is_setup),
+            "ingredients": ingredients,
+            "tools": tool_list,
+            "summary": {
+                "people": people, "budget": total_budget, "per_person": round(total_budget / people, 2),
+                "food_cost": food_cost,
+                "extra_name": extra_name, "extra_cost": extra_cost, "extra_detail": extra_detail,
+                "cutting_labor": cutting,
+                "rental_cost": rental_cost,
+                "depreciation": depreciation,
+                "include_depreciation": bool(include_depreciation),
+                "rent_detail": rent["detail"],
+                "labor_cost": round(extra_cost + cutting + rental_cost + depreciation, 2),
+                "total_cost": total_cost,
+                "margin": margin, "margin_pct": margin_pct,
+                "meat_weight_per_person": round(meat_weight / people),
+                "cost_ceiling": cost_ceiling,
+                "is_healthy": is_ok,
+                "target_margin": target_margin,
+            },
+            "warnings": suggestions,
+            "suggestions": suggestions,
+        },
+    }
+
 
 def catering_suggest(people, total_budget, per_person=None, kitchen_labor=0, delivery_labor=0):
     """餐标配餐器：返回建议方案（食材列表+工具+成本摘要）

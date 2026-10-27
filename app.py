@@ -295,6 +295,43 @@ def _fix_pkg_setup_flags():
     return fixed
 
 
+def _fix_empty_addresses():
+    """一次性数据修复：补全「录入时地址没被解析出来」的历史订单（幂等）。
+
+    背景：早期 parser 只认「预约地址:」前缀，不认纯「地址:」（万娅 321 那单写的是
+    纯「地址:青龙湖二期」），导致 address 字段留空。后果：财务/订单按地址分组时
+    这单归不到「青龙湖」，区域统计也缺这一单。
+
+    做法：启动时对所有 address 为空的单，用当前 parser 现解析 raw_text 取地址补全。
+    parser 现已支持纯「地址:」前缀，所以 321 会被正确补成「青龙湖二期」；而仅仅是
+    联系人行里含「地址」二字、本就没填地址的单（如 240/248/251/254）不会被误填。
+    幂等：只在「parser 能解析出非空地址 且 库里为空」时更新；补完再跑不动。
+    """
+    from parser import parse_order_text
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, raw_text, address FROM orders WHERE deleted_at IS NULL "
+        "AND (address IS NULL OR TRIM(address)='')"
+    ).fetchall()
+    fixed = []
+    for r in rows:
+        if not r["raw_text"]:
+            continue
+        parsed = parse_order_text(r["raw_text"])
+        addr = (parsed.get("address") or "").strip()
+        if addr and addr != (r["address"] or "").strip():
+            db.execute("UPDATE orders SET address=? WHERE id=?", (addr, r["id"]))
+            fixed.append((r["id"], addr))
+    if fixed:
+        db.commit()
+        try:
+            from db_backup import mark_write
+            mark_write()  # 改动后立即推 GitHub，避免下次启动又被旧镜像覆盖
+        except Exception:
+            pass
+    return fixed
+
+
 # ===== 一次性数据修复：补回被漏掉的套餐 =====
 # 背景：解析器曾把「10人餐+8人餐」只当成 10 人餐（只取了第一个数字），第二个套餐被整个丢掉。
 # 后果：18 人的单只按 10 人入库 → 食材/搭建费/人工全都少算（搭建费 200 只收了 100）。
@@ -317,6 +354,14 @@ try:
         print("[init] 已修正套餐搭建标记：%s" % _fixed2)
 except Exception as _e:
     print(f"[init] fix_pkg_setup_flags skipped: {_e}")
+
+# ===== 一次性数据修复：补全空地址（早期 parser 只认"预约地址"漏掉纯"地址"）=====
+try:
+    _fixed3 = _fix_empty_addresses()
+    if _fixed3:
+        print("[init] 已补全空地址：%s" % _fixed3)
+except Exception as _e:
+    print(f"[init] fix_empty_addresses skipped: {_e}")
 
 # 启动定时备份（10分钟）
 try:
@@ -618,10 +663,12 @@ def auth_guard():
     g.cur_user = user
     # 角色不够（按等级比：staff 1 < partner 2 < boss 3）
     if ROLE_LEVEL.get(user["role"], 0) < ROLE_LEVEL.get(need, 1):
-        if path.startswith("/api/"):
-            if need == "boss":
-                # 原数据/配置：不回"无权限"（免得对方在界面上感觉出分等级），直接当不存在
+        # 老板专属（账号页/原数据/配置）：不回"无权限"（免得对方在界面上感觉出分等级），直接当不存在
+        if need == "boss":
+            if path.startswith("/api/"):
                 return jsonify({"ok": False, "msg": "未找到"}), 404
+            return "未找到", 404
+        if path.startswith("/api/"):
             return jsonify({"ok": False, "msg": "无权限：该操作仅老板/合伙人可用"}), 403
         return "无权限：该页面仅老板/合伙人可访问", 403
 
@@ -3310,18 +3357,84 @@ def del_package(pid):
 # ===== 餐标配餐器 =====
 @app.route("/api/catering/suggest", methods=["POST"])
 def catering_suggest():
-    """餐标配餐器：输入人数+餐标+人工成本，返回建议套餐方案"""
-    from calculator import catering_suggest as _cs
+    """餐标配餐器：输入人数+餐标+人工成本，返回建议套餐方案。
+    mode='package'（默认）：按最接近套餐缩放；mode='template'：按标准人均克重模板配菜单。"""
+    from calculator import catering_suggest as _cs, build_template_menu
+    import json
     data = request.get_json(force=True)
     people = int(data.get("people", 0))
     total = float(data.get("total_budget", 0))
     per_person = data.get("per_person")
     kitchen_labor = float(data.get("kitchen_labor", 0))
     delivery_labor = float(data.get("delivery_labor", 0))
+    mode = data.get("mode", "package")
+    is_setup = bool(data.get("is_setup", False))
+    address = data.get("address") or None
+    scale_percent = data.get("scale_percent", 100)
+    cutting_labor = data.get("cutting_labor")
+    include_depreciation = bool(data.get("include_depreciation", False))
     if per_person is not None:
         per_person = float(per_person)
-    result = _cs(people, total, per_person, kitchen_labor, delivery_labor)
+    if mode == "template":
+        tpl = load_menu_template()
+        result = build_template_menu(people, total, per_person, kitchen_labor, delivery_labor,
+                                     template=tpl, is_setup=is_setup, address=address,
+                                     scale_percent=scale_percent, cutting_labor=cutting_labor,
+                                     include_depreciation=include_depreciation)
+    else:
+        result = _cs(people, total, per_person, kitchen_labor, delivery_labor)
     return jsonify(result)
+
+
+# 标准人均克重模板默认值（以 10人餐 人均克重为基准；可在菜单页配餐器里编辑保存）
+DEFAULT_MENU_TEMPLATE = {
+    "per_person_g": {"beef": 90, "pork": 117, "chicken": 84,
+                     "vegetable": 242, "side": 120, "sauce": 110, "drink": 150},
+    "target_margin": 0.50,          # 目标利润率 50%（用户 2026-10-27 确认）
+    "scale_percent": 100,           # 人均克重比例：基准(10人餐)的几成，1%-200% 可调
+    "min_per_person_g": {},         # 每样菜最低人均克重（可选，暂留空）
+    "per_person_unit": {"奶香小馒头": 1.6},  # 馒头按个/人（归素菜维度，不在 g 池）
+}
+
+
+def load_menu_template():
+    import json
+    try:
+        row = g.db.execute("SELECT value FROM settings WHERE key='menu_template'").fetchone()
+        if row and row["value"]:
+            return json.loads(row["value"])
+    except Exception:
+        pass
+    from calculator import standard_template_from_10
+    return standard_template_from_10()
+
+
+@app.route("/api/menu-template", methods=["GET"])
+def get_menu_template():
+    return jsonify({"ok": True, "template": load_menu_template()})
+
+
+@app.route("/api/menu-template", methods=["PUT", "POST"])
+def put_menu_template():
+    import json
+    data = request.get_json(force=True)
+    tpl = data.get("template") or data
+    clean = {
+        "per_person_g": tpl.get("per_person_g", DEFAULT_MENU_TEMPLATE["per_person_g"]),
+        "target_margin": float(tpl.get("target_margin", 0.40) or 0.40),
+        "scale_percent": int(tpl.get("scale_percent", 100) or 100),
+        "min_per_person_g": tpl.get("min_per_person_g", {}) or {},
+    }
+    cur = g.db.cursor()
+    cur.execute("SELECT 1 FROM settings WHERE key='menu_template'")
+    if cur.fetchone():
+        cur.execute("UPDATE settings SET value=? WHERE key='menu_template'",
+                    (json.dumps(clean, ensure_ascii=False),))
+    else:
+        cur.execute("INSERT INTO settings(key, value) VALUES('menu_template', ?)",
+                    (json.dumps(clean, ensure_ascii=False),))
+    g.db.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/catering/save", methods=["POST"])
@@ -3517,22 +3630,22 @@ def export_menu_xlsx():
         p["tools"] = sort_tools([dict(r) for r in cur.fetchall()], "per_package", "tool")
 
     # 与网页菜单完全一致的分类顺序与标签（以菜单原数据页 CAT_ORDER 为准）
-    # beef→pork→chicken→vegetable→side→sauce→drink→packaging→utensil→staple→other→tool
+    # beef→pork→chicken→vegetable→side→sauce→drink→packaging→utensil→other→tool
     EXPORT_CAT_ORDER = [
         "beef", "pork", "chicken", "vegetable", "side", "sauce", "drink",
-        "packaging", "utensil", "staple", "other", "tool"
+        "packaging", "utensil", "other", "tool"
     ]
     cat_colors = {
         'beef': '8E1E1A', 'pork': 'C75D3E', 'chicken': 'C9962B',
         'vegetable': '3A8A3A', 'side': '5A8A3A', 'sauce': '7A5A3A',
-        'drink': '666666', 'staple': '666666',
+        'drink': '666666',
         'packaging': 'D35400', 'utensil': '8E44AD', 'other': '666666',
         'tool': '4A4A4A'
     }
     cat_labels = {
         'beef': '🥩 牛肉', 'pork': '🥓 猪肉', 'chicken': '🍗 鸡肉',
         'vegetable': '🥬 素菜', 'side': '🥗 小菜', 'sauce': '🧂 小料',
-        'drink': '🎁 赠品', 'staple': '🍚 主食',
+        'drink': '🎁 赠品',
         'packaging': '📦 食材包装', 'utensil': '🍱 客户餐具',
         'other': '📦 其他', 'tool': '🔧 工具'
     }
@@ -3760,12 +3873,12 @@ def export_prep_matrix():
         return bool(vals) and all(vals)
 
     cat_colors = {'beef':'8E1E1A','pork':'C75D3E','chicken':'C9962B','vegetable':'3A8A3A',
-                  'side':'5A8A3A','sauce':'7A5A3A','drink':'666666','staple':'666666',
+                  'side':'5A8A3A','sauce':'7A5A3A','drink':'666666',
                   'packaging':'D35400','utensil':'8E44AD','other':'666666','tool':'4A4A4A'}
     cat_labels = {'beef':'🥩 牛肉','pork':'🥓 猪肉','chicken':'🍗 鸡肉','vegetable':'🥬 素菜',
-                  'side':'🥗 小菜','sauce':'🧂 小料','drink':'🎁 赠品','staple':'🍚 主食',
+                  'side':'🥗 小菜','sauce':'🧂 小料','drink':'🎁 赠品',
                   'packaging':'📦 食材包装','utensil':'🍱 客户餐具','other':'📦 其他','tool':'🔧 工具'}
-    EXPORT_CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','staple','packaging','utensil','other','tool']
+    EXPORT_CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','other','tool']
     ing_fixed_order = [
         ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
         ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
@@ -3783,7 +3896,7 @@ def export_prep_matrix():
         if is_tool:
             return 'tool'
         raw = v["category"]
-        if raw in ('packaging','utensil','drink','staple','side','sauce','other','vegetable'):
+        if raw in ('packaging','utensil','drink','side','sauce','other','vegetable'):
             return raw
         return _subcategorize_meat(v["name"], raw)
 
@@ -3833,9 +3946,9 @@ def export_prep_matrix():
         except Exception:
             return x
         return int(x) if abs(x - round(x)) < 1e-9 else x
-    # 类别列用的简称（与参考备餐清单一致：荤菜/素菜/主食/小菜/蘸料/饮料/餐具配套/装备）
+    # 类别列用的简称（与参考备餐清单一致：荤菜/素菜/小菜/蘸料/饮料/餐具配套/装备）
     cat_short = {'beef': '荤菜', 'pork': '荤菜', 'chicken': '荤菜', 'vegetable': '素菜',
-                 'staple': '主食', 'side': '小菜', 'sauce': '蘸料', 'drink': '饮料',
+                 'side': '小菜', 'sauce': '蘸料', 'drink': '饮料',
                  'packaging': '餐具配套', 'utensil': '餐具配套', 'other': '其他', 'tool': '装备'}
     for cat in EXPORT_CAT_ORDER:
         items = cats[cat]
@@ -4477,9 +4590,14 @@ def finance_profit_overview():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _ck = "po:" + request.url
+    _cached = _fin_cache_get(_ck)
+    if _cached is not None:
+        return jsonify(_cached)
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
                          extra_clause=_clause, extra_params=_params)
     _annotate_setup_flags(g.db, ov.get("orders", []))
+    _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
 
 
@@ -4493,10 +4611,46 @@ def finance_period_real_profit():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _ck = "prp:" + request.url
+    _cached = _fin_cache_get(_ck)
+    if _cached is not None:
+        return jsonify(_cached)
     ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
                             extra_clause=_clause, extra_params=_params)
     _annotate_setup_flags(g.db, ov.get("orders", []))
+    _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
+
+
+# ---- 财务重接口内存缓存：避免每次全量重算数百单（免费实例 CPU/磁盘受限，每次数秒）----
+import time as _t
+_FIN_CACHE = {}
+_FIN_CACHE_TTL = 120  # 秒：财务数据非秒级变化，2 分钟内复用结果；改数据后在写入入口显式失效，最多 2 分钟自动刷新
+def _fin_cache_get(key):
+    v = _FIN_CACHE.get(key)
+    if v and (_t.time() - v[0]) < _FIN_CACHE_TTL:
+        return v[1]
+    return None
+def _fin_cache_put(key, payload):
+    _FIN_CACHE[key] = (_t.time(), payload)
+def _fin_cache_invalidate():
+    _FIN_CACHE.clear()
+
+
+# 任一"会影响利润的写入"成功后，让财务缓存失效——下次读实时重算，最多 2 分钟自动刷新兜底。
+# 集中在 teardown 一处处理，避免漏改各写入接口；只读(GET)不触发。
+_FIN_INVALIDATE_PREFIXES = ("/api/orders", "/api/finance/expense", "/api/finance/order",
+                            "/api/cost", "/api/ingredients", "/api/config",
+                            "/api/update-settings", "/config")
+@app.teardown_request
+def _fin_cache_invalidate_on_write(_exc):
+    try:
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            p = request.path or ""
+            if any(p.startswith(x) for x in _FIN_INVALIDATE_PREFIXES):
+                _fin_cache_invalidate()
+    except Exception:
+        pass
 
 
 def _annotate_setup_flags(db, orders):
@@ -5438,7 +5592,12 @@ def analytics_overview():
 
     places = dist(lambda x: x["address"])
     hours = dist(lambda x: (x["hour"] + "点") if x["hour"] else "", 8)
-    hours.sort(key=lambda x: int(x["name"].replace("点", "") or 0))
+    def _hour_key(x):
+        try:
+            return int(x["name"].replace("点", "") or 0)
+        except Exception:
+            return 99                      # 时段「未填」排最后，不转数字避免 500
+    hours.sort(key=_hour_key)
     WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     weekdays = dist(lambda x: (WD[to_date(x["date"]).weekday()] if to_date(x["date"]) else ""), 7)
     weekdays.sort(key=lambda x: WD.index(x["name"]) if x["name"] in WD else 9)
@@ -5577,7 +5736,7 @@ def print_menu():
     cat_colors = {
         "beef": "#8e1e1a", "pork": "#c75d3e", "chicken": "#c9962b",
         "vegetable": "#3a8a3a", "side": "#5a8a3a", "sauce": "#7a5a3a",
-        "drink": "#666666", "staple": "#888888", "other": "#6b4f3a",
+        "drink": "#666666", "other": "#6b4f3a",
         "packaging": "#d35400", "utensil": "#8e44ad", "tool": "#4a4a4a",
     }
     # 食材按分类渲染（与备餐/菜单页顺序一致：含packaging/utensil，不再单独处理）
@@ -5811,7 +5970,6 @@ def _menu_print_build(show_cost):
         ("drink", "赠饮", "🎁", "#666666"),
         ("packaging", "食材包装", "📦", "#d35400"),
         ("utensil", "客户餐具", "🍱", "#8e44ad"),
-        ("staple", "主食", "🍚", "#b8860b"),
         ("other", "其他", "📦", "#6b4f3a"),
     ]
     # 固定显示顺序（与菜单原数据页完全一致）：避免各套餐因数量排序而乱跳，破坏观看惯性
@@ -5827,7 +5985,7 @@ def _menu_print_build(show_cost):
 
     def eff_cat(name, raw):
         raw = raw or "other"
-        if raw in ("packaging", "utensil", "drink", "staple", "side", "sauce", "other", "vegetable"):
+        if raw in ("packaging", "utensil", "drink", "side", "sauce", "other", "vegetable"):
             return raw
         return _subcategorize_meat(name, raw)
 

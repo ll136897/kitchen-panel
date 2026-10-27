@@ -108,10 +108,6 @@
   .cat-drink    .prep-row{background:#eee}
   .cat-drink    .prep-row:nth-child(odd){background:#e6e6e6}
 
-  .cat-staple   .cat-head{background:#888}                 /* 主食·深灰 */
-  .cat-staple   .prep-row{background:#f0f0f0}
-  .cat-staple   .prep-row:nth-child(odd){background:#e8e8e8}
-
   .cat-other    .cat-head{background:#666}                 /* 其他·灰 */
   .cat-other    .prep-row{background:#eee}
   .cat-other    .prep-row:nth-child(odd){background:#e6e6e6}
@@ -416,7 +412,7 @@
     <div class="ord-hint">点左侧色条 = 标记已备 / 未备；点任意一行 = 看这单要备什么</div>
   </div>
 
-  <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具） -->
+  <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→其他→工具） -->
   <div class="card" id="prepCard" style="display:none">
     <div class="sec-toolbar">
       <h3 style="margin:0"><span class="dot" style="background:var(--primary)"></span>📋 备餐核对清单</h3>
@@ -459,9 +455,9 @@ const CAT_LABEL = {
   beef:'🥩 牛肉', pork:'🥓 猪肉', chicken:'🍗 鸡肉',
   vegetable:'🥬 素菜', side:'🥗 小菜', sauce:'🧂 小料', drink:'🎁 赠品',
   packaging:'📦 食材包装', utensil:'🍱 客户餐具',
-  staple:'🍚 主食', other:'📦 其他', tool:'🔧 工具'
+  other:'📦 其他', tool:'🔧 工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','other','tool'];
 
 // ===== 归属筛选（这单算谁的）：全部 / 我归属的 / 某人归属的（两人的单都算进系统，但可以分开看）=====
 const CUR_USER = {{ (cur_user or {})|tojson }};
@@ -1592,7 +1588,7 @@ function subcatFor(name, cat){
   // 馒头归素菜（用户指定）
   if(n.includes('馒头')) return 'vegetable';
   if(cat !== 'meat') {
-    // side(小菜)/sauce(小料)/drink(赠品)/staple(主食) 各自独立，不再合并
+    // side(小菜)/sauce(小料)/drink(赠品) 各自独立，不再合并
     return cat;
   }
   // 小肠优先归牛肉（爆汁烤小肠 = 牛肠）

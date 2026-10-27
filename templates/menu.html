@@ -59,7 +59,6 @@
   .cat-sauce{background:#7a5a3a}
   .cat-packaging{background:#d35400}
   .cat-utensil,.cat-tableware{background:#8e44ad}
-  .cat-staple,.cat-drink,.cat-other{background:#666}
   .cat-tool{background:#4a4a4a}
   .badge-cat{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;color:#fff;margin-left:4px}
 </style>
@@ -104,11 +103,36 @@
       <button class="btn btn-primary btn-sm" onclick="generateCatering()">🚀 生成方案</button>
     </div>
 
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px;padding:12px;background:#fff3cd;border-radius:10px;border:1px solid #ffeaa7">
-      <span style="font-weight:700;color:#856404">👤 兼职人工成本（每单）</span>
-      <label>后厨 ¥ <input type="number" id="cat_kitchen_labor" value="60" min="0" step="20" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
-      <label>配送 ¥ <input type="number" id="cat_delivery_labor" value="100" min="0" step="50" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
-      <span style="font-size:12px;color:#856404">合计人工 ¥<b id="cat_labor_total" style="font-size:14px">160</b>/单</span>
+    <div style="font-size:12px;color:#888;margin-bottom:8px">💡 总餐标与人均可互填：填一个会自动算出另一个</div>
+
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#eef6ff;border-radius:10px">
+      <span style="font-weight:700;color:#27ae60">配餐基准：</span>
+      <label><input type="radio" name="cat_mode" value="package" checked onchange="toggleCatMode()"> 按最近套餐缩放</label>
+      <label><input type="radio" name="cat_mode" value="template" onchange="toggleCatMode()"> 📐 标准人均克重模板</label>
+    </div>
+    <div id="tplPanel" style="display:none;margin-bottom:12px;padding:12px;background:#f0f7ff;border:1px solid #bcd4ef;border-radius:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <b style="color:#2c6">📐 标准人均克重模板</b>
+        <span style="font-size:12px;color:#666">每类每人多少克，改完直接生成试效果（不保存也能看）</span>
+        <button class="btn btn-sm" onclick="saveTemplate()">💾 保存此模板</button>
+      </div>
+      <div id="tplGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;font-size:13px"></div>
+      <div style="margin-top:8px;font-size:13px">
+        目标利润率 <input type="number" id="tpl_margin" value="40" min="0" max="90" style="width:60px"> %（成本上限 = 餐标 × (100 − 此值)）
+      </div>
+      <div style="margin-top:8px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:13px">
+        <label><input type="checkbox" id="tpl_is_setup"> 含搭建（收搭建回收，不计配送）</label>
+        <label>配送地址 <input type="text" id="tpl_address" placeholder="如：青龙湖二期（留空按全局均价）" style="width:240px;padding:5px;border:1px solid #ddd;border-radius:6px"></label>
+        <label>切配人工 ¥<input type="number" id="tpl_cutting" value="40" min="0" style="width:60px;padding:5px;border:1px solid #ddd;border-radius:6px"></label>
+        <label>馒头 <input type="number" id="tpl_mantou" value="1.6" min="0" step="0.1" style="width:60px;padding:5px;border:1px solid #ddd;border-radius:6px"> 个/人</label>
+        <label><input type="checkbox" id="tpl_include_dep"> 计入折旧（自有装备×租金×10%）</label>
+      </div>
+      <div style="margin-top:8px;font-size:13px">
+        人均克重比例
+        <input type="range" id="tpl_scale" min="1" max="200" value="100" oninput="document.getElementById('tpl_scale_val').textContent=this.value+'%'">
+        <b id="tpl_scale_val">100%</b>
+        <span style="color:#888">（基准 = 10人餐人均克重，1%–200% 可调）</span>
+      </div>
     </div>
 
     <div id="cateringResult"></div>
@@ -130,9 +154,9 @@ const CAT_LABEL = {
   vegetable:'🥬素菜', side:'🥗小菜', sauce:'🧂小料', drink:'🎁赠品',
   packaging:'📦食材包装',
   utensil:'🍱客户餐具',
-  staple:'主食', other:'其他', tool:'🔧工具'
+  other:'其他', tool:'🔧工具'
 };
-const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','staple','other','tool'];
+const CAT_ORDER = ['beef','pork','chicken','vegetable','side','sauce','drink','packaging','utensil','other','tool'];
 
 // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
 // 注：菜单页 side(小菜) 与 sauce(蘸料) 分开显示，故分别定义
@@ -540,35 +564,68 @@ function downloadFile(url){
 // ===== 刷新特效 =====
 let cateringData = null;  // 当前生成的方案，供保存用
 const CAT_COLOR = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',
-  side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',staple:'#888',other:'#666',
+  side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',other:'#666',
   packaging:'#d35400',utensil:'#8e44ad',tool:'#4a4a4a',meat:'#8e1e1a'};
 
 function openCatering(){
   document.getElementById('cateringModal').style.display='block';
-  // 绑定人工成本实时合计
-  const updLabor = ()=>{
-    const k = parseFloat(document.getElementById('cat_kitchen_labor').value)||0;
-    const d = parseFloat(document.getElementById('cat_delivery_labor').value)||0;
-    document.getElementById('cat_labor_total').textContent = (k+d).toFixed(0);
-  };
-  document.getElementById('cat_kitchen_labor').oninput = updLabor;
-  document.getElementById('cat_delivery_labor').oninput = updLabor;
-  // 人数超过10自动配送翻倍（2单×100=200）
-  const autoDelivery = ()=>{
-    const p = parseInt(document.getElementById('cat_people').value)||0;
-    const dl = document.getElementById('cat_delivery_labor');
-    if(dl.dataset.touched !== '1'){
-      dl.value = p > 10 ? 200 : 100;
+  // 总餐标 ↔ 人均 双向联动：填一个自动算另一个
+  const pe = document.getElementById('cat_people');
+  const be = document.getElementById('cat_budget');
+  const pe_p = document.getElementById('cat_perperson');
+  const linkFrom = (src)=>{
+    const p = parseInt(pe.value)||0;
+    if(p <= 0) return;
+    if(src === 'budget'){
+      const b = parseFloat(be.value)||0;
+      pe_p.value = Math.round(b / p * 100) / 100;
+    } else if(src === 'perperson'){
+      const pp = parseFloat(pe_p.value)||0;
+      be.value = Math.round(pp * p);
+    } else { // people 变动：优先按人均反推总餐标，否则按总餐标推人均
+      if(pe_p.value){ be.value = Math.round(parseFloat(pe_p.value) * p); }
+      else if(be.value){ pe_p.value = Math.round(parseFloat(be.value) / p * 100) / 100; }
     }
-    updLabor();
   };
-  document.getElementById('cat_people').oninput = autoDelivery;
-  // 用户手动改过配送就不再自动
-  document.getElementById('cat_delivery_labor').onchange = function(){ this.dataset.touched='1'; };
-  autoDelivery();
+  be.oninput = ()=>linkFrom('budget');
+  pe_p.oninput = ()=>linkFrom('perperson');
+  pe.oninput = ()=>linkFrom('people');
+  toggleCatMode();
+  loadTplPanel();
 }
 function closeCatering(){
   document.getElementById('cateringModal').style.display='none';
+}
+
+function toggleCatMode(){
+  const m = document.querySelector('input[name=cat_mode]:checked').value;
+  document.getElementById('tplPanel').style.display = (m === 'template') ? 'block' : 'none';
+}
+function loadTplPanel(){
+  fetch('/api/menu-template').then(r=>r.json()).then(res=>{
+    if(!res.ok) return;
+    const t = res.template || {};
+    const per = t.per_person_g || {};
+    const labels = {beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',sauce:'小料',drink:'赠品/饮'};
+    const grid = document.getElementById('tplGrid');
+    if(grid) grid.innerHTML = Object.keys(labels).map(c=>
+      '<label style="display:flex;gap:4px;align-items:center">'+labels[c]+
+      ' <input type="number" id="tpl_'+c+'" value="'+(per[c]||0)+'" min="0" style="width:64px"> g/人</label>'
+    ).join(' ');
+    const mg = document.getElementById('tpl_margin');
+    if(mg) mg.value = Math.round((t.target_margin||0.4)*100);
+  });
+}
+function saveTemplate(){
+  const labels = {beef:1,pork:1,chicken:1,vegetable:1,side:1,sauce:1,drink:1};
+  const per = {};
+  Object.keys(labels).forEach(c=>{ per[c] = parseFloat(document.getElementById('tpl_'+c).value)||0; });
+  const margin = parseFloat(document.getElementById('tpl_margin').value)||40;
+  const scale = parseInt(document.getElementById('tpl_scale').value)||100;
+  const mantou = parseFloat(document.getElementById('tpl_mantou').value)||1.6;
+  fetch('/api/menu-template',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({template:{per_person_g:per, target_margin:margin/100, scale_percent:scale, min_per_person_g:{}, per_person_unit:{'奶香小馒头':mantou}}})
+  }).then(r=>r.json()).then(res=>{ alert(res.ok ? '✓ 模板已保存' : '保存失败'); });
 }
 
 function generateCatering(){
@@ -580,9 +637,24 @@ function generateCatering(){
   if(people<=0){ alert('请输入人数'); return; }
   if(perPerson===null && budget<=0){ alert('请输入总餐标或人均'); return; }
 
+  const mode = document.querySelector('input[name=cat_mode]:checked').value;
   const body = {people, total_budget: perPerson ? perPerson*people : budget,
-    kitchen_labor: kitchenLabor, delivery_labor: deliveryLabor};
+    kitchen_labor: kitchenLabor, delivery_labor: deliveryLabor, mode};
   if(perPerson) body.per_person = perPerson;
+  if(mode === 'template'){
+    const labels = {beef:1,pork:1,chicken:1,vegetable:1,side:1,sauce:1,drink:1};
+    const per = {};
+    Object.keys(labels).forEach(c=>{ per[c] = parseFloat(document.getElementById('tpl_'+c).value)||0; });
+    const margin = parseFloat(document.getElementById('tpl_margin').value)||40;
+    const mantou = parseFloat(document.getElementById('tpl_mantou').value)||1.6;
+    body.template = {per_person_g: per, target_margin: margin/100, min_per_person_g: {}, per_person_unit:{'奶香小馒头':mantou}};
+    body.is_setup = document.getElementById('tpl_is_setup').checked;
+    body.address = document.getElementById('tpl_address').value.trim();
+    body.scale_percent = parseInt(document.getElementById('tpl_scale').value)||100;
+    body.include_depreciation = document.getElementById('tpl_include_dep').checked;
+    const cutting = parseFloat(document.getElementById('tpl_cutting').value)||0;
+    if(cutting>0) body.cutting_labor = cutting;
+  }
 
   fetch('/api/catering/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)})
@@ -598,7 +670,7 @@ function renderCatering(d){
   const ingRows = d.ingredients.map(it=>{
     const color = CAT_COLOR[it.category] || '#666';
     const catName = ({beef:'牛肉',pork:'猪肉',chicken:'鸡肉',vegetable:'素菜',side:'小菜',
-      sauce:'小料',drink:'赠品',staple:'主食',other:'其他',packaging:'包装',
+      sauce:'小料',drink:'赠品',other:'其他',packaging:'包装',
       utensil:'餐具',meat:'肉类'})[it.category] || it.category;
     const pc = it.portion_count||1;
     const ps = it.portion_size||0;
@@ -627,6 +699,14 @@ function renderCatering(d){
 
   const healthColor = s.is_healthy ? '#27ae60' : '#c0392b';
   const warnHtml = (d.warnings||[]).map(w=>`<div style="color:#c0392b;padding:4px 0">⚠️ ${w}</div>`).join('');
+  // 装备租赁/折旧（模板模式有，套餐模式无则默认0/不显示）
+  const rentalCost = Math.round((s.rental_cost||0)*100)/100;
+  const deprec = Math.round((s.depreciation||0)*100)/100;
+  const inclDep = !!s.include_depreciation;
+  const rentDet = (s.rent_detail||[]).filter(x=>x.shortage>0);
+  const rentStr = rentDet.map(x=>x.name+'×'+x.shortage).join(' ');
+  const depDet = (s.rent_detail||[]).filter(x=>x.depreciation>0);
+  const depStr = depDet.map(x=>x.name+'×¥'+x.depreciation).join(' ');
   document.getElementById('cateringResult').innerHTML = `
     <div style="background:#faf5ed;padding:10px;border-radius:8px;margin-bottom:12px;font-size:13px">
       参考 <b>${d.base_package}</b>（${d.base_people}人）按 ${d.ratio}x 缩放
@@ -642,10 +722,24 @@ function renderCatering(d){
         <div style="font-size:12px;color:#888">食材成本</div><b style="color:#c0392b">¥${s.food_cost}</b>
       </div>
       <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:8px 12px;border-radius:8px">
-        <div style="font-size:12px;color:#856404">人工成本</div>
-        <b style="color:#856404">¥${s.labor_cost}</b>
-        <span style="font-size:10px;color:#856404">(后厨¥${s.kitchen_labor}+配送¥${s.delivery_labor})</span>
+        <div style="font-size:12px;color:#856404">${s.extra_name}</div>
+        <b style="color:#856404">¥${s.extra_cost}</b>
+        <span style="font-size:10px;color:#856404">${s.extra_detail}</span>
       </div>
+      <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#856404">切配人工</div>
+        <b style="color:#856404">¥${s.cutting_labor||0}</b>
+      </div>
+      <div style="background:#e8f4ff;border:1px solid #bcd4ef;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#2980b9">装备租赁(库存缺口)</div>
+        <b style="color:#2980b9">¥${rentalCost}</b>
+        ${rentStr?`<div style="font-size:10px;color:#666;margin-top:2px">${rentStr}</div>`:''}
+      </div>
+      ${inclDep?`<div style="background:#fde8ef;border:1px solid #f5c6d6;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#c0392b">装备折旧(×10%)</div>
+        <b style="color:#c0392b">¥${deprec}</b>
+        ${depStr?`<div style="font-size:10px;color:#666;margin-top:2px">${depStr}</div>`:''}
+      </div>`:''}
       <div style="background:#fff;border:1px solid #c0392b;padding:8px 12px;border-radius:8px">
         <div style="font-size:12px;color:#888">总成本</div><b style="color:#c0392b">¥${s.total_cost}</b>
       </div>
@@ -653,8 +747,12 @@ function renderCatering(d){
         <div style="font-size:12px;color:#888">毛利</div><b style="color:#27ae60">¥${s.margin} (${s.margin_pct}%)</b>
       </div>
       <div style="background:#fff;border:1px solid ${healthColor};padding:8px 12px;border-radius:8px">
-        <div style="font-size:12px;color:#888">食材成本区间</div>
-        <b style="color:${healthColor}">¥${s.target_cost_range[0]}-${s.target_cost_range[1]} ${s.is_healthy?'✓':'✗'}</b>
+        <div style="font-size:12px;color:#888">达标判定</div>
+        <b style="color:${healthColor}">${s.is_healthy?'✓ 达标':'✗ 不达标'}（目标${Math.round((s.target_margin||0.4)*100)}%）</b>
+      </div>
+      <div style="background:#fff;border:1px solid #2980b9;padding:8px 12px;border-radius:8px">
+        <div style="font-size:12px;color:#888">成本上限(目标${Math.round((s.target_margin||0.4)*100)}%)</div>
+        <b style="color:#2980b9">¥${s.cost_ceiling}</b>
       </div>
       <div style="background:#fff;border:1px solid #ddd;padding:8px 12px;border-radius:8px">
         <div style="font-size:12px;color:#888">人均肉类</div><b>${s.meat_weight_per_person}g</b>

@@ -13,8 +13,9 @@ def seed_data():
 
         # ========== 所有食材（含餐具配套里的一次性消耗品，含成本） ==========
         # 格式：(name, unit, 初始库存, 预警阈值, 单位成本, category)
-        # category: meat荤菜 / vegetable素菜 / staple主食 / side小菜 / sauce蘸料 / drink饮料
+        # category: meat荤菜 / vegetable素菜 / side小菜 / sauce蘸料 / drink饮料
         #          packaging食材包装 / utensil客户餐具工具
+        # （注：奶香小馒头归 vegetable 素菜，用户未设独立"主食"分类）
         ALL_INGREDIENTS = [
             # 荤菜
             ("南美安格斯肥牛", "g", 5000, 2000, 0.075, "meat"),
@@ -41,8 +42,8 @@ def seed_data():
             ("杏鲍菇", "g", 1500, 300, 0.008, "vegetable"),
             ("韭菜", "g", 1000, 200, 0.008, "vegetable"),
             ("包浆豆腐", "份", 100, 20, 2.25, "vegetable"),
-            # 主食
-            ("奶香小馒头", "个", 500, 100, 0.27, "staple"),
+            # 主食（归素菜：用户未设独立"主食"分类，馒头按素菜维度、按个计数）
+            ("奶香小馒头", "个", 500, 100, 0.27, "vegetable"),
             # 小菜
             ("辣白菜", "g", 2000, 500, 0.005, "side"),
             ("海带丝", "g", 1500, 300, 0.019, "side"),
