@@ -1561,10 +1561,10 @@ def tool_rent_breakdown(people, db=None, include_depreciation=False, exclude_too
 
 
 def catering_cost_units(people):
-    """餐配『单』定义（用户 2026-10-27 确认，2026-10-29 补理由）：三桌为正常搭建一单。
+    """餐配『单』定义（用户 2026-10-27 确认，2026-10-29 补理由）：三桌为正常搭建一单——**此为特殊单子/报价估算口径，非底层逻辑**（底层逻辑以套餐为主，见 `profit.py` 的 40+25）。
     理由：最大套餐是 10 人餐 ≈ 3 张桌（每桌4人），超过 10 人餐即算另一单，故 1 单 ≈ 1 个 10 人餐。
     桌数 = ceil(人/4)；单 = ceil(桌/3)。例：320人=80桌÷3=27单。
-    切配人工 / 搭建回收 均按此『单』计（首单40 + 每多一单25，与订单底层40+25同源同公式，仅『单』计量不同）。"""
+    切配人工 / 搭建回收 按此『单』做估算兜底（首单40 + 每多一单25，与订单底层40+25同源同公式，仅『单』计量不同）。"""
     import math
     tables = math.ceil(people / 4.0)
     units = max(1, math.ceil(tables / 3.0))
@@ -1572,7 +1572,7 @@ def catering_cost_units(people):
 
 
 def catering_cutting_labor(people, override=None):
-    """后厨切配人工（与财务口径一致，单位改为三桌一单）：首单 ¥40，每多一单 +¥25。
+    """后厨切配人工（与财务口径同源公式，但单按三桌一单做报价估算兜底；底层逻辑以套餐为主）：首单 ¥40，每多一单 +¥25。
     override 为 None 或 0（前端空值）时按三桌一单自动估算，成本永不为空；>0 用填的值。"""
     import math
     if override is not None and override != 0:
