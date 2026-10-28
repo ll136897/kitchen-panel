@@ -428,9 +428,9 @@ try:
         _old_stock = _old["stock"] if _old else 15
         _old_thr = _old["threshold"] if _old else 3
         _cur.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
-                     ("卡式炉", _old_stock, _old_thr, 65.0))
+                     ("卡式炉", _old_stock, _old_thr, 30.0))
         _cur.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)",
-                     ("烤盘", _old_stock, _old_thr, 15.0))
+                     ("烤盘", _old_stock, _old_thr, 30.0))
         _new_stove = _cur.execute("SELECT id FROM tools WHERE name='卡式炉'").fetchone()["id"]
         _new_pan = _cur.execute("SELECT id FROM tools WHERE name='烤盘'").fetchone()["id"]
         # 2. 给每个套餐添加两条 package_tools 关联，per_package 等于原值
@@ -463,6 +463,26 @@ try:
     _db.close()
 except Exception as _e:
     print(f"[migrate] 重命名应季水果三样跳过: {_e}")
+
+# 迁移：修正装备采购成本（用户核对实际采购价）& 新增耗材「礼盒纸盒」
+# 蛋卷桌75 / 月亮椅(椅子)26 / 卡式炉30 / 烤盘30（元）；礼盒纸盒3.5元/个，归 packaging(耗材)
+try:
+    _db = get_db()
+    _cur = _db.cursor()
+    _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0}
+    for _tname, _tcost in _tool_fix.items():
+        _cur.execute("UPDATE tools SET cost = ? WHERE name = ?", (_tcost, _tname))
+    _cur.execute("SELECT id FROM ingredients WHERE name = '礼盒纸盒'")
+    if not _cur.fetchone():
+        _cur.execute(
+            "INSERT INTO ingredients (name, unit, stock, threshold, cost, category) VALUES (?,?,?,?,?,?)",
+            ("礼盒纸盒", "个", 100, 30, 3.5, "packaging"))
+        print("[migrate] 已新增耗材「礼盒纸盒」(3.5元/个)")
+    _db.commit()
+    print(f"[migrate] 已修正装备投价: {_tool_fix}")
+    _db.close()
+except Exception as _e:
+    print(f"[migrate] 修正装备投价/新增礼盒纸盒跳过: {_e}")
 
 # 迁移：修复历史订单 booking_date/booking_time 解析错误（旧 parser 对"9月11日12点"等格式解析失败）
 # 重新用 raw_text 解析，更新非标准 YYYY-MM-DD 的 booking_date
