@@ -792,6 +792,34 @@ function loadDash(){
       `<div class="alert-bar ${a.cls}"><div class="alert-body">${a.body}</div></div>`
     ).join('');
 
+    // 套餐屏显只写总数（如「24人餐」）；拆分（10人餐 10人餐 4人餐）只在导出备餐表(Excel)里用。
+    function pkgTotalPeople(o){
+      const pkgs = o.packages || [];
+      let n = 0, ok = false;
+      for(const p of pkgs){
+        const qty = Number(p.quantity || 1);
+        let per = Number(p.people || 0);
+        if(!per){
+          const m = (p.name||'').match(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/);
+          const s = (p.name||'').match(/(\d+)\s*人餐/);
+          per = m ? Number(m[2]) : (s ? Number(s[1]) : 0);
+        }
+        if(per){ n += per * qty; ok = true; }
+      }
+      return ok ? n : 0;
+    }
+    function fmtPkgsTotal(o, showNosetup){
+      const pkgs = o.packages || [];
+      if(!pkgs.length) return '套餐未记录';
+      const n = pkgTotalPeople(o);
+      let label = n > 0 ? (n + '人餐') : pkgs.map(p => (p.name||'') + (p.quantity>1?'×'+p.quantity:'')).join(' ');
+      if(showNosetup){
+        const allNosetup = pkgs.length && pkgs.every(p => (p.setup_flag===0 || p.pkg_setup===0));
+        if(allNosetup) label += '（不搭建）';
+      }
+      return label;
+    }
+
     // ---- 近期预约 ----
     const upcoming = data.upcoming_orders||[];
     if(upcoming.length){
@@ -807,7 +835,7 @@ function loadDash(){
         html += `<div class="upcoming-date-group">
           <div class="upcoming-date-hd">📌 ${date} · ${orders.length} 单</div>`;
         for(const o of orders){
-          const pkgs = (o.packages||[]).map(p=>`${p.name}×${p.quantity}`).join(' ');
+          const pkgs = fmtPkgsTotal(o, false);
           const stTag = o.status==='preparing'?'<span class="tag tag-blue tag-sm">备餐中</span>':'<span class="tag tag-orange tag-sm">待备</span>';
           const u = o.urgency || {};
           const urgCls = u.level==='overdue'?'background:var(--red)':(u.level==='soon'?'background:var(--orange)':'background:var(--green)');

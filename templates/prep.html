@@ -906,7 +906,7 @@ function renderFocusHeader(o){
     else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
   }
   const t = orderTimeOf(o) || '';
-  const pkgs = fmtPkgs(o).replace(/×/g,'·').replace(/ /g,'·');
+  const pkgs = fmtPkgsTotal(o, true).replace(/×/g,'·').replace(/ /g,'·');
   el.innerHTML = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   sub.innerHTML = `👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}` +
     (o.note && o.note!=='无' ? ` · 📝 ${o.note}` : '') +
@@ -999,18 +999,34 @@ function boardTime(o){ return ((o.meal_time||o.booking_time||'')+'').trim(); }
 function pkgShort(name){
   return (name||'').replace(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/g, '$2人餐');
 }
-function fmtPkgs(o){
+// 套餐屏显只写总数（如「24人餐」= 各套餐 people×quantity 之和）；拆分（10人餐 10人餐 4人餐）只在导出备餐表(Excel)里用于菜品执行方案。
+function pkgTotalPeople(o){
+  const pkgs = o.packages || [];
+  let n = 0, ok = false;
+  for(const p of pkgs){
+    const qty = Number(p.quantity || 1);
+    let per = Number(p.people || 0);
+    if(!per){ // 兜底：从套餐名取人数上限
+      const m = (p.name||'').match(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/);
+      const s = (p.name||'').match(/(\d+)\s*人餐/);
+      per = m ? Number(m[2]) : (s ? Number(s[1]) : 0);
+    }
+    if(per){ n += per * qty; ok = true; }
+  }
+  return ok ? n : 0;
+}
+function fmtPkgsTotal(o, showNosetup){
   const pkgs = o.packages || [];
   if(!pkgs.length) return '套餐未记录';
-  // 搭建是常态 → **不标注**（与其他订单写法一致，不再出现「搭建 10人餐」这种误导）；
-  // 只有「不搭建（半包）」才明确标出来，一眼看出哪份不用搭。
-  return pkgs.map(p =>
-    pkgShort(p.name)
-    + (p.quantity>1 ? '×'+p.quantity : '')
-    + (p.setup_flag === 0 ? '（不搭建）' : '')
-  ).join(' ');
+  const n = pkgTotalPeople(o);
+  let label = n > 0 ? (n + '人餐') : pkgs.map(p => pkgShort(p.name) + (p.quantity>1?'×'+p.quantity:'')).join(' ');
+  if(showNosetup){
+    const allNosetup = pkgs.length && pkgs.every(p => (p.setup_flag===0 || p.pkg_setup===0));
+    if(allNosetup) label += '（不搭建）';
+  }
+  return label;
 }
-function boardPkgTxt(o){ return fmtPkgs(o); }
+function boardPkgTxt(o){ return fmtPkgsTotal(o, true); }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function boardPeople(o){
   let n=0;
@@ -1228,7 +1244,7 @@ function render(){
   });
   d.orders = orders;
   document.getElementById('ordersList').innerHTML = orders.map(o=>{
-    const pkgs = fmtPkgs(o);
+    const pkgs = fmtPkgsTotal(o, true);
     // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
     const oDate = o.booking_date || '';
     const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
@@ -1423,7 +1439,7 @@ function renderByOrder(){
     } else {
       dateLabel = t || '待定';
     }
-    const pkgsTxt = fmtPkgs(o);
+    const pkgsTxt = fmtPkgsTotal(o, true);
     return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
       <h3 style="margin:0">🍱 ${pkgsTxt||'套餐未记录'} · 📍 ${o.address||'—'} · 📅 ${dateLabel} · 👤 ${o.contact_name||'—'}</h3>
       <span>
@@ -1497,7 +1513,7 @@ function openOrderSheet(oid){
     else dLabel = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
   }
   const t = orderTimeOf(o);
-  const pkgs = fmtPkgs(o).replace(/×/g,'·').replace(/ /g,'·');
+  const pkgs = fmtPkgsTotal(o, true).replace(/×/g,'·').replace(/ /g,'·');
   document.getElementById('osTitle').textContent = `🍱 ${pkgs||'套餐未记录'} · 📍 ${o.address||'—'} · ${dLabel}${t?' '+t:''}`;
   document.getElementById('osBody').innerHTML =
     `<div class="os-sum">👤 ${o.contact_name||'—'}${o.contact_phone?' · '+o.contact_phone:''}</div>` +

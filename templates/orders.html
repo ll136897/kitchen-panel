@@ -294,6 +294,33 @@ function ownerSign(name){
 function pkgShort(name){
   return (name||'').replace(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/g, '$2人餐');
 }
+// 套餐屏显只写总数（如「24人餐」= 各套餐 people×quantity 之和）；拆分（10人餐 10人餐 4人餐）只在导出备餐表(Excel)里用于菜品执行方案。
+function pkgTotalPeople(o){
+  const pkgs = o.packages || [];
+  let n = 0, ok = false;
+  for(const p of pkgs){
+    const qty = Number(p.quantity || 1);
+    let per = Number(p.people || 0);
+    if(!per){ // 兜底：从套餐名取人数上限
+      const m = (p.name||'').match(/(\d+)\s*[-~—]\s*(\d+)\s*人餐/);
+      const s = (p.name||'').match(/(\d+)\s*人餐/);
+      per = m ? Number(m[2]) : (s ? Number(s[1]) : 0);
+    }
+    if(per){ n += per * qty; ok = true; }
+  }
+  return ok ? n : 0;
+}
+function fmtPkgsTotal(o, showNosetup){
+  const pkgs = o.packages || [];
+  if(!pkgs.length) return '套餐未记录';
+  const n = pkgTotalPeople(o);
+  let label = n > 0 ? (n + '人餐') : pkgs.map(p => pkgShort(p.name) + (p.quantity>1?'×'+p.quantity:'')).join(' ');
+  if(showNosetup){
+    const allNosetup = pkgs.length && pkgs.every(p => (p.setup_flag===0 || p.pkg_setup===0));
+    if(allNosetup) label += '（不搭建）';
+  }
+  return label;
+}
 function creatorLabel(o){
   return ownerSign(o && o.created_by_name);
 }
@@ -710,12 +737,9 @@ function renderOrderList(list, isGroup){
 
 // 单张订单卡片（分组时 anchor=true 会高亮并打标）
 function buildCard(o, isAnchor){
-  const pkgsText = (o.packages||[]).map(p=>`${pkgShort(p.name)}${p.quantity>1?' ×'+p.quantity:''}`).join(' · ') || '';
-  // 每个套餐单独可点：点某个套餐 = 筛出所有点了同套餐的订单
-  // （套餐仍是首要信息、仍排在地址前面，只是值本身变成可点，样式规格不变）
-  const pkgHtml = (o.packages||[]).length
-    ? (o.packages||[]).map((p,i)=>`<span class="v-click" onclick="groupByValue('pkg', ${o.id}, ${i})">${pkgShort(p.name)}${p.quantity>1?' ×'+p.quantity:''}</span>`).join(' · ')
-    : (pkgsText || '未记录');
+  // 套餐只显示总数（如「24人餐」）；拆分（10人餐 10人餐 4人餐）仅用于导出备餐表，平时不展开。
+  // 搭建/不搭建由卡片头部徽标（setupBadge）单独显示，这里不再重复。
+  const pkgHtml = fmtPkgsTotal(o, false);
   const [stText, stCls] = statusLabel(o.status);
   const anchorFlag = isAnchor ? `<span class="anchor-flag">← 你点的这单</span>` : '';
   return `<div class="order-card ${cardClass(o.status)}${isAnchor?' anchor':''}${selectedIds.has(o.id)?' selected':''}" id="ocard-${o.id}">
@@ -1210,7 +1234,7 @@ async function openPrepModal(id){
 function closePrepModal(){ document.getElementById('prepModal').classList.remove('show'); }
 function prepReqHtml(req, o){
   const pkgs = (o.packages||[]);
-  const pkgHtml = pkgs.length ? pkgs.map(p=>`<span class="chip pkg">${escHtml(pkgShort(p.name))}${p.quantity>1?' ×'+p.quantity:''}${p.pkg_setup===1?'（搭建）':(p.pkg_setup===0?'（半包）':'')}</span>`).join(' ') : '<span class="muted">无套餐</span>';
+  const pkgHtml = pkgs.length ? fmtPkgsTotal(o, true) : '<span class="muted">无套餐</span>';
   const ings = req.ingredients||[];
   const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 素菜',side:'🥗 小菜',sauce:'🧂 小料',drink:'🎁 赠品',other:'📦 其他',packaging:'📦 食材包装',utensil:'🍱 客户餐具'};
   const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',other:'#666',packaging:'#d35400',utensil:'#8e44ad'};
