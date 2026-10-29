@@ -147,7 +147,12 @@ def match_place(address, cfg):
 
 
 def outsource_units(people, pkg_qty, per_unit=10):
-    """外包单数：每 per_unit 人一单、不足也算一单；再与套餐份数取大（13人=2单）"""
+    """切配/搭建『单』数（底层口径，见 LOGIC.md 切配人工条）：
+
+    - 正常订单以**标准套餐数**计单（>10人 订单先拆为标准套餐再数个数）；
+    - 这里与「每 per_unit 人一单」取大，仅作兜底：有套餐时一律以套餐数为准（13人=拆成 10+3 两单）。
+    - 按人数订的特殊单、无套餐的估计口径见 calculator.catering_cost_units（每三桌一单）。
+    """
     people = float(people or 0)
     pkg_qty = int(pkg_qty or 0)
     by_people = int(math.ceil(people / float(per_unit or 10))) if people > 0 else 0
