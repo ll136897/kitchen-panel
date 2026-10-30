@@ -159,6 +159,59 @@ def outsource_units(people, pkg_qty, per_unit=10):
     return max(1, by_people, pkg_qty)
 
 
+def _day_cutting_labor(db, oid, cfg, units, bulk=None):
+    """按天聚合的『打包切配人工』自动值（规则见 LOGIC.md 切配人工条）。
+
+    口径：把当天所有「未手动改价」订单的 units 求和 = day_units；
+    当天切配人工合计 = labor_first + labor_per_unit × (day_units − 1)；
+    分摊到各单：每单 = units × labor_per_unit，再把「首份 40 而非 25」的溢价
+    (labor_first − labor_per_unit) 加到当天最早（id 最小）的那一单上。
+    - 手动改过 labor 的订单不参与天聚合（其手动值在 order_profit 中覆盖）。
+    - 单 = 正常单按套餐份数（>10人先拆标准套餐）；特殊单手动或三桌一单（已体现在 units）。
+    """
+    l_first = float(cfg.get("labor_first", 40) or 0)
+    l_per = float(cfg.get("labor_per_unit", 25) or 0)
+    premium = l_first - l_per  # 首份溢价（默认 15）
+
+    def _auto(u, is_first):
+        return round(u * l_per + (premium if is_first else 0), 2)
+
+    # 批量路径：用预计算的 day_labor（period_overview / period_real_profit 已建好）
+    if bulk is not None and isinstance(bulk, dict) and "day_labor" in bulk:
+        info = bulk["day_labor"].get((bulk.get("orders") or {}).get(oid, {}).get("booking_date"))
+        if info is not None:
+            return _auto(units, info.get("first_oid") == oid)
+        return _auto(units, True) if units > 0 else 0.0  # 兜底：不在聚合日期内
+
+    # 非批量路径（单笔订单查看）：直接查当天
+    cur = db.cursor()
+    row = cur.execute("SELECT booking_date FROM orders WHERE id=?", (oid,)).fetchone()
+    if not row:
+        return _auto(units, units > 0)
+    date = row["booking_date"]
+    day_rows = cur.execute(
+        "SELECT o.id FROM orders o WHERE o.booking_date=? AND o.deleted_at IS NULL "
+        "AND o.status!='cancelled' ORDER BY o.id ASC", (date,)).fetchall()
+    day_units = 0
+    first_oid = None
+    for dr in day_rows:
+        rid = dr["id"]
+        pr = cur.execute(
+            "SELECT COALESCE(SUM(op.quantity),0) q, COALESCE(SUM(op.people),0) p "
+            "FROM order_packages op WHERE op.order_id=?", (rid,)).fetchone()
+        is_manual = cur.execute(
+            "SELECT 1 FROM order_costs WHERE order_id=? AND kind='labor' LIMIT 1", (rid,)).fetchone()
+        if is_manual:
+            continue
+        ru = outsource_units(pr["p"], pr["q"], cfg.get("people_per_unit", 10))
+        day_units += ru
+        if first_oid is None:
+            first_oid = rid
+    if day_units <= 0:
+        return _auto(units, units > 0)
+    return _auto(units, first_oid == oid)
+
+
 # 半包（不搭建）判定里的租赁关键词
 _RENT_KW = ("桌椅", "卡式炉", "气罐", "烤盘", "租赁", "出租", "租用")
 
@@ -307,7 +360,7 @@ def _overrides(db, oid, costs=None):
     return fixed, extras
 
 
-def _auto_items(db, oid, cfg, setup=None, o=None, pkgs=None, dishes=None):
+def _auto_items(db, oid, cfg, setup=None, o=None, pkgs=None, dishes=None, bulk=None):
     """自动算出的成本项（未手工覆盖前的默认值）。
     搭建费：仅搭建(全包)单征收；不搭建(半包/自送)一律不计。
     配送费：仅不搭建单、且为平台配送时计（自提/老板送=0）。
@@ -331,12 +384,11 @@ def _auto_items(db, oid, cfg, setup=None, o=None, pkgs=None, dishes=None):
     if setup is None:
         setup = _order_setup(db, o, cfg, pkgs=pkgs)
     d = cfg.get("defaults", {})
-    # 打包切配人工：首单 + 每多一个"单"（单价更低，单越大越省）
+    # 打包切配人工：按天聚合（见 LOGIC.md）——当天首单40、其余每单+25，跨单累加不再重复收起步价
     l_first = float(cfg.get("labor_first", 40) or 0)
     l_per = float(cfg.get("labor_per_unit", 25) or 0)
-    extra = max(0, units - 1)
-    labor_auto = round(l_first + l_per * extra, 2)
-    labor_detail = ("首单 ¥%g" % l_first) if extra == 0 else ("首单 ¥%g + %d 个多单 × ¥%g" % (l_first, extra, l_per))
+    labor_auto = _day_cutting_labor(db, oid, cfg, units, bulk=bulk)
+    labor_detail = "当天切配人工（按天聚合）：首单¥%g + 每多一单¥%g" % (l_first, l_per)
     # —— 搭建费：仅搭建(全包)单；不搭建(半包/自送)不计 ——
     if setup == 1:
         outsource_amount = round(units * out_price, 2)
@@ -379,7 +431,7 @@ def order_profit(db, oid, cfg=None, bulk=None):
         _dishes = None
     revenue = float(o.get("amount") or 0)
     setup = _order_setup(db, o, cfg, pkgs=_pkgs)
-    auto = _auto_items(db, oid, cfg, setup=setup, o=o, pkgs=_pkgs, dishes=_dishes)
+    auto = _auto_items(db, oid, cfg, setup=setup, o=o, pkgs=_pkgs, dishes=_dishes, bulk=bulk)
     fixed, extras = _overrides(db, oid, costs=_costs)
 
     items, cost_total = [], 0.0
@@ -529,16 +581,18 @@ def order_profit(db, oid, cfg=None, bulk=None):
 
 
 # ---------- 期间汇总 ----------
-def _build_profit_bulk(db, oids):
+def _build_profit_bulk(db, oids, cfg=None):
     """一次性批量预取指定订单的全部关联数据与参考表，供 period_overview / period_real_profit
     在循环内用字典查表代替逐单查库（消除 N+1）。返回 dict：
       orders: {oid: 全字段行}
       pkgs:   {oid: [order_packages 行(含 pkg_name/pkg_base_price/pkg_price)]}
       costs:  {oid: [order_costs 行]}
       dishes: {oid: [order_dishes 行]}
-      month_counts: {ym: 当月有效订单数}（供固定开销摊销，与逐单查库结果一致）。"""
+      month_counts: {ym: 当月有效订单数}（供固定开销摊销，与逐单查库结果一致）。
+      day_labor: {date: {'first_oid': 当天最早非手动改价单 id, 'units': 当天自动单 units 之和}}
+                 （供按天聚合的切配人工分摊，见 _day_cutting_labor）。"""
     if not oids:
-        return {"orders": {}, "pkgs": {}, "costs": {}, "dishes": {}, "month_counts": {}}
+        return {"orders": {}, "pkgs": {}, "costs": {}, "dishes": {}, "month_counts": {}, "day_labor": {}}
     ph = ",".join("?" * len(oids))
     orders = {r["id"]: dict(r) for r in db.execute("SELECT * FROM orders WHERE id IN (%s)" % ph, oids)}
     pkgs = {}
@@ -555,7 +609,42 @@ def _build_profit_bulk(db, oids):
     mc = {}
     for r in db.execute("SELECT substr(booking_date,1,7) ym, COUNT(*) c FROM orders WHERE deleted_at IS NULL AND status!='cancelled' GROUP BY ym"):
         mc[r["ym"]] = r["c"]
-    return {"orders": orders, "pkgs": pkgs, "costs": costs, "dishes": dishes, "month_counts": mc}
+    # ---- day_labor：按天聚合切配人工所需的当天 units 与最早非手动单 ----
+    day_labor = {}
+    dates = {o.get("booking_date") for o in orders.values() if o.get("booking_date")}
+    if dates:
+        ph_d = ",".join("?" * len(dates))
+        all_rows = db.execute(
+            "SELECT o.id, o.booking_date FROM orders o WHERE o.booking_date IN (%s) "
+            "AND o.deleted_at IS NULL AND o.status!='cancelled'" % ph_d, list(dates)).fetchall()
+        all_oids = [r["id"] for r in all_rows]
+        pkgs_all = {}
+        if all_oids:
+            ph_o = ",".join("?" * len(all_oids))
+            for r in db.execute(
+                "SELECT op.order_id, COALESCE(SUM(op.quantity),0) q, COALESCE(SUM(op.people),0) p "
+                "FROM order_packages op WHERE op.order_id IN (%s) GROUP BY op.order_id" % ph_o, all_oids):
+                pkgs_all[r["order_id"]] = (r["p"], r["q"])
+            manual_set = set()
+            for r in db.execute(
+                "SELECT DISTINCT order_id FROM order_costs WHERE order_id IN (%s) AND kind='labor'" % ph_o, all_oids):
+                manual_set.add(r["order_id"])
+        per_date = {}
+        for r in all_rows:
+            per_date.setdefault(r["booking_date"], []).append(r["id"])
+        for d, oids_d in per_date.items():
+            day_units, first_oid = 0, None
+            for rid in sorted(oids_d):
+                if rid in manual_set:
+                    continue
+                pp = pkgs_all.get(rid, (0, 0))
+                ru = outsource_units(pp[0], pp[1], (cfg or {}).get("people_per_unit", 10))
+                day_units += ru
+                if first_oid is None:
+                    first_oid = rid
+            day_labor[d] = {"first_oid": first_oid, "units": day_units}
+    return {"orders": orders, "pkgs": pkgs, "costs": costs, "dishes": dishes,
+            "month_counts": mc, "day_labor": day_labor}
 
 
 def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
@@ -580,7 +669,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
     # 批量预取：一次性把所有订单关联数据与参考表装进内存，逐单计算改走字典查表
     # （消除 N+1，免费实例上全量计算从十几秒降到亚秒级）
     from calculator import prime_calc_cache, clear_calc_cache
-    bulk = _build_profit_bulk(db, [r["id"] for r in rows])
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg)
     prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
@@ -714,7 +803,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
 
     # 批量预取：消除 N+1，免费实例上全量计算从十几秒降到亚秒级
     from calculator import prime_calc_cache, clear_calc_cache
-    bulk = _build_profit_bulk(db, [r["id"] for r in rows])
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg)
     prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
