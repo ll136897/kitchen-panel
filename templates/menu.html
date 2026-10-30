@@ -665,10 +665,20 @@ function generateCatering(){
       if(!res.ok){ alert(res.msg||'生成失败'); return; }
       cateringData = res.data;
       renderCatering(res.data);
+    })
+    .catch(err=>{
+      const box=document.getElementById('cateringResult');
+      if(box) box.innerHTML='<div style="color:#c0392b;padding:12px;background:#fff3f3;border:1px solid #f0c0c0;border-radius:8px">⚠️ 请求失败：'+((err&&err.message)?err.message:err)+'<br>请把这段红字发我，我好定位。</div>';
+      if(typeof showToast==='function') showToast('⚠️ 配餐请求失败，见结果区');
     });
 }
 
 function renderCatering(d){
+  if(!d || !d.summary){
+    const box=document.getElementById('cateringResult');
+    if(box) box.innerHTML='<div style="color:#c0392b;padding:12px;background:#fff3f3;border:1px solid #f0c0c0;border-radius:8px">⚠️ 方案数据不完整，无法渲染。请把此提示反馈。</div>';
+    return;
+  }
   const s = d.summary;
   const ingRows = d.ingredients.map(it=>{
     const color = CAT_COLOR[it.category] || '#666';

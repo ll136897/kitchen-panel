@@ -3395,20 +3395,29 @@ def catering_suggest():
     include_depreciation = bool(data.get("include_depreciation", False))
     if per_person is not None:
         per_person = float(per_person)
-    if mode == "template":
-        tpl = load_menu_template()
-        result = build_template_menu(people, total, per_person, kitchen_labor, delivery_labor,
-                                     template=tpl, is_setup=is_setup, address=address,
-                                     scale_percent=scale_percent, cutting_labor=cutting_labor,
-                                     include_depreciation=include_depreciation,
-                                     exclude_tools=data.get("exclude_tools"))
-    else:
-        result = _cs(people, total, per_person, kitchen_labor, delivery_labor,
-                     is_setup=is_setup, address=address,
-                     include_depreciation=include_depreciation,
-                     exclude_tools=data.get("exclude_tools"),
-                     scale_percent=scale_percent)
-    return jsonify(result)
+    try:
+        if mode == "template":
+            tpl = load_menu_template()
+            result = build_template_menu(people, total, per_person, kitchen_labor, delivery_labor,
+                                         template=tpl, is_setup=is_setup, address=address,
+                                         scale_percent=scale_percent, cutting_labor=cutting_labor,
+                                         include_depreciation=include_depreciation,
+                                         exclude_tools=data.get("exclude_tools"))
+        else:
+            result = _cs(people, total, per_person, kitchen_labor, delivery_labor,
+                         is_setup=is_setup, address=address,
+                         include_depreciation=include_depreciation,
+                         exclude_tools=data.get("exclude_tools"),
+                         scale_percent=scale_percent)
+        # 业务层已正常返回（含 ok=False 的业务提示），原样回传；非字典则兜底
+        if not isinstance(result, dict):
+            return jsonify({"ok": False, "msg": "配餐返回格式异常（非字典）"})
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        app.logger.error("catering_suggest 计算异常: %s\n%s", e, traceback.format_exc())
+        # 永远返回合法 JSON，避免前端 r.json() 解析 500 错误页而静默失败
+        return jsonify({"ok": False, "msg": "配餐计算异常：" + str(e)})
 
 
 # 标准人均克重模板默认值（以 10人餐 人均克重为基准；可在菜单页配餐器里编辑保存）
