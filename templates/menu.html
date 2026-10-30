@@ -100,6 +100,8 @@
       <label>总餐标 ¥ <input type="number" id="cat_budget" value="1000" min="0" step="50" style="width:100px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
       <span style="color:#888">或</span>
       <label>人均 ¥ <input type="number" id="cat_perperson" placeholder="如60" style="width:80px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <label>厨房人工 ¥ <input type="number" id="cat_kitchen_labor" value="0" min="0" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
+      <label>配送人工 ¥ <input type="number" id="cat_delivery_labor" value="0" min="0" style="width:70px;padding:6px;border:1px solid #ddd;border-radius:6px"></label>
       <button class="btn btn-primary btn-sm" onclick="generateCatering()">🚀 生成方案</button>
     </div>
 
@@ -634,8 +636,10 @@ function generateCatering(){
   const people = parseInt(document.getElementById('cat_people').value)||0;
   const budget = parseFloat(document.getElementById('cat_budget').value)||0;
   const perPerson = parseFloat(document.getElementById('cat_perperson').value)||null;
-  const kitchenLabor = parseFloat(document.getElementById('cat_kitchen_labor').value)||0;
-  const deliveryLabor = parseFloat(document.getElementById('cat_delivery_labor').value)||0;
+  const _kl = document.getElementById('cat_kitchen_labor');
+  const _dl = document.getElementById('cat_delivery_labor');
+  const kitchenLabor = _kl ? (parseFloat(_kl.value)||0) : 0;
+  const deliveryLabor = _dl ? (parseFloat(_dl.value)||0) : 0;
   if(people<=0){ alert('请输入人数'); return; }
   if(perPerson===null && budget<=0){ alert('请输入总餐标或人均'); return; }
 
