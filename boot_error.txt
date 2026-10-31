@@ -1,4 +1,4 @@
-[2026-10-31T15:49:58.824709 UTC] request /api/orders/359/detail
+[2026-10-31T15:50:10.590531 UTC] request /api/orders/360/detail
 Traceback (most recent call last):
   File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 880, in full_dispatch_request
     rv = self.dispatch_request()
