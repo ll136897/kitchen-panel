@@ -50,26 +50,20 @@ def _clean_meal_time(text):
 def _extract_clock_after_date(value):
     """从「10.25 13.00」这类"日期 时间"组合里取出时间（13.00），忽略前面的日期。
     供「用餐时间」在没有独立「预约时间」字段时，补全 booking_time 用。
-    返回 '' 表示没有可提取的时间（如老格式「12.00」会被当成日期误删 → 返回 ''，
-    因为老格式的 booking_time 本就来自「预约时间」）。
+    返回 '' 表示没有可提取的时间（如老格式「12.00」单独出现，本就来自「预约时间」）。
     """
     s = re.sub(r"[（(][^）)]*[）)]", "", str(value)).strip()
     if "/" in s:
         s = s.split("/", 1)[0].strip()
     toks = s.split()
-
-    def _looks_like_date(tok):
-        m = re.match(r"^(\d{1,2})[月./\-](\d{1,2})([号日]?)$", tok)
-        if not m:
-            return False
-        # 首数字必须是合法月份（1~12），否则像「13.00」其实是时间并非日期
-        return 1 <= int(m.group(1)) <= 12
-
-    # 去掉像日期的 token（M.D / M-D / M月D，且首数字≤12），剩下的才是时间
-    rest = [t for t in toks if not _looks_like_date(t)]
-    if not rest:
+    # 只有一个 token（如老格式单独写「12.00」）→ 不把它当 booking_time，
+    # 老格式的时间本就来自「预约时间」字段，避免误填。
+    if len(toks) < 2:
         return ""
-    return _extract_time(" ".join(rest))
+    # 「日期 时间」组合里，时间一定在最后（11.1 12.00 / 10.25 13:00）。
+    # 取最后一个 token 解析成 HH:MM：首数字≤12 的「12.00」「6.30」是时间不是日期，必须正确识别
+    # （旧实现用"首数字≤12 就像日期"过滤，把 12.00/6.30 误删 → booking_time 全空，仅 13:00 这类>12 的幸存）。
+    return _extract_time(toks[-1]) or ""
 
 
 def _normalize_date(s):
@@ -248,6 +242,8 @@ def parse_order_text(raw_text):
     if current_key is not None:
         sections.append((current_key, buffer))
 
+    import datetime as _dt
+    today = _dt.date.today()
     for key, value_lines in sections:
         # 末尾常有复制带来的多余引号（"备注:无"""），一并去掉
         value = " ".join(v for v in value_lines if v).strip().strip('"').strip()
@@ -275,13 +271,13 @@ def parse_order_text(raw_text):
                     if m:
                         result["booking_date"] = f"{today.year}-{today.month:02d}-{int(m.group(1)):02d}"
                         result["booking_time"] = _build_time(m.group(2), m.group(3), m.group(4), None, None)
-        # 4) 中文相对日期兜底（今天/明天/后天/大后天/周X/星期X）—— 此前完全不识别，
-        #    导致写「预约时间:明天12点」的订单日期与时间都落空、卡片只能显示破折号「—」
-        if not result.get("booking_date"):
-            _rd = _parse_relative_date(value, today)
-            if _rd:
-                result["booking_date"] = _rd
-                result["booking_time"] = _extract_time(value) or result.get("booking_time", "")
+            # 4) 中文相对日期兜底（今天/明天/后天/大后天/周X/星期X）—— 此前完全不识别，
+            #    导致写「预约时间:明天12点」的订单日期与时间都落空、卡片只能显示破折号「—」
+            if not result.get("booking_date"):
+                _rd = _parse_relative_date(value, today)
+                if _rd:
+                    result["booking_date"] = _rd
+                    result["booking_time"] = _extract_time(value) or result.get("booking_time", "")
         elif key == "预约项目":
             result["package_lines"] = value_lines
         elif key in ("预约地址", "地址"):

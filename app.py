@@ -499,22 +499,25 @@ try:
         _new_bd = _bd
         _new_bt = _r["booking_time"] or ""
         _new_mt = _r["meal_time"] or ""
-        # 标准 YYYY-MM-DD 且不等于"待定"之类垃圾值则跳过日期解析
-        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", _bd) and _r["raw_text"]:
+        if _r["raw_text"]:
             from parser import parse_order_text as _pot
             _parsed = _pot(_r["raw_text"])
-            _new_bd = _parsed.get("booking_date", "")
-            _new_bt = _parsed.get("booking_time", "") or _new_bt
-            _new_mt = _parsed.get("meal_time", "") or _new_mt
-            if _new_bd:
+            _pb = _parsed.get("booking_date", "")
+            _pt = _parsed.get("booking_time", "")
+            _pm = _parsed.get("meal_time", "")
+            # 日期：仅当当前非标准（或空）且能重解析出才覆盖
+            if (not _re.match(r"^\d{4}-\d{2}-\d{2}$", _bd)) and _pb:
+                _new_bd = _pb
                 _needs_update = True
-        # 同时清洗历史脏 meal_time（即使日期正常）
-        if _r["raw_text"]:
-            from parser import parse_order_text as _pot, _clean_meal_time as _cmt
-            _parsed2 = _pot(_r["raw_text"])
-            _cleaned_mt = _parsed2.get("meal_time", "")
-            if _cleaned_mt and _cleaned_mt != _r["meal_time"]:
-                _new_mt = _cleaned_mt
+            # 时间：当前为空且能解析出 → 补上
+            # （修复「用餐时间:11.1 12.00」类 booking_time 落空：旧 _extract_clock_after_date
+            #  把 ≤12:00 的时间误判成日期删掉，导致 12.00/12.30/6.30 全空、只留 13:00 这类 >12 的）
+            if (not _new_bt) and _pt:
+                _new_bt = _pt
+                _needs_update = True
+            # 用餐时间：与重解析不一致则更新（清洗历史脏值）
+            if _pm and _pm != _new_mt:
+                _new_mt = _pm
                 _needs_update = True
         if _needs_update:
             _cur.execute("UPDATE orders SET booking_date=?, booking_time=?, meal_time=? WHERE id=?",
@@ -1911,7 +1914,7 @@ def list_orders():
     # 前端用来区分订单归属、决定给不给改的按钮、显示"谁代录的"
     if show_deleted:
         cur.execute("""
-            SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
+            SELECT o.id, o.booking_date, o.booking_time, o.meal_time, o.address, o.contact_name,
                    o.contact_phone, o.amount, o.deposit, o.note, o.raw_text, o.status, o.created_at, o.deleted_at,
                    o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
@@ -1924,7 +1927,7 @@ def list_orders():
         #    （117 单时 9 月只显示 58 单、实际 75 单）。订单页的筛选/排序/按月分组
         #    全在前端做，必须拿全量，所以放宽到 5000（够用多年，仍留个上限防跑飞）。
         cur.execute("""
-            SELECT o.id, o.booking_date, o.booking_time, o.address, o.contact_name,
+            SELECT o.id, o.booking_date, o.booking_time, o.meal_time, o.address, o.contact_name,
                    o.contact_phone, o.amount, o.deposit, o.note, o.raw_text, o.status, o.created_at,
                    o.setup_flag, o.delivery_person, o.delivery_fee, o.source, o.menu_name, o.discount,
                    o.created_by, COALESCE(u.name, o.created_by_name) AS created_by_name,
