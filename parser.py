@@ -1104,6 +1104,8 @@ def _looks_like_order(text):
 # ⚠️ 不要放"预约项目"："预约时间"和"预约项目"在一条订单里会同时出现，两个都当锚点会把一单切成两半。
 # ⚠️ 更不要用"联系人/联系电话/地址"——同一单里也各出现一次，会把一单切成好几段。
 _ANCHOR_RE = re.compile(r"^[ \t　]*(?:预约时间|预约日期|预约时段)[ \t　]*[:：]")
+# 不要求行首，匹配全文任意位置的预约时间锚点（用于"同一行连发多单"的兜底切分）
+_ANCHOR_INLINE_RE = re.compile(r"(?:预约时间|预约日期|预约时段)\s*[:：]")
 
 
 def _subsplit_by_anchor(block):
@@ -1113,31 +1115,56 @@ def _subsplit_by_anchor(block):
     避免整块被当成一单入库（只会取到最后一个联系人的值，前面的单全丢）。
 
     返回 ≥1 段；拆不出来就原样返回一段。
+
+    ⚠️ 2026-10-31 加固：原来只按"行首锚点"切，遇到**同一行里出现多个预约时间**
+    （微信连发、两段订单之间没有换行）就切不动 → 整段被当一单、取第一个预约时间当日期、
+    前面单子的加菜/备注字样一并污染进后面那单。现在补充"全文锚点切分"兜底：
+    行内切分不足 2 段、但全文有 ≥2 个预约时间锚点时，按锚点位置直接切（不依赖换行）。
     """
     block = (block or "").strip()
     if not block:
         return []
     lines = block.split("\n")
     idxs = [i for i, l in enumerate(lines) if _ANCHOR_RE.match(l or "")]
-    if len(idxs) < 2:
-        return [block]
-    segs = []
-    head = "\n".join(lines[:idxs[0]]).strip()          # 锚点之前的零碎内容并入第一单
-    for j, i in enumerate(idxs):
-        end = idxs[j + 1] if j + 1 < len(idxs) else len(lines)
-        seg = "\n".join(lines[i:end]).strip()
-        if j == 0 and head:
-            seg = head + "\n" + seg
-        if seg:
-            segs.append(seg)
-    # 兜底：切出来但完全没有订单特征的碎片，并回上一段（防止把备注里的同名字段误当新单）
-    merged = []
-    for s in segs:
-        if merged and not _looks_like_order(s):
-            merged[-1] = merged[-1] + "\n" + s
-        else:
-            merged.append(s)
-    return merged or [block]
+    if len(idxs) >= 2:
+        segs = []
+        head = "\n".join(lines[:idxs[0]]).strip()          # 锚点之前的零碎内容并入第一单
+        for j, i in enumerate(idxs):
+            end = idxs[j + 1] if j + 1 < len(idxs) else len(lines)
+            seg = "\n".join(lines[i:end]).strip()
+            if j == 0 and head:
+                seg = head + "\n" + seg
+            if seg:
+                segs.append(seg)
+        # 兜底：切出来但完全没有订单特征的碎片，并回上一段（防止把备注里的同名字段误当新单）
+        merged = []
+        for s in segs:
+            if merged and not _looks_like_order(s):
+                merged[-1] = merged[-1] + "\n" + s
+            else:
+                merged.append(s)
+        return merged or [block]
+    # 兜底：整段只有一行（或行内切分不足 2 段）但全文出现 ≥2 个预约时间锚点
+    # （如微信连发"预约时间:11.2 ... 预约时间:11.1 ..."挤在同一行）→ 按锚点位置切，不依赖换行。
+    _spans = [m.start() for m in _ANCHOR_INLINE_RE.finditer(block)]
+    if len(_spans) >= 2:
+        segs = []
+        for k, st in enumerate(_spans):
+            end = _spans[k + 1] if k + 1 < len(_spans) else len(block)
+            seg = block[st:end].strip()
+            if seg:
+                segs.append(seg)
+        head = block[:_spans[0]].strip()                  # 锚点之前的零碎内容并入第一单
+        if head and segs:
+            segs[0] = head + "\n" + segs[0]
+        merged = []
+        for s in segs:
+            if merged and not _looks_like_order(s):
+                merged[-1] = merged[-1] + "\n" + s
+            else:
+                merged.append(s)
+        return merged or [block]
+    return [block]
 
 
 def split_chunks(chunks):
