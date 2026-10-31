@@ -94,13 +94,50 @@ def _normalize_date(s):
     return ""
 
 
+def _parse_relative_date(value, today):
+    """识别中文相对日期：今天/明天/后天/大后天/明日 + 周X/星期X/周末。
+    返回 YYYY-MM-DD 或 ''。供「预约时间」在常规数字日期（9.11 / 2026-09-11）解析失败时兜底。
+
+    2026-10-31 修复：0ddf28a 之前完全不识别「明天/今天/周X」这类写法，
+    导致写「预约时间:明天12点」的订单日期与时间双双落空，卡片只能显示破折号「—」（常被误看成「一」）。"""
+    import datetime as _dt
+    s = str(value)
+    for kw, delta in (("大后天", 3), ("后天", 2), ("明天", 1), ("明日", 1), ("今天", 0)):
+        if kw in s:
+            d = today + _dt.timedelta(days=delta)
+            return d.strftime("%Y-%m-%d")
+    m = re.search(r"(?:周|星期)([一二三四五六日天])", s)
+    if m:
+        _map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+        target = _map[m.group(1)]
+        cur = today.weekday()  # 周一=0 … 周日=6
+        delta = (target - cur) % 7
+        if delta == 0:
+            delta = 7
+        d = today + _dt.timedelta(days=delta)
+        return d.strftime("%Y-%m-%d")
+    return ""
+
+
 def _extract_time(s):
     """从字符串中提取时间，归一化成 HH:MM。
-    支持：12.00 / 12:00 / 12点 / 12点30分 / 下午3点
+    支持：12.00 / 12:00 / 12点 / 12点30分 / 下午3点 / 晚上10点 / 凌晨2点
     """
     s = str(s).strip()
     if not s:
         return ""
+    # 时段词 + 点：下午3点 / 晚上10点 / 傍晚6点 / 夜里11点 → 加 12 小时
+    m = re.search(r"(下午|晚上|傍晚|夜里)\s*(\d{1,2})\s*点", s)
+    if m:
+        h = int(m.group(2)) + 12
+        if h >= 24:
+            h -= 12
+        return f"{h:02d}:00"
+    # 凌晨：凌晨2点 → 02:00（不加 12，避免变 14:00）
+    m = re.search(r"凌晨\s*(\d{1,2})\s*点", s)
+    if m:
+        h = int(m.group(1)) % 24
+        return f"{h:02d}:00"
     # HH:MM 或 HH.MM
     m = re.search(r"(\d{1,2})[:.点](\d{1,2})", s)
     if m:
@@ -238,6 +275,13 @@ def parse_order_text(raw_text):
                     if m:
                         result["booking_date"] = f"{today.year}-{today.month:02d}-{int(m.group(1)):02d}"
                         result["booking_time"] = _build_time(m.group(2), m.group(3), m.group(4), None, None)
+        # 4) 中文相对日期兜底（今天/明天/后天/大后天/周X/星期X）—— 此前完全不识别，
+        #    导致写「预约时间:明天12点」的订单日期与时间都落空、卡片只能显示破折号「—」
+        if not result.get("booking_date"):
+            _rd = _parse_relative_date(value, today)
+            if _rd:
+                result["booking_date"] = _rd
+                result["booking_time"] = _extract_time(value) or result.get("booking_time", "")
         elif key == "预约项目":
             result["package_lines"] = value_lines
         elif key in ("预约地址", "地址"):
