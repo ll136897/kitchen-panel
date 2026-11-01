@@ -1,17 +1,1 @@
-[2026-10-31T15:50:14.590003 UTC] request /api/orders/354/detail
-Traceback (most recent call last):
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 880, in full_dispatch_request
-    rv = self.dispatch_request()
-  File "/opt/render/project/src/.venv/lib/python3.14/site-packages/flask/app.py", line 865, in dispatch_request
-    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-  File "/opt/render/project/src/app.py", line 1666, in order_detail
-    req = calc_order_requirements(oid)
-  File "/opt/render/project/src/calculator.py", line 538, in calc_order_requirements
-    ing_demand = calc_order_ingredient_net(order_id)
-  File "/opt/render/project/src/calculator.py", line 454, in calc_order_ingredient_net
-    parsed = parse_order_text(own or raw_text)
-  File "/opt/render/project/src/parser.py", line 281, in parse_order_text
-    _rd = _parse_relative_date(value, today)
-                                      ^^^^^
-UnboundLocalError: cannot access local variable 'today' where it is not associated with a value
+worker(pid=42) 启动成功，app import OK
