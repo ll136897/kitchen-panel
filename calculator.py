@@ -44,11 +44,13 @@ def tool_qty_by_people(name, people):
     if name == "椅子":
         return p
     if name in ("卡式炉", "烤盘"):
-        return (p + 3) // 4
+        return 1 if p <= 6 else 2            # 用户 2026-11-01：≤6人餐1个、8/10人餐2个
     if name == "燃气罐":
-        return (p + 3) // 4 + 1
-    if name in ("夹子", "剪刀"):
-        return (p + 7) // 8
+        return 2 if p <= 6 else 4            # ≤6人餐2罐、8/10人餐4罐（用户确认）
+    if name == "夹子":
+        return 1 if p <= 6 else 2            # ≤6人餐1把、8/10人餐2把
+    if name == "剪刀":
+        return 1                             # 无论人数均1把（用户 2026-11-01）
     return 1
 
 
