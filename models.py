@@ -577,6 +577,45 @@ def init_db():
         except Exception as _e:
             print("[迁移] 托盘移除跳过：", _e)
 
+        # 一次性迁移（2026-11-01）：9-10人餐 固定标配清单对齐用户确认的「固定拿」规格。
+        # 用户给了 10人餐 固定 kit（工具+耗材），原 seed/线上库数值与之偏差：
+        # 纸杯20→12、筷子20→12、三格底料盒14→12、一次性桌布2→3、垃圾袋4→3、纸巾1→2、油1份→2份、蛋卷桌2→3。
+        # 用独立 settings 标记保证只跑一次；改套餐标配数量须同步 seed.py + 线上库 + LOGIC.md。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_pkg10_kit_20261101','1','一次性迁移：9-10人餐固定标配清单对齐用户规格(耗材/蛋卷桌)')"
+            )
+            if cur.rowcount:  # 仅在首次执行（标记不存在时）
+                _pid = cur.execute("SELECT id FROM packages WHERE name='9-10人餐'").fetchone()
+                if _pid:
+                    pid = _pid["id"]
+                    # 工具：蛋卷桌 = 3
+                    cur.execute(
+                        "UPDATE package_tools SET per_package=3 "
+                        "WHERE package_id=? AND tool_id=(SELECT id FROM tools WHERE name='蛋卷桌')",
+                        (pid,))
+                    # 耗材：name -> (per_package, portion_count)
+                    _consum = {
+                        "油": (300, 2),          # 2份(150ml×2)
+                        "三格底料盒": (12, 1),
+                        "纸杯": (12, 1),
+                        "筷子": (12, 1),
+                        "勺子": (3, 1),
+                        "围裙": (10, 1),
+                        "一次性桌布": (3, 1),
+                        "垃圾袋": (3, 1),
+                        "纸巾": (2, 1),
+                    }
+                    for _nm, (_pp, _pc) in _consum.items():
+                        cur.execute(
+                            "UPDATE package_ingredients SET per_package=?, portion_count=? "
+                            "WHERE package_id=? AND ingredient_id=(SELECT id FROM ingredients WHERE name=?)",
+                            (_pp, _pc, pid, _nm))
+                    print("[迁移] 9-10人餐固定标配清单已对齐用户规格")
+        except Exception as _e:
+            print("[迁移] 9-10人餐固定标配清单对齐跳过：", _e)
+
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
         #   expenses            —— 每笔支出一条
