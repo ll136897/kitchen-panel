@@ -358,6 +358,11 @@
           <button class="ltab" id="ltEst" onclick="setLaborMode('estimate')">估算</button>
           <button class="ltab" id="ltAct" onclick="setLaborMode('actual')">实际</button>
         </div>
+        <div class="labor-toggle" onclick="event.stopPropagation()">
+          <span style="font-size:11px;color:#888;margin-right:2px">折旧</span>
+          <button class="ltab" id="dtOff" onclick="setDepMode(false)">不算</button>
+          <button class="ltab" id="dtOn" onclick="setDepMode(true)">含折旧</button>
+        </div>
         <div id="profitSummary" class="muted" style="font-size:12px"></div>
       </div>
     </div>
@@ -833,6 +838,7 @@ function loadSigners(){
 let currentRange = 'day';     // 默认看"今天"（与工具栏高亮一致）
 let cfgData = null;
 let laborMode = 'estimate';   // 利润里"人工"口径：estimate=配置估算；actual=支出台账实际日结工资÷当天单数
+let depMode = false;          // 利润里"装备折旧"口径：false=平时不算（默认）；true=含折旧·科学成本模式（采购价÷寿命摊销）
 
 // ===== 日期范围 =====
 // 注意用本地时间（不能用 toISOString，那是 UTC——早上 8 点前会错成前一天）
@@ -1096,7 +1102,7 @@ function loadAll(){
   if(r.to)   scParams.push('date_to='+encodeURIComponent(r.to));
   const scQ = scParams.length ? ('?'+scParams.join('&')) : '';
   Promise.all([
-    fetchJSONRetry((laborMode==='actual' ? '/api/finance/period-real-profit' : '/api/finance/profit-overview') + q),
+    fetchJSONRetry((laborMode==='actual' ? '/api/finance/period-real-profit' : '/api/finance/profit-overview') + (q ? (q + '&dep=' + (depMode?'1':'0')) : ('?dep=' + (depMode?'1':'0')))),
     fetchJSONRetry('/api/finance/summary' + q),
     fetchJSONRetry('/api/finance/signer-counts' + scQ)
   ]).then(([pfRes, sumRes, scRes])=>{
@@ -1115,6 +1121,7 @@ function loadAll(){
     renderProfitOrders(pfData.orders||[]);
     renderRealProfitNote(pfData.totals||{});
     renderLaborToggle();
+    renderDepToggle();
     signerCounts = scRes ? (scRes.data || {}) : {};
     signerTotal = scRes ? (scRes.total || 0) : 0;
     renderFinSignBar();   // 归属筛选条按当前区间更新计数
@@ -1125,6 +1132,10 @@ function loadAll(){
   loadBillDates(finBy ? ('by='+encodeURIComponent(finBy)) : '');
 }
 
+function fmtNum(n){
+  n = Number(n||0);
+  return (n % 1 === 0) ? String(n) : n.toFixed(2);
+}
 function fmtY(n){
   n = n || 0;
   const a = Math.abs(n);
@@ -1179,6 +1190,7 @@ const KIND_UI = [
   ['outsource', '🏕️ 搭建/回收外包费', '按人数折算单数 × 场地单价'],
   ['fuel',      '🚚 配送费',          '配送/跑腿费用'],
   ['consume',   '🔥 额外耗材',        '炭、气罐这类'],
+  ['depreciation', '🛠️ 装备折旧',   '采购价÷寿命摊销到本单（可复用设备，平时不计；科学成本模式才计入）'],
   ['other',     '📌 其他开销',        '临时多出来的开销'],
 ];
 function kpiEsc(s){
@@ -1795,6 +1807,18 @@ function renderLaborToggle(){
   if(e) e.classList.toggle('active', laborMode==='estimate');
   if(a) a.classList.toggle('active', laborMode==='actual');
 }
+// 装备折旧切换：不算（默认，工具是可复用设备不并一次性消耗）↔ 含折旧·科学成本（采购价÷寿命摊销到本单）
+function setDepMode(v){
+  if(depMode === v) return;
+  depMode = v;
+  renderDepToggle();
+  loadAll();
+}
+function renderDepToggle(){
+  const off = document.getElementById('dtOff'), on = document.getElementById('dtOn');
+  if(off) off.classList.toggle('active', !depMode);
+  if(on) on.classList.toggle('active', depMode);
+}
 function renderRealProfitNote(t){
   const box = document.getElementById('realProfitNote');
   if(!box) return;
@@ -1840,7 +1864,7 @@ function openPf(oid){
 function closePf(){ document.getElementById('pfModal').style.display = 'none'; }
 
 function loadPf(oid){
-  fetch(`/api/finance/order/${oid}/profit`).then(r=>r.json()).then(res=>{
+  fetch(`/api/finance/order/${oid}/profit?dep=${depMode?1:0}`).then(r=>r.json()).then(res=>{
     if(!res.ok){ document.getElementById('pfBody').innerHTML = '<div class="muted">读取失败</div>'; return; }
     renderPf(res.data);
   });
@@ -1920,6 +1944,13 @@ function renderPf(p){
         <span class="nm">📌 ${it.name}</span>
         <input type="number" step="1" value="${it.amount}" style="margin-left:auto" onchange="pfSave('other',{id:${it.id},name:'${(it.name||'').replace(/'/g,'')}',amount:this.value})">
         <div class="hint">${it.detail||it.hint} <button class="btn btn-sm" onclick="pfClear('other',${it.id})" style="font-size:10px;padding:1px 6px">删除</button></div>
+      </div>`;
+    } else if(it.kind === 'depreciation'){
+      const det = (it.dep_detail||[]).map(d=>`${escHtml(d.name)}：采购¥${d.cost}/寿命${d.lifespan}场 × 本单${fmtNum(d.qty)}张 = ¥${fmtNum(d.dep)}`).join('；');
+      html += `<div class="pf-row">
+        <span class="nm">🛠️ ${it.name} <span class="pf-tag pf-ok">自动</span></span>
+        <span class="pf-val out">${fmtY(it.amount)}</span>
+        <div class="hint">${it.hint}${det?('　明细：'+det):''}</div>
       </div>`;
     } else {
       html += `<div class="pf-row">

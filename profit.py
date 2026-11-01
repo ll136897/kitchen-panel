@@ -29,6 +29,7 @@ KIND_LABEL = {
     "fuel": "配送费",
     "labor": "打包切配人工",
     "consume": "额外耗材",
+    "depreciation": "装备折旧",
     "other": "其他开销",
 }
 KIND_HINT = {
@@ -37,6 +38,7 @@ KIND_HINT = {
     "fuel": "配送/跑腿的费用",
     "labor": "打包切配出餐人工：首单 + 每多一个 10 人单（单越大越省，参数见设置）",
     "consume": "炭、气罐这类；一次性餐具已含在食材里，这里别重复算",
+    "depreciation": "装备采购价 ÷ 预计寿命（使用场次）摊销到本单；平时不算，开「含折旧·科学成本」才计入",
     "other": "临时多出来的开销",
 }
 
@@ -92,6 +94,7 @@ DEFAULT_CONFIG = {
     "fixed_monthly": 0,            # 每月固定开销（装备折旧、工具添置等）
     "fixed_orders_per_month": 0,   # 预计每月单数（用于摊销；0=按当期实际单数）
     "margin_alert": 40,            # 毛利率低于它标红
+    "include_depreciation": False, # 是否把「装备折旧」计入成本（默认不算；科学成本模式才开）
 }
 
 CONFIG_KEY = "cost_config"
@@ -360,6 +363,38 @@ def _overrides(db, oid, costs=None):
     return fixed, extras
 
 
+def calc_order_depreciation(db, oid, _tool_demand=None):
+    """装备折旧：采购价(cost) ÷ 预计寿命(lifespan 使用场次)，摊销到本单；寿命=0 不折旧。
+    返回 (total, detail)；detail 每项 {tool_id, name, qty, cost, lifespan, dep}。
+    _tool_demand：批量预取时传入 calc_order_tool_needs 结果（key=tool_id，含 total），
+    不传则自己调 calc_order_tool_needs(oid)。只有「平时算利润」之外的科学成本模式才调它。
+    注意：这与 calculator.tool_rent_breakdown 里的「折旧=租金×10%」是两套完全不同的口径——
+    这里是真实的「装备采购投入按寿命摊销」，不是按租金比例算的伪折旧（见 LOGIC.md）。"""
+    from calculator import calc_order_tool_needs
+    demand = _tool_demand if _tool_demand is not None else calc_order_tool_needs(oid)
+    if not demand:
+        return 0.0, []
+    ids = list(demand.keys())
+    ph = ",".join("?" * len(ids))
+    rows = db.execute("SELECT id, name, cost, lifespan FROM tools WHERE id IN (%s)" % ph, ids).fetchall()
+    total = 0.0
+    detail = []
+    for r in rows:
+        tid = r["id"]
+        lifespan = float(r["lifespan"] or 0)
+        cost = float(r["cost"] or 0)
+        if lifespan <= 0 or cost <= 0:
+            continue
+        qty = float((demand[tid] or {}).get("total") or 0)
+        dep = round(cost / lifespan * qty, 2)
+        if dep <= 0:
+            continue
+        total += dep
+        detail.append({"tool_id": tid, "name": r["name"], "qty": qty,
+                       "cost": cost, "lifespan": lifespan, "dep": dep})
+    return round(total, 2), detail
+
+
 def _auto_items(db, oid, cfg, setup=None, o=None, pkgs=None, dishes=None, bulk=None):
     """自动算出的成本项（未手工覆盖前的默认值）。
     搭建费：仅搭建(全包)单征收；不搭建(半包/自送)一律不计。
@@ -466,6 +501,25 @@ def order_profit(db, oid, cfg=None, bulk=None):
         items.append({"kind": "other", "id": e["id"], "name": e["name"] or "其他开销",
                       "hint": KIND_HINT["other"], "amount": amt, "auto": None,
                       "overridden": True, "detail": e["note"] or "", "locked": False})
+
+    # —— 装备折旧（可开关成本项）：采购价÷寿命摊销到本单；平时不算，开「含折旧·科学成本」才计入 ——
+    # 工具是可复用设备，平常算利润不并一次性消耗；但科学成本核算时要按寿命摊一笔，算清"这单用旧了多少装备"。
+    inc_dep = bool(cfg.get("include_depreciation", False))
+    dep_detail = []
+    if inc_dep:
+        _td = None
+        if bulk is not None and isinstance(bulk, dict) and bulk.get("tool_needs") is not None:
+            _td = bulk["tool_needs"].get(oid)
+        dep_amount, dep_detail = calc_order_depreciation(db, oid, _tool_demand=_td)
+        if dep_amount > 0:
+            cost_total += dep_amount
+            items.append({
+                "kind": "depreciation", "name": KIND_LABEL["depreciation"],
+                "hint": KIND_HINT["depreciation"], "amount": dep_amount,
+                "auto": round(dep_amount, 2), "overridden": False,
+                "detail": "采购价÷寿命摊销（%d 件装备）" % len(dep_detail),
+                "locked": False, "note": None, "dep_detail": dep_detail,
+            })
 
     cost_total = round(cost_total, 2)
     cash_profit = round(revenue - cost_total, 2)
@@ -577,11 +631,13 @@ def order_profit(db, oid, cfg=None, bulk=None):
                           o.get("amount"), o.get("address")),
             order_info.get("packages", [])),
         "setup": setup,          # 1=搭建 / 0=不搭建（供财务页逐单表显示搭建图标）
+        "include_depreciation": inc_dep,   # 本单利润是否已计入装备折旧
+        "dep_detail": dep_detail,          # 折旧明细（每装备：采购价/寿命/用量/摊销）
     }
 
 
 # ---------- 期间汇总 ----------
-def _build_profit_bulk(db, oids, cfg=None):
+def _build_profit_bulk(db, oids, cfg=None, include_depreciation=False):
     """一次性批量预取指定订单的全部关联数据与参考表，供 period_overview / period_real_profit
     在循环内用字典查表代替逐单查库（消除 N+1）。返回 dict：
       orders: {oid: 全字段行}
@@ -590,9 +646,12 @@ def _build_profit_bulk(db, oids, cfg=None):
       dishes: {oid: [order_dishes 行]}
       month_counts: {ym: 当月有效订单数}（供固定开销摊销，与逐单查库结果一致）。
       day_labor: {date: {'first_oid': 当天最早非手动改价单 id, 'units': 当天自动单 units 之和}}
-                 （供按天聚合的切配人工分摊，见 _day_cutting_labor）。"""
+                 （供按天聚合的切配人工分摊，见 _day_cutting_labor）。
+      tool_needs: {oid: {tool_id: {total,...}}}（仅 include_depreciation=True 时计算，供折旧摊销用；
+                 默认 False 不计算，保证平时算利润零额外开销、性能不受影响）。"""
     if not oids:
-        return {"orders": {}, "pkgs": {}, "costs": {}, "dishes": {}, "month_counts": {}, "day_labor": {}}
+        return {"orders": {}, "pkgs": {}, "costs": {}, "dishes": {}, "month_counts": {},
+                "day_labor": {}, "tool_needs": {}}
     ph = ",".join("?" * len(oids))
     orders = {r["id"]: dict(r) for r in db.execute("SELECT * FROM orders WHERE id IN (%s)" % ph, oids)}
     pkgs = {}
@@ -643,15 +702,25 @@ def _build_profit_bulk(db, oids, cfg=None):
                 if first_oid is None:
                     first_oid = rid
             day_labor[d] = {"first_oid": first_oid, "units": day_units}
+    # ---- tool_needs：折旧摊销用（仅开启折旧时计算，平时零额外开销）----
+    tool_needs = {}
+    if include_depreciation:
+        from calculator import calc_order_tool_needs
+        for _oid in oids:
+            tool_needs[_oid] = calc_order_tool_needs(_oid)
     return {"orders": orders, "pkgs": pkgs, "costs": costs, "dishes": dishes,
-            "month_counts": mc, "day_labor": day_labor}
+            "month_counts": mc, "day_labor": day_labor, "tool_needs": tool_needs}
 
 
-def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
+def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=(), include_depreciation=None):
     """期间利润汇总：现金口径 + 含固定开销摊销口径
     extra_clause/extra_params：额外过滤（如按"归属" by= 筛选），直接拼进 WHERE。
+    include_depreciation：是否把「装备折旧」计入成本（None=用配置，True/False=覆盖配置）。
     """
     cfg = cfg or get_config(db)
+    if include_depreciation is not None:
+        cfg["include_depreciation"] = bool(include_depreciation)
+    inc_dep = bool(cfg.get("include_depreciation", False))
     cur = db.cursor()
     clause = "o.status!='cancelled' AND o.deleted_at IS NULL"
     params = []
@@ -669,13 +738,13 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
     # 批量预取：一次性把所有订单关联数据与参考表装进内存，逐单计算改走字典查表
     # （消除 N+1，免费实例上全量计算从十几秒降到亚秒级）
     from calculator import prime_calc_cache, clear_calc_cache
-    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg)
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg, include_depreciation=inc_dep)
     prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
                        "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
                        "fuel_cost": 0.0, "consume_cost": 0.0, "other_cost": 0.0,
-                       "fixed_alloc": 0.0}
+                       "depreciation_cost": 0.0, "fixed_alloc": 0.0}
     by_kind = {}
     for r in rows:
         p = order_profit(db, r["id"], cfg, bulk=bulk)
@@ -703,6 +772,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
         tot["fuel_cost"] += bk.get("fuel", 0.0)
         tot["consume_cost"] += bk.get("consume", 0.0)
         tot["other_cost"] += bk.get("other", 0.0)
+        tot["depreciation_cost"] += bk.get("depreciation", 0.0)
         tot["fixed_alloc"] += p.get("fixed_alloc", 0.0)
         if p["alert"] == "loss":
             tot["loss"] += 1
@@ -769,10 +839,11 @@ def real_labor_by_date(db, date_from=None, date_to=None):
     return {r["d"]: float(r["a"] or 0) for r in db.execute(sql, params).fetchall()}
 
 
-def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=()):
+def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause="", extra_params=(), include_depreciation=None):
     """周期真实利润：与 period_overview 同口径、同返回结构，
     唯一差别——人工用「支出台账里实际记的日结工资 ÷ 当天单数」替换掉配置估算值。
     食材=实际消耗（order_profit 已含）；配送/搭建=地址规则（特殊情况你手填的优先）；人工=实际。
+    折旧：同样受 include_depreciation 控制（None=用配置，True/False=覆盖），开启时把装备折旧计入成本。
 
     返回结构里 totals 额外带：
       labor_recorded   实际人工总额（你真的转出去的钱）
@@ -781,6 +852,9 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
       labor_missing    有单但没录人工的天数（数据缺口提示）
     """
     cfg = cfg or get_config(db)
+    if include_depreciation is not None:
+        cfg["include_depreciation"] = bool(include_depreciation)
+    inc_dep = bool(cfg.get("include_depreciation", False))
     cur = db.cursor()
     clause = "o.status!='cancelled' AND o.deleted_at IS NULL"
     params = []
@@ -803,13 +877,13 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
 
     # 批量预取：消除 N+1，免费实例上全量计算从十几秒降到亚秒级
     from calculator import prime_calc_cache, clear_calc_cache
-    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg)
+    bulk = _build_profit_bulk(db, [r["id"] for r in rows], cfg=cfg, include_depreciation=inc_dep)
     prime_calc_cache(db)
     orders, tot = [], {"revenue": 0.0, "food": 0.0, "other": 0.0, "cost": 0.0,
                        "profit": 0.0, "net": 0.0, "loss": 0, "warn": 0, "delivery": 0.0,
                        "food_cost": 0.0, "labor_cost": 0.0, "outsource_cost": 0.0,
                        "fuel_cost": 0.0, "consume_cost": 0.0, "other_cost": 0.0,
-                       "fixed_alloc": 0.0}
+                       "depreciation_cost": 0.0, "fixed_alloc": 0.0}
     by_kind = {}
     labor_days = set()
     order_days = set()
@@ -864,6 +938,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
         tot["fuel_cost"] += bk.get("fuel", 0.0)
         tot["consume_cost"] += bk.get("consume", 0.0)
         tot["other_cost"] += bk.get("other", 0.0)
+        tot["depreciation_cost"] += bk.get("depreciation", 0.0)
         tot["fixed_alloc"] += fixed_alloc
         if level == "loss":
             tot["loss"] += 1

@@ -95,13 +95,17 @@ def init_db():
                 name TEXT NOT NULL UNIQUE,
                 stock REAL NOT NULL DEFAULT 0,
                 threshold REAL NOT NULL DEFAULT 0,
-                cost REAL NOT NULL DEFAULT 0          -- 单位成本（用于损耗计算）
+                cost REAL NOT NULL DEFAULT 0,          -- 单位采购价（投价）
+                lifespan REAL NOT NULL DEFAULT 0       -- 预计使用场次，用于折旧摊销；0=不折旧
             )
         """)
         # 迁移：老库补 cost 字段
         cols = [r[1] for r in cur.execute("PRAGMA table_info(tools)").fetchall()]
         if "cost" not in cols:
             cur.execute("ALTER TABLE tools ADD COLUMN cost REAL NOT NULL DEFAULT 0")
+        # 迁移：老库补 lifespan 字段（折旧用；0=不折旧）
+        if "lifespan" not in cols:
+            cur.execute("ALTER TABLE tools ADD COLUMN lifespan REAL NOT NULL DEFAULT 0")
 
         # 采购记录（进货入库带单价）
         cur.execute("""
@@ -615,6 +619,28 @@ def init_db():
                     print("[迁移] 9-10人餐固定标配清单已对齐用户规格")
         except Exception as _e:
             print("[迁移] 9-10人餐固定标配清单对齐跳过：", _e)
+
+        # 一次性迁移（2026-11-01 折旧功能）：给 8 件装备填上默认预计寿命（使用场次）。
+        # 寿命=0 表示不折旧（不会自动算进成本）；这里只对「当前 lifespan=0」的工具填默认，
+        # 已手动设过寿命的不覆盖。用独立 settings 标记保证只跑一次。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_tools_lifespan_20261101','1','一次性迁移：给装备填默认预计寿命(使用场次)，用于折旧摊销')"
+            )
+            if cur.rowcount:  # 仅在首次执行（标记不存在时）
+                # 默认寿命（使用场次）：耐用品给大值，燃气罐=1 即当场消耗（按投价全计）
+                _TOOL_LIFESPAN = {
+                    "天幕": 100, "蛋卷桌": 80, "椅子": 100, "卡式炉": 80,
+                    "烤盘": 60, "燃气罐": 1, "夹子": 50, "剪刀": 50,
+                }
+                for _nm, _lf in _TOOL_LIFESPAN.items():
+                    cur.execute(
+                        "UPDATE tools SET lifespan=? WHERE name=? AND (lifespan IS NULL OR lifespan=0)",
+                        (_lf, _nm))
+                print("[迁移] 装备默认寿命已填（折旧摊销用）")
+        except Exception as _e:
+            print("[迁移] 装备默认寿命填充跳过：", _e)
 
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。

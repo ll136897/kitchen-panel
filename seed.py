@@ -84,20 +84,21 @@ def seed_data():
                        (name, unit, stock, thr, cost, cat))
 
         # ========== 工具 ==========
-        # 格式：(name, 初始库存, 预警阈值, 单位成本)
+        # 格式：(name, 初始库存, 预警阈值, 单位成本, 寿命场次)
         # 顺序统一：天幕、桌子、椅子、卡式炉、烤盘、气罐、夹子、剪刀
+        # 寿命=预计使用场次（折旧摊销用）：耐用品给大值，燃气罐=1 即当场消耗（按投价全计）；0=不折旧
         ALL_TOOLS = [
-            ("天幕", 10, 3, 280.0),
-            ("蛋卷桌", 10, 2, 75.0),
-            ("椅子", 80, 15, 26.0),
-            ("卡式炉", 15, 3, 30.0),
-            ("烤盘", 15, 3, 30.0),
-            ("燃气罐", 30, 5, 65.0),
-            ("夹子", 20, 5, 12.0),
-            ("剪刀", 10, 2, 15.0),
+            ("天幕", 10, 3, 280.0, 100),
+            ("蛋卷桌", 10, 2, 75.0, 80),
+            ("椅子", 80, 15, 26.0, 100),
+            ("卡式炉", 15, 3, 30.0, 80),
+            ("烤盘", 15, 3, 30.0, 60),
+            ("燃气罐", 30, 5, 65.0, 1),
+            ("夹子", 20, 5, 12.0, 50),
+            ("剪刀", 10, 2, 15.0, 50),
         ]
-        for name, stock, thr, cost in ALL_TOOLS:
-            db.execute("INSERT INTO tools (name, stock, threshold, cost) VALUES (?,?,?,?)", (name, stock, thr, cost))
+        for name, stock, thr, cost, lifespan in ALL_TOOLS:
+            db.execute("INSERT INTO tools (name, stock, threshold, cost, lifespan) VALUES (?,?,?,?,?)", (name, stock, thr, cost, lifespan))
 
         # 取映射
         cur.execute("SELECT id, name FROM ingredients")

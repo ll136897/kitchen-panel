@@ -4547,9 +4547,15 @@ def cost_config():
 
 @app.route("/api/finance/order/<int:oid>/profit")
 def order_profit_api(oid):
-    """单笔订单利润：收入、成本项明细（食材/搭建回收/配送费/人工/耗材/其他）、现金利润、净利、毛利率"""
-    from profit import order_profit
-    p = order_profit(g.db, oid)
+    """单笔订单利润：收入、成本项明细（食材/搭建回收/配送费/人工/耗材/其他/装备折旧）、现金利润、净利、毛利率。
+    支持 ?dep=1|0 覆盖配置里的「含折旧·科学成本」开关（平时不算折旧，科学成本模式才计入）。"""
+    from profit import order_profit, get_config
+    cfg = None
+    dep = request.args.get("dep")
+    if dep in ("1", "0"):
+        cfg = get_config(g.db)
+        cfg["include_depreciation"] = (dep == "1")
+    p = order_profit(g.db, oid, cfg=cfg)
     if not p:
         return jsonify({"ok": False, "msg": "订单不存在"}), 404
     return jsonify({"ok": True, "data": p})
@@ -4627,12 +4633,15 @@ def finance_profit_overview():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _dep = request.args.get("dep")
+    _dep_bool = True if _dep == "1" else (False if _dep == "0" else None)
     _ck = "po:" + request.url
     _cached = _fin_cache_get(_ck)
     if _cached is not None:
         return jsonify(_cached)
     ov = period_overview(g.db, request.args.get("date_from"), request.args.get("date_to"),
-                         extra_clause=_clause, extra_params=_params)
+                         extra_clause=_clause, extra_params=_params,
+                         include_depreciation=_dep_bool)
     _annotate_setup_flags(g.db, ov.get("orders", []))
     _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
@@ -4648,12 +4657,15 @@ def finance_period_real_profit():
     _stc, _stp = store_scope(getattr(g, "cur_user", None), request.args.get("store"))
     _clause = _sc + _stc
     _params = list(_sp) + list(_stp)
+    _dep = request.args.get("dep")
+    _dep_bool = True if _dep == "1" else (False if _dep == "0" else None)
     _ck = "prp:" + request.url
     _cached = _fin_cache_get(_ck)
     if _cached is not None:
         return jsonify(_cached)
     ov = period_real_profit(g.db, request.args.get("date_from"), request.args.get("date_to"),
-                            extra_clause=_clause, extra_params=_params)
+                            extra_clause=_clause, extra_params=_params,
+                            include_depreciation=_dep_bool)
     _annotate_setup_flags(g.db, ov.get("orders", []))
     _fin_cache_put(_ck, {"ok": True, "data": ov})
     return jsonify({"ok": True, "data": ov})
