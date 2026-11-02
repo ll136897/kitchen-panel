@@ -472,6 +472,10 @@ try:
     _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0, "燃气罐": 45.0/12.0}
     for _tname, _tcost in _tool_fix.items():
         _cur.execute("UPDATE tools SET cost = ? WHERE name = ?", (_tcost, _tname))
+    # 装备寿命（折旧摊销分母）= 用户 2026-11-02 确认的「示意更换频次」，幂等覆盖，保证所有库一致
+    _tool_lifespan_fix = {"天幕": 20, "蛋卷桌": 15, "椅子": 15, "卡式炉": 10, "烤盘": 10, "燃气罐": 1, "夹子": 4, "剪刀": 4}
+    for _tname, _tlf in _tool_lifespan_fix.items():
+        _cur.execute("UPDATE tools SET lifespan = ? WHERE name = ?", (_tlf, _tname))
     _cur.execute("SELECT id FROM ingredients WHERE name = '礼盒纸盒'")
     if not _cur.fetchone():
         _cur.execute(
