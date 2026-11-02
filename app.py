@@ -469,7 +469,7 @@ except Exception as _e:
 try:
     _db = get_db()
     _cur = _db.cursor()
-    _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0, "燃气罐": 45.0/12.0}
+    _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0, "燃气罐": 45.0/12.0, "夹子": 7.0, "剪刀": 7.0}
     for _tname, _tcost in _tool_fix.items():
         _cur.execute("UPDATE tools SET cost = ? WHERE name = ?", (_tcost, _tname))
     # 装备寿命（折旧摊销分母）= 用户 2026-11-02 确认的「示意更换频次」，幂等覆盖，保证所有库一致

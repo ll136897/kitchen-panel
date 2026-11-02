@@ -94,8 +94,8 @@ def seed_data():
             ("卡式炉", 15, 3, 30.0, 10),
             ("烤盘", 15, 3, 30.0, 10),
             ("燃气罐", 30, 5, 45.0/12.0, 1),
-            ("夹子", 20, 5, 12.0, 4),
-            ("剪刀", 10, 2, 15.0, 4),
+            ("夹子", 20, 5, 7.0, 4),
+            ("剪刀", 10, 2, 7.0, 4),
         ]
         for name, stock, thr, cost, lifespan in ALL_TOOLS:
             db.execute("INSERT INTO tools (name, stock, threshold, cost, lifespan) VALUES (?,?,?,?,?)", (name, stock, thr, cost, lifespan))
