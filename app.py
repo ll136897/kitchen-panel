@@ -465,11 +465,11 @@ except Exception as _e:
     print(f"[migrate] 重命名应季水果三样跳过: {_e}")
 
 # 迁移：修正装备采购成本（用户核对实际采购价）& 新增耗材「礼盒纸盒」
-# 蛋卷桌75 / 月亮椅(椅子)26 / 卡式炉30 / 烤盘30（元）；礼盒纸盒3.5元/个，归 packaging(耗材)
+# 蛋卷桌75 / 月亮椅(椅子)26 / 卡式炉30 / 烤盘30 / 燃气罐3.5（元，2026-11-02 修正：原为65系坏默认值）；礼盒纸盒3.5元/个，归 packaging(耗材)
 try:
     _db = get_db()
     _cur = _db.cursor()
-    _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0}
+    _tool_fix = {"蛋卷桌": 75.0, "椅子": 26.0, "卡式炉": 30.0, "烤盘": 30.0, "燃气罐": 3.5}
     for _tname, _tcost in _tool_fix.items():
         _cur.execute("UPDATE tools SET cost = ? WHERE name = ?", (_tcost, _tname))
     _cur.execute("SELECT id FROM ingredients WHERE name = '礼盒纸盒'")
