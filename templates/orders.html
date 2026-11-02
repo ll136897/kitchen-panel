@@ -120,6 +120,7 @@
     .preview-grid .cell .v{font-size:13px}
     /* 备注含椅子数/位置要求/忌口等关键备餐信息，手机端也必须显示（仅压缩留白，不隐藏） */
     .note-box{display:block;font-size:11px;padding:5px 8px;margin:4px 0;line-height:1.45}
+    .preview-grid .note-cell{font-size:11px;padding:4px 2px;line-height:1.45}
     .btn-row{gap:6px;margin-top:8px}
     .btn-row .btn{padding:7px 9px;font-size:12px}
     .tag-lg{font-size:11px;padding:4px 11px}
@@ -764,9 +765,8 @@ function buildCard(o, isAnchor){
       <div class="cell clickable" onclick="groupBy('contact_name', ${o.id})"><div class="k">👤 联系人</div><div class="v">${o.contact_name||'-'}</div></div>
       <div class="cell clickable" ${o.contact_phone?`onclick="groupByValue('phone', ${o.id}, 0)"`:''}><div class="k">📞 电话</div><div class="v">${o.contact_phone?`${o.contact_phone}<a class="tel-mini" href="tel:${o.contact_phone}" onclick="event.stopPropagation()" title="拨号">📞</a>`:'-'}</div></div>
       <div class="cell"><div class="k">💰 金额 / 押金</div><div class="v">¥${o.amount||'-'} / ¥${o.deposit||'-'}</div></div>
+      ${o.note?`<div class="note-cell"><b>📝 备注：</b>${o.note}</div>`:''}
     </div>
-
-    ${o.note?`<div class="note-box"><b>📝 备注：</b>${o.note}</div>`:''}
 
     <div class="btn-row">
       ${showDeleted ? (canTouch(o) ? `
