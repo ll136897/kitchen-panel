@@ -384,3 +384,7 @@
   - **修正（`parser.py` `_parse_extra_ingredients`）**：① 工具/耗材排除词补齐：餐具、具、纸巾、桌布、垃圾、一次性、打包、餐盒、筷、勺、纸杯、围裙（仍由原 `_parse_extra_tools` 处理装备，不重复计）；② 新增物流/日期闲文排除词：号、单子、订单、滴滴、打包、提前、准备、位置、风景、看湖（命中即非加菜）。
   - **影响**：听海/徐先生等纯装备/物流备注 → `extra_ingredients=[]` → `has_extra=False`，简略表不再误标加菜；真实加菜（如「加一份牛骰子」「五香料换川香料，加一个薄荷牛肉」）识别不受影响。判定口径：备注徽标只认"能匹配到食材库"或经上述过滤后余下的真菜名，装备/耗材/物流/日期闲文一律不算加菜。
   - **订单页版面（`orders.html` `buildCard` + `static/style.css`）**：备注原在信息网格下方独占一整行，改为网格内第 6 格（`grid-column:auto / -1`）；宽屏（卡面≥约840px、有第 6 空列）时自动填在「金额」右侧空位，窄屏自动整行——省掉单独一行的纵向空间。备注仍是订单卡必显信息，不隐藏。
+- 2026-11-02（订单页与财务页明细编辑界面统一 + 同步）：
+  - **问题**：用户发现订单页与财务页明细是两套独立的"配送费/搭建费"编辑入口，且存到不同表，互不同步——在财务页改了配送费/搭建费，订单页看不到；反之亦然。根因：订单页写 `orders.delivery_fee` / `orders.setup_flag`，财务页明细的 🚚/🏕️ 行却写 `order_costs` 表的 `fuel`/`outsource` 覆盖行，两套数据源各自为政。
+  - **修正（`templates/finance.html` `renderPf`）**：① 配送费行（fuel）改为直接读写 `orders.delivery_fee`（与订单页同一字段、唯一数据源），保存时顺手清掉旧的 `order_costs.fuel` 覆盖行（`pfSaveDelivery` → PUT `/api/orders/<oid>/edit` + POST `cost/clear` kind=fuel），避免两套数据打架；② 搭建/外包行（outsource）顶部加「搭建 是/否」开关，直接写 `orders.setup_flag`（`pfToggleSetup`），与订单页同步；不搭建时成本自动归 0。③ 食材/人工/其他/折旧等纯成本项维持原 `order_costs` 覆盖机制（只在成本侧，无需与订单页同步）。
+  - **效果**：配送费、搭建与否现在只有一个真值（都落在 `orders` 表），两边随便哪页改，另一页打开都是同一个数。旧数据里若已存在 `order_costs.fuel` 覆盖行，下次在财务页改一下配送费即自动清掉并统一到 `orders.delivery_fee`。

@@ -1932,10 +1932,20 @@ function renderPf(p){
         <div class="hint">${it.hint} <button id="pfFoodBtn" class="btn btn-sm pf-food-btn" onclick="toggleFood()">看明细 ▾</button></div>
       </div>`;
     } else if(it.kind === 'outsource'){
+      const _od = p.order || {};
+      const _setupNow = (_od.setup_flag === 1) ? '1' : '0';
       html += `<div class="pf-row">
         <span class="nm">🏕️ ${it.name} ${it.overridden?'<span class="pf-tag pf-warn">手改</span>':'<span class="pf-tag pf-ok">自动</span>'}</span>
-        <span class="pf-ctl"><input type="number" step="1" id="pfQty" value="${it.qty!=null?it.qty:''}" title="单数" onchange="pfSaveOut()"> <span class="eq">单 ×</span>
-        <input type="number" step="1" id="pfUp" value="${it.unit_price!=null?it.unit_price:''}" title="单价" onchange="pfSaveOut()"></span>
+        <span class="pf-ctl">
+          <label style="font-size:12px;margin-right:8px;white-space:nowrap">搭建
+            <select id="pfSetup" onchange="pfToggleSetup(this.value)" style="padding:2px 4px;border-radius:6px;border:1px solid var(--border)">
+              <option value="1" ${_setupNow==='1'?'selected':''}>是</option>
+              <option value="0" ${_setupNow==='0'?'selected':''}>否（自搭/半包）</option>
+            </select>
+          </label>
+          <input type="number" step="1" id="pfQty" value="${it.qty!=null?it.qty:''}" title="单数" onchange="pfSaveOut()"> <span class="eq">单 ×</span>
+          <input type="number" step="1" id="pfUp" value="${it.unit_price!=null?it.unit_price:''}" title="单价" onchange="pfSaveOut()">
+        </span>
         <span class="pf-val out">＝ ${fmtY(it.amount)}</span>
         <div class="hint">${it.detail||it.hint}${it.overridden?` <button class="btn btn-sm" onclick="pfClear('outsource')" style="font-size:10px;padding:1px 6px">恢复自动</button>`:''}</div>
       </div>`;
@@ -1951,6 +1961,17 @@ function renderPf(p){
         <span class="nm">🛠️ ${it.name} <span class="pf-tag pf-ok">自动</span></span>
         <span class="pf-val out">${fmtY(it.amount)}</span>
         <div class="hint">${it.hint}${det?('　明细：'+det):''}</div>
+      </div>`;
+    } else if(it.kind === 'fuel'){
+      // 配送费统一从 orders.delivery_fee 取/写（与订单页同一字段，避免两套数据打架）；
+      // 改搭建单时此处仍记录，但成本侧不计入（配送已含在搭建费内）。
+      const _od = p.order || {};
+      const _dv = (_od.delivery_fee != null) ? _od.delivery_fee : (it.amount||'');
+      const _isSetup = (_od.setup_flag === 1);
+      html += `<div class="pf-row">
+        <span class="nm">🚚 ${it.name}</span>
+        <input type="number" step="1" value="${_dv}" style="margin-left:auto" onchange="pfSaveDelivery(this.value)">
+        <div class="hint">${it.hint}${_isSetup?'　⚠️ 搭建单：配送已含在搭建费内，此项仅记录、不计入成本':''}${_od.delivery_fee!=null?'':'　<span class="pf-tag pf-ok">自动</span>'}</div>
       </div>`;
     } else {
       html += `<div class="pf-row">
@@ -2052,6 +2073,32 @@ function pfClear(kind, id){
   }).then(r=>r.json()).then(res=>{
     if(res.ok){ renderPf(res.data); showRefreshToast(); loadAll(); }
   });
+}
+// 配送费：直接写 orders.delivery_fee（与订单页同一字段，唯一数据源），
+// 并清掉旧的 order_costs.fuel 覆盖行，避免两套数据打架。
+function pfSaveDelivery(v){
+  fetch(`/api/orders/${pfOid}/edit`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({delivery_fee: v})
+  }).then(r=>r.json()).then(d=>{
+    if(!d.ok) throw new Error(d.msg||'保存失败');
+    return fetch(`/api/finance/order/${pfOid}/cost/clear`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({kind:'fuel'})
+    });
+  }).then(r=>r.json()).then(()=>{
+    loadPf(pfOid); loadAll(); showRefreshToast();
+  }).catch(e=>alert(e.message||'网络错误'));
+}
+// 搭建开关：直接写 orders.setup_flag（与订单页同步）。
+function pfToggleSetup(v){
+  fetch(`/api/orders/${pfOid}/edit`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({setup_flag: v})
+  }).then(r=>r.json()).then(d=>{
+    if(!d.ok) throw new Error(d.msg||'保存失败');
+    loadPf(pfOid); loadAll(); showRefreshToast();
+  }).catch(e=>alert(e.message||'网络错误'));
 }
 function addOther(){
   const name = prompt('这项开销叫什么？（例：临时帮工）');
