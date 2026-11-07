@@ -581,16 +581,54 @@ def _parse_extra_tools(note):
 
 
 def _parse_extra_ingredients(note):
-    """从备注解析额外加菜需求，如 "加一份牛骰子，一份牛肋条"
-    返回 [{name: 食材名(备注原文), qty: 份数}]
-    识别模式：
-      - 加一份牛骰子 / 加2份牛肋条 / 加一份新牛骰子
-      - 一份牛骰子，一份牛肋条（加号/逗号/顿号分隔）
-      - 多加一份牛骰子
+    """从备注解析额外加菜需求，返回 [{name, qty, mode}]。
+
+    支持写法：
+      - 加一份牛骰子 / 一份牛肋条 / 加2份牛肋条 / 牛肋条2份 / 五花肉2份
+      - 加肥牛（无份数默认 1）/ 加薄荷牛肉
+      - 松板各一份（单项带"各X份"）
+      - 加肥牛 拌牛肉 五花 松板各一份（"各一份"套到整张清单，每项都来一份）
+
+    ⚠️ 数量必须紧跟量词（份/盘/个…）：避免把"五花肉"里的"五"误读成 5 份。
+    换菜（A换B）交给 _parse_dish_swaps，这里跳过。
     """
     if not note:
         return []
+    # 纯菜名判定：1-6 个汉字，且不含口语闲文（避免"客户说好吃"被误收）
+    _FORBID = ("说", "好", "喜", "谢", "您", "我", "他", "这", "那", "就", "是", "的", "了",
+               "吗", "呢", "吧", "具体", "客户", "电话", "地址", "备注", "时间", "准备",
+               "打包", "需要", "拿", "带", "配", "吃", "要", "无", "没有")
+
+    def _is_pure_dish(nm):
+        if not nm:
+            return False
+        if not re.fullmatch(r"[\u4e00-\u9fa5]{1,6}", nm):
+            return False
+        if any(f in nm for f in _FORBID):
+            return False
+        return True
+
+    # 工具/耗材真名（提前跳过整段，避免"需要卡式炉和夹子剪子"被当加菜）
+    # ⚠️ 不含单字"盘/夹/刷/剪"——它们是"一盘肥牛"的量词，不能当工具排除
+    TOOL_NAME_KW = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "燃气", "气罐",
+                    "餐具", "纸巾", "桌布", "垃圾", "一次性", "打包", "餐盒",
+                    "筷", "勺", "纸杯", "围裙"]
+    NUM = r"(\d+|[一二两三四五六七八九十]+)"
+    QUANT = r"(?:份|盘|个|把|只|条|块|串|袋|瓶|盒)"
+    RE0 = re.compile(r"^" + NUM + r"\s*" + QUANT + r"\s*([\u4e00-\u9fa5]+)$")                       # 一份牛肋条 / 五份肥牛
+    RE1 = re.compile(r"^(?:多加|加|再加)\s*" + NUM + r"\s*" + QUANT + r"\s*([\u4e00-\u9fa5]+)$")     # 加一份牛骰子
+    RE2 = re.compile(r"^([\u4e00-\u9fa5]+?)\s*" + NUM + r"\s*份$")                                  # 牛肋条2份 / 五花肉2份
+    RE3 = re.compile(r"^(?:多加|加|再加)\s*([\u4e00-\u9fa5]+?)\s*" + NUM + r"\s*" + QUANT + r"$")     # 加肥牛1份
+    REB = re.compile(r"^(?:加|多加|再加|需要|要)?\s*([\u4e00-\u9fa5]+?)各\s*" + NUM + r"\s*份\s*$")    # 松板各一份
+    REC = re.compile(r"^(?:多加|加|再加)\s*([\u4e00-\u9fa5]+)$")                                    # 加肥牛 / 加薄荷牛肉
+
     results = []
+    # 集体份数："各一份"套到整张清单（"加肥牛 拌牛肉 五花 松板各一份"）
+    collective_q = None
+    m = re.search(r"各\s*" + NUM + r"\s*份", note)
+    if m:
+        collective_q = _num_from_str(m.group(1))
+
     # 按加号/逗号/顿号/分号/空格切分
     segments = re.split(r"[+，,。；;、\s]+", note)
     # 过滤时间相关段（含"X点""X点钟"等时间表达，非食材需求）
@@ -598,40 +636,48 @@ def _parse_extra_ingredients(note):
 
     for seg in segments:
         # 「X换Y」是换菜（dish_swaps 已经在管），不是加菜——别把它当加菜算进成本。
-        # 例："五香料换川香料，加一个薄荷牛肉" 前半句是换口味，只有后半句才是加菜。
         if re.search(r".+换.+", seg):
             continue
-        mode = _detect_mode(seg)
-        # 匹配 "加一份XX" / "加2份XX" / "多加一份XX" / "一份XX"
-        m = re.search(r"(?:多加|加|再加)?\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*[份盘份盘]?\s*(.+)", seg)
-        if not m:
-            # 也匹配 "XX一份" 倒装
-            m2 = re.search(r"(.+?)\s*(\d+|一|两|二|三|四|五|六|七|八|九|十)\s*份", seg)
-            if m2:
-                n = _num_from_str(m2.group(2))
-                name = m2.group(1).strip()
-                # 去掉前面的"加""多加"等
-                name = re.sub(r"^(多加|加|再加|配|带|拿|加一份|加两份)", "", name).strip()
-                if name and len(name) >= 2 and n:
-                    results.append({"name": name, "qty": n, "mode": mode})
-                continue
+        # 工具/耗材整段跳过（交由 _parse_extra_tools 处理）
+        if any(kw in seg for kw in TOOL_NAME_KW):
             continue
-        n = _num_from_str(m.group(1))
-        name = m.group(2).strip()
-        # 去掉尾部"一份""两份"等残留
-        name = re.sub(r"(一份|两份|二份|三份|四份|五份|六份|七份|八份|九份|十份|1份|2份)$", "", name).strip()
-        # 去掉前缀的动词/量词（"个薄荷牛肉"→"薄荷牛肉"、"奶香牛骰子"→"牛骰子"）。
-        # ⚠️ 原来是 `^(...)$`（整名等于才去掉），导致"加一个薄荷牛肉"里的"个"去不掉，
-        # 名字变成"个薄荷牛肉"，匹配不到库里的"薄荷拌牛肉"，加菜成本就被漏掉了。
-        name = re.sub(r"^(多加|加|再加|配|带|拿|新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|南美|沙葱|安格斯|谷饲|好|的|个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", name).strip()
-        # 排除工具/耗材类（卡式炉/烤盘/桌子/椅子等已由 _parse_extra_tools 处理；
-        # 餐具/纸巾等耗材也不算"加菜"——⚠️ "餐具"二字是"餐+具"，不含"盘"，原只靠"盘"过滤会漏，故显式列入）
+        mode = _detect_mode(seg)
+        name = None
+        n = None
+        explicit = False
+        for rx, gname, gnum in ((RE0, 2, 1), (RE1, 2, 1), (RE2, 1, 2), (RE3, 1, 2), (REB, 1, 2)):
+            mm = rx.match(seg)
+            if mm:
+                name = mm.group(gname)
+                n = _num_from_str(mm.group(gnum))
+                explicit = True
+                break
+        if name is None:
+            mm = REC.match(seg)
+            if mm and _is_pure_dish(mm.group(1)):
+                name = mm.group(1)
+                n = 1
+        if name is None and collective_q:
+            nm = re.sub(r"^(多加|加|再加|需要|要|配|带|拿|多|再)\s*", "", seg).strip()
+            if _is_pure_dish(nm):
+                name = nm
+                n = collective_q
+        if name is None:
+            continue
+        # 集体份数覆盖未显式写份数的项
+        if collective_q and not explicit:
+            n = collective_q
+        # 清理："各"残留、前缀动词/量词（"个薄荷牛肉"→"薄荷牛肉"、"奶香牛骰子"→"牛骰子"）
+        name = re.sub(r"各+$", "", name).strip()
+        name = re.sub(
+            r"^(多加|加|再加|配|带|拿|新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|"
+            r"南美|沙葱|安格斯|谷饲|好|的|个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", name).strip()
+        # 排除工具/耗材类（二次保险）
         tool_keywords = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "盘", "夹", "刷", "剪", "燃气", "气罐",
                          "餐具", "具", "纸巾", "桌布", "垃圾", "一次性", "打包", "餐盒", "筷", "勺", "纸杯", "围裙"]
         if any(kw in name for kw in tool_keywords):
             continue
-        # 排除物流/日期类闲文（"11.2号单子""提前准备""打包送滴滴""看湖风景好的位置"等不是菜）
-        # ⚠️ 备注里的"11.2号"会被当成"11份+2号单子"误识别成加菜，故含"号/单子/订单…"的直接排除
+        # 排除物流/日期类闲文
         logistics_kw = ["号", "单子", "订单", "滴滴", "打包", "提前", "准备", "位置", "风景", "看湖"]
         if any(kw in name for kw in logistics_kw):
             continue
