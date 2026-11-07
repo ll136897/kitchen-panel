@@ -120,13 +120,10 @@
     <div class="detail-grid" id="infoGrid"></div>
   </div>
 
-  <!-- 备餐需求 -->
+  <!-- 备餐需求（统一走 renderPrepTable，与订单页弹窗/录入预览同一套渲染） -->
   <div class="detail-card">
     <h3 style="margin:0 0 10px">🥩 备餐需求</h3>
-    <table class="req-tbl" id="reqTable">
-      <thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>总克数</th><th>库存</th><th>缺口</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div id="reqTableWrap"></div>
   </div>
 
   <!-- 工具借还 -->
@@ -147,6 +144,7 @@
     <div class="raw-diff" id="rawDiff" style="display:none"></div>
   </div>
 </div>
+<script src="/static/prep_common.js"></script>
 <script>
 // 当前登录人（服务端注入）——决定"编辑本单"给不给用
 const CUR_USER = {{ (cur_user or {})|tojson }};
@@ -260,57 +258,10 @@ function loadDetail(){
     `;
     applyPermUI(o);
 
-    // 备餐需求（按分类分组，固定排序）
-    const reqs = o.requirements||{};
-    const ings = reqs.ingredients||[];
-    const catOrder = ['beef','pork','chicken','vegetable','side','sauce','drink','other'];
-    const catLabel = {beef:'🥩 牛肉',pork:'🥓 猪肉',chicken:'🍗 鸡肉',vegetable:'🥬 素菜',side:'🥗 小菜',sauce:'🧂 小料',drink:'🎁 赠品',other:'📦 其他'};
-    const catColor = {beef:'#8e1e1a',pork:'#c75d3e',chicken:'#c9962b',vegetable:'#3a8a3a',side:'#5a8a3a',sauce:'#7a5a3a',drink:'#666',other:'#6b4f3a'};
-    // 分组
-    const byCat = {};
-    ings.forEach(i=>{
-      const c = i.category||'other';
-      byCat[c] = byCat[c]||[];
-      byCat[c].push(i);
-    });
-    // 固定排序顺序（与后端 INGREDIENT_FIXED_ORDER 一致）
-    // 注：side(小菜) 与 sauce(小料) 分开，海带丝等归 side
-    const FIXED_ORDER = [
-      ['beef','肥牛'],['beef','拌牛肉'],['beef','牛肋条'],['beef','牛骰子'],['beef','小肠'],
-      ['pork','五花肉'],['pork','小香猪'],['pork','松板肉'],['pork','风味肠'],['pork','梅花肉'],
-      ['chicken','鸡尖'],['chicken','郡肝'],['chicken','鸡腿肉'],['chicken','鸡翅根'],['chicken','掌中宝'],['chicken','鸡脚筋'],
-      ['vegetable','生菜'],['vegetable','豆腐'],['vegetable','西葫芦'],['vegetable','土豆'],['vegetable','馒头'],['vegetable','韭菜'],['vegetable','杏鲍菇'],['vegetable','洋葱'],
-      ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
-      ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
-    ];
-    function getFixedIdx(name, cat){
-      for(let i=0;i<FIXED_ORDER.length;i++){
-        if(FIXED_ORDER[i][0]===cat && (name||'').includes(FIXED_ORDER[i][1])) return i;
-      }
-      return 999;
-    }
-    let html = '';
-    for(const cat of catOrder){
-      let items = byCat[cat]||[];
-      if(!items.length) continue;
-      // 固定顺序排序，不在列表的按用量降序
-      items.sort((a,b)=>{
-        const ia = getFixedIdx(a.name, cat);
-        const ib = getFixedIdx(b.name, cat);
-        if(ia!==ib) return ia-ib;
-        return (b.need||0)-(a.need||0);
-      });
-      html += `<tr><td colspan="7" class="cat-row" style="background:${catColor[cat]}">${catLabel[cat]||cat}</td></tr>`;
-      for(const i of items){
-        const pc = i.portion_count||1;
-        const isSimple = ['packaging','utensil'].includes(cat) || (cat==='drink' && /可乐|雪碧/.test(i.name||''));
-        const ps = isSimple ? '—' : (i.portion_size||i.per_package||0);
-        const tp = i.total_portions||pc*(i.order_qty||1);
-        const short = (i.shortage||0)>0 ? `<span style="color:#e74c3c">缺${i.shortage}</span>` : '<span style="color:#27ae60">✓</span>';
-        html += `<tr><td style="text-align:left">${i.name}</td><td>${tp}份</td><td>${ps}</td><td>${i.unit||''}</td><td style="font-weight:700">${i.need||0}</td><td>${i.stock||0}</td><td>${short}</td></tr>`;
-      }
-    }
-    document.querySelector('#reqTable tbody').innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">无备餐需求</td></tr>';
+    // 备餐需求：统一走 renderPrepTable（与订单页弹窗/录入预览同一套渲染），保留详情页专属固定排序
+    const pkgHtml = (o.packages||[]).map(p=>{const sf=(p.pkg_setup!=null?p.pkg_setup:p.setup_flag);const tag=sf===1?'（搭建）':(sf===0?'（半包）':'');return `${p.pkg_name||''}×${p.quantity}${tag}`;}).join('， ')||'无套餐';
+    // hideTools:true —— 详情页已有独立的「工具借还」卡片，这里只展示食材需求，避免重复
+    document.getElementById('reqTableWrap').innerHTML = renderPrepTable(o.requirements||{}, {pkgHtml: pkgHtml, fixedSort: true, hideTools: true});
 
     // 工具借还
     const loans = o.tool_loans||[];
