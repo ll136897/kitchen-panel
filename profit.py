@@ -792,6 +792,7 @@ def period_overview(db, date_from=None, date_to=None, cfg=None, extra_clause="",
             "deposit": p["deposit"],
             "fixed_alloc": p.get("fixed_alloc", 0.0),
             "by_kind": bk,                      # 这一单的成本分项（供"成本明细"逐单展开）
+            "delivery_fee": (p.get("order") or {}).get("delivery_fee") or 0.0,  # 客户实付配送费（自检：收了费但没记成本→利润虚高）
         })
     clear_calc_cache()
     tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
@@ -957,6 +958,7 @@ def period_real_profit(db, date_from=None, date_to=None, cfg=None, extra_clause=
             "setup": p.get("setup"),
             "payment_status": p["payment_status"], "deposit_status": p.get("deposit_status"),
             "deposit": p["deposit"], "fixed_alloc": fixed_alloc, "by_kind": bk,
+            "delivery_fee": (p.get("order") or {}).get("delivery_fee") or 0.0,
         })
     tot = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()}
     tot["order_cnt"] = len(orders)

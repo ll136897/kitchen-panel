@@ -8,9 +8,9 @@
 <style>
   .fin-card{background:#fff;border:1px solid var(--border-l);border-radius:12px;padding:16px;margin:10px 0}
   .fin-kpi{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:12px}
-  .fin-kpi-item{background:linear-gradient(135deg,#f9f5ed,#f3ebe0);border-radius:10px;padding:10px;text-align:center}
+  .fin-kpi-item{background:linear-gradient(135deg,#f9f5ed,#f3ebe0);border-radius:10px;padding:10px;text-align:center;min-width:0}
   .fin-kpi-item .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
-  .fin-kpi-item .val{font-size:18px;font-weight:800}
+  .fin-kpi-item .val{font-size:18px;font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .fin-kpi-item .sub{font-size:10px;color:var(--muted);margin-top:2px}
   .fin-kpi-item.positive .val{color:#27ae60}
   .fin-kpi-item.negative .val{color:#c0392b}
@@ -244,7 +244,7 @@
     .fin-kpi{grid-template-columns:repeat(3,1fr);gap:7px}
     .fin-kpi-item{padding:8px 6px}
     .fin-kpi-item .val{font-size:15px}
-    .fin-kpi-item .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .fin-kpi-item .lbl{white-space:normal;overflow:visible;line-height:1.25}
     .fin-tbl{font-size:11px}
     .fin-tbl th,.fin-tbl td{padding:5px 3px}
     .cost-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
@@ -1502,20 +1502,58 @@ function kpiCost(){
   `;
 }
 
-// —— 利润：收入 − 成本 = 现金利润 ——
+// —— 利润：收入 − 成本 = 现金利润（分项可核验 + 数据自检）——
 function kpiProfit(){
   const os = ordersOf(), t = totOf();
   if(!os.length) return kpiEmpty('这个区间没有订单');
-  const mbase = t.margin_base || 0;
+  const depOn = (t.depreciation_cost||0) > 0;
+  // 成本分项合计（每类加起来 = 成本合计，供你核对）
+  const cats = [
+    ['🥩 食材', t.food_cost||0],
+    ['👷 打包切配人工', t.labor_cost||0],
+    ['🏕️ 搭建/回收外包', t.outsource_cost||0],
+    ['🚚 配送费', t.fuel_cost||0],
+    ['🔥 额外耗材', t.consume_cost||0],
+    ['📌 其他开销', t.other_cost||0],
+  ];
+  if(depOn) cats.push(['🛠️ 装备折旧', t.depreciation_cost||0]);
+  const catsHtml = cats.map(c =>
+    '<div class="kpi-line"><span class="nm">'+c[0]+'</span><span class="amt">'+fmtY(c[1])+'</span></div>'
+  ).join('');
   const list = os.slice().sort((a,b)=> (a.profit||0) - (b.profit||0));
   const worst = list.slice(0, 8);
+  // —— 数据自检：标出可能算错的单，让用户只核少数几单就能判断整体准不准 ——
+  const sc = {rev0:[], food0:[], delv:[], setup:[]};
+  for(const o of os){
+    const bk = o.by_kind||{}, food = bk.food||0, fuel = bk.fuel||0, out = bk.outsource||0;
+    const rev = o.revenue||0, dv = o.delivery_fee||0;
+    if(rev <= 0) sc.rev0.push(o);
+    else if(food <= 0) sc.food0.push(o);
+    if(dv > 0 && fuel <= 0) sc.delv.push(o);
+    if(o.setup === 1 && out <= 0) sc.setup.push(o);
+  }
+  const scHtml = (()=>{
+    const rows = [];
+    const add = (label, arr)=>{ if(arr.length) rows.push(
+      '<div class="kpi-line"><span class="nm">'+label+' <b style="color:#c0392b">'+arr.length+'</b> 单</span>'+
+      '<span class="amt">'+arr.slice(0,3).map(o=>orderLinks(o)).join(' ')+'</span></div>'); };
+    add('⚠️ 收入未录（¥0）', sc.rev0);
+    add('⚠️ 食材成本=0（利润可能虚高）', sc.food0);
+    add('⚠️ 收了配送费但没记配送成本', sc.delv);
+    add('⚠️ 搭建单但搭建成本=0', sc.setup);
+    if(!rows.length) return '<div class="kpi-note" style="border-color:#cfe6cf;background:#eef6ee">✅ 本区间 '+os.length+' 单成本数据齐全，没发现明显漏算项。</div>';
+    return '<div class="kpi-sec">数据自检（系统提示，供你抽核）</div>'+rows.join('')+
+           '<div class="kpi-note">上面这些单的成本可能没录全，点链接打开核对；不在里面的单一般可信。</div>';
+  })();
   return `
-    <div class="kpi-sec">钱的流向</div>
+    <div class="kpi-sec">钱的流向（分项合计，加起来 = 成本合计）</div>
+    ${catsHtml}
+    <div class="kpi-line"><span class="nm">＝ 成本合计</span><span class="amt">${fmtY(t.cost||0)}</span></div>
     <div class="kpi-line"><span class="nm">💵 收入（实收货款）</span><span class="amt">${fmtY(t.revenue)}</span></div>
-    <div class="kpi-line"><span class="nm">💸 － 成本合计<div class="hint">食材 + 人工 + 搭建 + 配送 + 耗材 + 其他</div></span><span class="amt" style="color:#c0392b">${fmtY(-(t.cost||0))}</span></div>
     <div class="kpi-line total"><span>＝ 现金利润</span><span style="color:${(t.profit||0)>=0?'#27ae60':'#c0392b'}">${fmtY(t.profit)}</span></div>
     <div class="kpi-line"><span class="nm">真实毛利率<div class="hint">利润 ÷（收入 − 代收代付的配送搭建费 ${fmtY(t.delivery)}）</div></span><span class="amt">${t.margin||0}%</span></div>
     <div class="kpi-line"><span class="nm">平均每单利润</span><span class="amt">${fmtY(os.length ? (t.profit||0)/os.length : 0)}</span></div>
+    ${scHtml}
     <div class="kpi-sec">最不赚钱的几单</div>
     <div class="kpi-tbl-wrap"><div class="kpi-tbl-wrap"><table class="kpi-tbl"><thead><tr><th>日期</th><th>客户</th><th class="r">收入</th><th class="r">成本</th><th class="r">利润</th><th class="r">操作</th></tr></thead>
       <tbody>${worst.map(o=>`<tr>
@@ -1523,7 +1561,7 @@ function kpiProfit(){
         <td class="r">${fmtY(o.revenue)}</td><td class="r">${fmtY(o.cost_total)}</td>
         <td class="r" style="font-weight:700;color:${(o.profit||0)<0?'#c0392b':'#27ae60'}">${fmtY(o.profit)}</td>
         <td class="r">${orderLinks(o)}</td></tr>`).join('')}</tbody></table></div></div>
-    <div class="kpi-note">💡 现金利润＝实际到手的钱；没算装备折旧、场地月租摊销——那部分看下一项「含固定开销净利」。</div>
+    <div class="kpi-note">💡 现金利润＝实际到手的钱；没算装备折旧、场地月租摊销（看下一项「含固定开销净利」）。想验证准不准：① 上面分项合计是否等于成本合计、每类数跟你自己的记录对不对得上；② 拿不准就点「数据自检」里标红的单去核。</div>
   `;
 }
 
