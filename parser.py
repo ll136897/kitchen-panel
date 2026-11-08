@@ -811,6 +811,15 @@ def _parse_dish_swaps(note):
     return swaps
 
 
+# 俗称别名（备注/菜单里孙常用俗称代指，库里是标准名）。
+# 例：三月瓜 = 库里"厚切西葫芦"。匹配时先把俗称翻译成标准名再查库。
+# 孙爱用俗称，后续遇到同类情况（如"XX瓜"代指某菜）直接在此追加一行即可。
+COLLOQUIAL_ALIASES = {
+    '三月瓜': '厚切西葫芦',
+    '西葫芦': '厚切西葫芦',  # 备注写"西葫芦"也统一到标准名（LIKE 已能命中，这里显式兜底）
+}
+
+
 def match_extra_ingredients_to_db(extra_ings):
     """把备注解析出的加菜需求匹配到数据库 ingredients 表。
     模糊匹配：备注"牛骰子" → 数据库"奶香牛骰子"。
@@ -836,7 +845,7 @@ def match_extra_ingredients_to_db(extra_ings):
 
     results = []
     for ei in extra_ings:
-        name = ei["name"]
+        name = COLLOQUIAL_ALIASES.get(ei["name"], ei["name"])
         qty = ei["qty"]
         mode = ei.get("mode", "add")
         matched = None

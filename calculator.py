@@ -3,7 +3,7 @@ import re
 import datetime
 from datetime import timezone, timedelta
 from models import get_db
-from parser import parse_order_text, match_packages_in_db
+from parser import parse_order_text, match_packages_in_db, COLLOQUIAL_ALIASES
 
 # 北京时区（UTC+8）——服务器可能是 UTC，所有"今天/现在"判断统一用北京时间
 CST = timezone(timedelta(hours=8))
@@ -194,6 +194,7 @@ def match_ingredient_id_by_name(name):
     if not name:
         return None
     key = str(name).strip()
+    key = COLLOQUIAL_ALIASES.get(key, key)  # 俗称→标准名（三月瓜→厚切西葫芦 等）
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM ingredients WHERE name = ?", (key,))
