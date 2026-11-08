@@ -629,70 +629,80 @@ def _parse_extra_ingredients(note):
     if m:
         collective_q = _num_from_str(m.group(1))
 
-    # 按加号/逗号/顿号/分号/空格切分
-    segments = re.split(r"[+，,。；;、\s]+", note)
-    # 过滤时间相关段（含"X点""X点钟"等时间表达，非食材需求）
-    segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
+    # 先按「句/分号」切分子句：一条备注里「加/各X份/多X」只作用于它所在的那个子句，
+    # 不会串到别的子句（避免 "加A、B；C换D" 把 C 也当加菜）。
+    # 子句级增量判定：子句含「加/多加/再加」或「各X份」或「多+数字」→ 整句食材都按 add（增量）。
+    # 对应客户写法 "加4份沙葱小香猪、1份五花、3份梅花…"：加一次，后面并列项全部加。
+    # 修复前只有紧跟"加"的第一项判 add，其余被默认成 set（基础配方里有的菜数字没变看不出，
+    # 没有的菜如备注加的生菜直接被丢）——王睿先生单(367)即此坑。
+    clauses = re.split(r"[。；;]+", note)
+    for clause in clauses:
+        clause_add = bool(
+            re.search(r"(多加|再加|加\s*\d|加\s*[\u4e00-\u9fa5])", clause)
+            or re.search(r"各\s*\d+\s*份", clause)
+            or re.search(r"多\S{0,2}(\d+|[一二两三四五六七八九十])", clause)
+        )
+        # 子句内按加号/逗号/顿号/空格切分
+        segments = re.split(r"[+，,、\s]+", clause)
+        # 过滤时间相关段（含"X点""X点钟"等时间表达，非食材需求）
+        segments = [s for s in segments if not re.search(r"\d+\s*点", s)]
 
-    for seg in segments:
-        # 「X换Y」是换菜（dish_swaps 已经在管），不是加菜——别把它当加菜算进成本。
-        if re.search(r".+换.+", seg):
-            continue
-        # 工具/耗材整段跳过（交由 _parse_extra_tools 处理）
-        if any(kw in seg for kw in TOOL_NAME_KW):
-            continue
-        mode = _detect_mode(seg)
-        # ⚠️ 集体份数「各X份」：套到整张清单的每一项都是「增量(add)」而非「总数(set)」。
-        # 之前只在首项带"加"前缀时才判 add，后面几项被默认成 set，导致
-        # "加肥牛 拌牛肉 五花 松板各一份"只有肥牛真正加量、其余三项被覆盖成基础值
-        # （基础配方克数恰好等于加菜克数，数字没变所以没被发现）。
-        # 吴先生单(372)即此坑：4 菜应各加 1 份，修复后 need=基础+加菜。
-        if collective_q:
-            mode = "add"
-        name = None
-        n = None
-        explicit = False
-        for rx, gname, gnum in ((RE0, 2, 1), (RE1, 2, 1), (RE2, 1, 2), (RE3, 1, 2), (REB, 1, 2)):
-            mm = rx.match(seg)
-            if mm:
-                name = mm.group(gname)
-                n = _num_from_str(mm.group(gnum))
-                explicit = True
-                break
-        if name is None:
-            mm = REC.match(seg)
-            if mm and _is_pure_dish(mm.group(1)):
-                name = mm.group(1)
-                n = 1
-        if name is None and collective_q:
-            nm = re.sub(r"^(多加|加|再加|需要|要|配|带|拿|多|再)\s*", "", seg).strip()
-            if _is_pure_dish(nm):
-                name = nm
+        for seg in segments:
+            # 「X换Y」是换菜（dish_swaps 已经在管），不是加菜——别把它当加菜算进成本。
+            if re.search(r".+换.+", seg):
+                continue
+            # 工具/耗材整段跳过（交由 _parse_extra_tools 处理）
+            if any(kw in seg for kw in TOOL_NAME_KW):
+                continue
+            mode = _detect_mode(seg)
+            # ⚠️ 集体份数「各X份」或子句含增量词(加/多加/再加/多X) → 整句都按「增量(add)」。
+            # 吴先生单(372)「各一份」四项都加；王睿先生单(367)「加4份A、1份B、3份C…」整条都加。
+            if collective_q or clause_add:
+                mode = "add"
+            name = None
+            n = None
+            explicit = False
+            for rx, gname, gnum in ((RE0, 2, 1), (RE1, 2, 1), (RE2, 1, 2), (RE3, 1, 2), (REB, 1, 2)):
+                mm = rx.match(seg)
+                if mm:
+                    name = mm.group(gname)
+                    n = _num_from_str(mm.group(gnum))
+                    explicit = True
+                    break
+            if name is None:
+                mm = REC.match(seg)
+                if mm and _is_pure_dish(mm.group(1)):
+                    name = mm.group(1)
+                    n = 1
+            if name is None and collective_q:
+                nm = re.sub(r"^(多加|加|再加|需要|要|配|带|拿|多|再)\s*", "", seg).strip()
+                if _is_pure_dish(nm):
+                    name = nm
+                    n = collective_q
+            if name is None:
+                continue
+            # 集体份数覆盖未显式写份数的项
+            if collective_q and not explicit:
                 n = collective_q
-        if name is None:
-            continue
-        # 集体份数覆盖未显式写份数的项
-        if collective_q and not explicit:
-            n = collective_q
-        # 清理："各"残留、前缀动词/量词（"个薄荷牛肉"→"薄荷牛肉"、"奶香牛骰子"→"牛骰子"）
-        name = re.sub(r"各+$", "", name).strip()
-        name = re.sub(
-            r"^(多加|加|再加|配|带|拿|新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|"
-            r"南美|沙葱|安格斯|谷饲|好|的|个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", name).strip()
-        # 排除工具/耗材类（二次保险）
-        tool_keywords = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "盘", "夹", "刷", "剪", "燃气", "气罐",
-                         "餐具", "具", "纸巾", "桌布", "垃圾", "一次性", "打包", "餐盒", "筷", "勺", "纸杯", "围裙"]
-        if any(kw in name for kw in tool_keywords):
-            continue
-        # 排除物流/日期类闲文
-        logistics_kw = ["号", "单子", "订单", "滴滴", "打包", "提前", "准备", "位置", "风景", "看湖"]
-        if any(kw in name for kw in logistics_kw):
-            continue
-        # 排除纯数量/无意义词
-        if not name or len(name) < 2 or name in ("一份", "两份", "无", "没有", "地址", "时间"):
-            continue
-        if n:
-            results.append({"name": name, "qty": n, "mode": mode})
+            # 清理："各"残留、前缀动词/量词（"个薄荷牛肉"→"薄荷牛肉"、"奶香牛骰子"→"牛骰子"）
+            name = re.sub(r"各+$", "", name).strip()
+            name = re.sub(
+                r"^(多加|加|再加|配|带|拿|新|特选|精选|奶香|原切|薄荷拌|爆汁|麻辣|葱香|蒜香|"
+                r"南美|沙葱|安格斯|谷饲|好|的|个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", name).strip()
+            # 排除工具/耗材类（二次保险）
+            tool_keywords = ["卡式炉", "烤盘", "桌子", "椅子", "天幕", "炉", "盘", "夹", "刷", "剪", "燃气", "气罐",
+                             "餐具", "具", "纸巾", "桌布", "垃圾", "一次性", "打包", "餐盒", "筷", "勺", "纸杯", "围裙"]
+            if any(kw in name for kw in tool_keywords):
+                continue
+            # 排除物流/日期类闲文
+            logistics_kw = ["号", "单子", "订单", "滴滴", "打包", "提前", "准备", "位置", "风景", "看湖"]
+            if any(kw in name for kw in logistics_kw):
+                continue
+            # 排除纯数量/无意义词
+            if not name or len(name) < 2 or name in ("一份", "两份", "无", "没有", "地址", "时间"):
+                continue
+            if n:
+                results.append({"name": name, "qty": n, "mode": mode})
     return results
 
 

@@ -430,6 +430,13 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                     WHERE pi.package_id = ?
                 """, (pk["package_id"],))
                 _rows = cur.fetchall()
+        # ⚠️ 同一套餐内若某食材既有正常行(cost_only=0)又有 cost_only=1 的重复行
+        # （生菜曾因录入重复产生「600g(cost_only=0)+400g(cost_only=1)」两行），
+        # 那行 cost_only=1 会把整条食材标成 cost_only，使其在备餐清单里整体消失
+        # （连备注显式加的也一起被连坐屏蔽）。此处丢弃「有正常行同款的 cost_only 行」，
+        # 保留唯一真相来源，使 calc 与 preview(本就排除 cost_only 行)口径统一。
+        _normal_ids = {r["id"] for r in _rows if not r["cost_only"]}
+        _rows = [r for r in _rows if not (r["cost_only"] and r["id"] in _normal_ids)]
         for r in _rows:
             amount = r["per_package"] * pk["quantity"]
             pc = r["portion_count"] or 1
@@ -475,8 +482,11 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
             ing_demand[iid]["total"] = amount
         else:
             ing_demand[iid]["total"] += amount
-        ing_demand[iid]["per_package"] = ei.get("per_package")
-        ing_demand[iid]["order_qty"] += ei.get("qty", 1)
+            ing_demand[iid]["per_package"] = ei.get("per_package")
+            ing_demand[iid]["order_qty"] += ei.get("qty", 1)
+            # ⚠️ 备注里显式加的食材必须进备餐清单：解除任何 cost_only 屏蔽
+            # （如生菜曾因重复行被标 cost_only，备注加的生菜也要显示，不被连坐）。
+            ing_demand[iid]["cost_only"] = False
 
     for sw in (parsed.get("dish_swaps") or []):
         to_id = match_ingredient_id_by_name(sw.get("to"))
