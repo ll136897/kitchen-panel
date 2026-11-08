@@ -642,6 +642,13 @@ def _parse_extra_ingredients(note):
         if any(kw in seg for kw in TOOL_NAME_KW):
             continue
         mode = _detect_mode(seg)
+        # ⚠️ 集体份数「各X份」：套到整张清单的每一项都是「增量(add)」而非「总数(set)」。
+        # 之前只在首项带"加"前缀时才判 add，后面几项被默认成 set，导致
+        # "加肥牛 拌牛肉 五花 松板各一份"只有肥牛真正加量、其余三项被覆盖成基础值
+        # （基础配方克数恰好等于加菜克数，数字没变所以没被发现）。
+        # 吴先生单(372)即此坑：4 菜应各加 1 份，修复后 need=基础+加菜。
+        if collective_q:
+            mode = "add"
         name = None
         n = None
         explicit = False
