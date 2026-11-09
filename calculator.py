@@ -485,6 +485,7 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
             ing_demand[iid]["total"] += amount
             ing_demand[iid]["per_package"] = ei.get("per_package")
             ing_demand[iid]["order_qty"] += ei.get("qty", 1)
+            ing_demand[iid]["total_portions"] += ei.get("qty", 1)
             # ⚠️ 备注里显式加的食材必须进备餐清单：解除任何 cost_only 屏蔽
             # （如生菜曾因重复行被标 cost_only，备注加的生菜也要显示，不被连坐）。
             ing_demand[iid]["cost_only"] = False

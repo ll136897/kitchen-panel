@@ -446,4 +446,13 @@
     4. **实施位置（唯一真相源）**：返回键固定在公共顶栏 `topbar.html` 最左侧（`← 返回` 按钮，JS：`history.length>1?history.back():location.href='/'`），所有已登录页面统一 `{% include 'topbar.html' %}`，一处改全站生效；高亮当前页的逻辑须跳过该返回键（否则每页都高亮成"当前页"）。登录页 `login.html` / 落地页 `index.html` 不挂顶栏（无返回需求，正确）。
   - **修落点**：`templates/topbar.html` 最左加 `← 返回` 按钮 + 高亮循环 `if(a.classList.contains('nav-back'))return;`；全站 9 个已登录页面已 include 顶栏（admin/finance/prep/dashboard/order_detail/config/orders/analytics/menu），无需逐页改。
   - **验证**：predeploy 全量自检通过（启动/页面/接口全 200，仅因未提交报"不能部署"，提交后即过）；`/prep` 等页顶栏始终可见、返回键在列。
+- 2026-11-09（肥牛"份数"漏算加菜份数 bug：备注加菜循环未累加 `total_portions`）
+  - **问题**：#372 吴先生(11.5) 3-4人餐，基础配方已含肥牛 100g(portion_count=1)，备注「加肥牛一份」再加 100g → 合计 200g(=2份)。但页面显示"份数=1、单份=100克、总=200克"——份数视觉矛盾。根因：`calc_order_ingredient_net` 的**备注加菜循环**只给 `order_qty` 加了份数，却没给 `total_portions` 加，导致 `total_portions` 恒为"基础份数"，把加菜份数漏掉（纯加菜新食材甚至连基础循环的 total_portions=0 都没补，显示 0 份）。`need`(权威总量)本身正确。
+  - **修法（`calculator.py` 备注加菜 add 分支）**：`ing_demand[iid]["total_portions"] += ei.get("qty", 1)`——加菜时份数同步累加。纯加菜新食材(total_portions 初值 0)也一并正确。
+  - **结论**：份数 = 基础份数 + 加菜份数（如肥牛=1基础+1加=2份），"份数×单份=总"自洽。3-4人餐基础配方含肥牛是**既有业务数据**，非 bug；若日后认为某套餐基础不该含某菜，是改 `package_ingredients` 数据、不是改此逻辑。
+  - **修落点**：`calculator.py` 备注加菜 add 分支新增 `total_portions += qty`。验证：#372 肥牛 `total_portions=2,need=200,portion_size=100`(2×100=200)；全量 333 单 `calc_order_requirements` 0 报错。
+- 2026-11-09（订单卡功能键顺序固定 + "出餐单"改名"小票"）
+  - **指令（用户定）**：订单卡下方功能键按固定顺序 **原单 → 备餐单 → 改单 → 小票**；其中"小票"= 原"出餐单"(打开 `/orders/<id>/ticket` 小票/收据页)改名。
+  - **实现（`templates/orders.html` 订单卡 `.btn-row`）**：① 所有人可见三键 `📄原单`(`orawToggle`)、`📋备餐单`(原"备餐表"，`openPrepModal`)、`🖨小票`(原"出餐单"，`window.open ticket`)；② `✏️改单`(仅归属人 `canTouch`)移到"小票"之前，使核心 4 键连续为 原单/备餐单/改单/小票；③ 状态键(开始备餐/完成/归还/删除/取消)及非归属锁定提示保持原逻辑、置于小票之后。④ 出餐页 `prep.html` 两处打开同一小票的按钮同步改名"小票"，`order_detail.html` 锁定提示"备餐/出餐单照常可用"→"备餐/小票照常可用"，全站叫法统一。
+  - **修落点**：`templates/orders.html`(按钮顺序+改名)、`templates/prep.html`(2处改名)、`templates/order_detail.html`(锁定提示改名)。
 

@@ -179,7 +179,7 @@ function applyPermUI(o){
   if(btn) btn.style.display = ok ? '' : 'none';
   if(note){
     note.style.display = ok ? 'none' : 'inline-block';
-    note.textContent = ok ? '' : ('🔒 这单是「' + (o.created_by_name || '别人') + '」归属的，你只能查看（备餐/出餐单照常可用）');
+    note.textContent = ok ? '' : ('🔒 这单是「' + (o.created_by_name || '别人') + '」归属的，你只能查看（备餐/小票照常可用）');
   }
   if(!ok && typeof toggleEdit === 'function') toggleEdit(false);
 }
