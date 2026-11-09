@@ -332,6 +332,51 @@ def _fix_empty_addresses():
     return fixed
 
 
+def _fix_booking_date_off_by_one():
+    """一次性数据修复：修正「用餐日期被多存一天(+1天)」的历史脏数据（幂等）。
+
+    背景：部分订单录入时用餐日期被多选了一天——原文写「用餐时间:11.4 11.30」本应 11.4，
+    却存成 11.5；「11.1 6.30」存成 11.2。当前 parser 已能正确解析，属历史录入/旧版错误。
+    做法：对每单用当前 parser 重新解析用餐日期；若「库里存的 = 解析值 +1 天」（典型 +1 天
+    bug 特征）则改回解析值。其它差异（人为改单、其它偏移）一律不动，避免误改。
+    幂等：修完再跑，库里已是解析值，不再触发。
+    """
+    from parser import parse_order_text
+    from datetime import date
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, raw_text, booking_date FROM orders WHERE deleted_at IS NULL "
+        "AND raw_text IS NOT NULL AND TRIM(raw_text) <> ''"
+    ).fetchall()
+    fixed = []
+    for r in rows:
+        if not r["raw_text"]:
+            continue
+        try:
+            parsed = parse_order_text(r["raw_text"]).get("booking_date") or ""
+        except Exception:
+            continue
+        stored = r["booking_date"] or ""
+        if not (parsed and stored):
+            continue
+        try:
+            pd = date.fromisoformat(parsed)
+            sd = date.fromisoformat(stored)
+        except Exception:
+            continue
+        if (sd - pd).days == 1:
+            db.execute("UPDATE orders SET booking_date=? WHERE id=?", (parsed, r["id"]))
+            fixed.append(r["id"])
+    if fixed:
+        db.commit()
+        try:
+            from db_backup import mark_write
+            mark_write()
+        except Exception:
+            pass
+    return fixed
+
+
 # ===== 一次性数据修复：补回被漏掉的套餐 =====
 # 背景：解析器曾把「10人餐+8人餐」只当成 10 人餐（只取了第一个数字），第二个套餐被整个丢掉。
 # 后果：18 人的单只按 10 人入库 → 食材/搭建费/人工全都少算（搭建费 200 只收了 100）。
@@ -362,6 +407,14 @@ try:
         print("[init] 已补全空地址：%s" % _fixed3)
 except Exception as _e:
     print(f"[init] fix_empty_addresses skipped: {_e}")
+
+# ===== 一次性数据修复：修正用餐日期 +1 天 的历史脏数据 =====
+try:
+    _fixed4 = _fix_booking_date_off_by_one()
+    if _fixed4:
+        print("[init] 已修正用餐日期(+1天)历史脏数据：%s" % _fixed4)
+except Exception as _e:
+    print(f"[init] fix_booking_date_off_by_one skipped: {_e}")
 
 # 启动定时备份（10分钟）
 try:
