@@ -750,7 +750,7 @@ function buildCard(o, isAnchor){
       <div style="display:flex;align-items:center">
         ${selMode ? `<input type="checkbox" class="batch-chk" data-oid="${o.id}" ${selectedIds.has(o.id)?'checked':''} onchange="toggleSel(${o.id}, this.checked)">` : ''}
         <b style="font-size:17px">${orderTime(o)||'—'}</b>
-        <span class="muted" style="margin-left:8px">${o.booking_date||''}</span>
+        <span class="muted" style="margin-left:8px">用餐 ${o.booking_date||'—'}</span>${o.created_at?`<span class="muted" style="margin-left:6px;font-size:11px;opacity:.6">录入 ${o.created_at.slice(0,10)}</span>`:''}
         <span class="muted" style="margin-left:6px;font-size:11px;opacity:.55">#${o.id}</span>${anchorFlag}
       </div>
       <div class="oh-right">
