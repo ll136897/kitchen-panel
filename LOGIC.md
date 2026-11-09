@@ -437,3 +437,13 @@
   - **问题**：10-27 提交 `ef8b43b` 清「staple 主食分类」时，误删 `.cat-drink` 背景色 CSS 且未补回，赠品徽章（白字）失去背景、糊在白底上，用户看到「赠品栏被误改」。数据本身正确（drink 分类仅应季水果/1.25L可乐雪碧任选），判定逻辑 `isSimpleCat` 完好。
   - **原则（写进底层）**：赠品= `drink` 分类，其徽章背景色由 `templates/menu.html` 的 `.cat-drink{background:#666}` 控制；**改 CSS 须同步核对 `.cat-*` 系列徽章，禁止单删某类导致白字隐形**。`.cat-other` 同批被删已补回；`.cat-staple` 因分类已废弃不补。
   - **修落点**：`templates/menu.html` 恢复 `.cat-drink`/`.cat-other` 背景色。
+- 2026-11-09（导航与返回铁律：任何页面都有返回、且返回不重载）
+  - **问题**：出餐单（`/prep`）点开后没有返回入口——公共顶栏 `topbar.html` 只有「跳到各页」的按钮（📊录入/📋订单/🍱备餐/💰财务…），没有「返回上一页」；`/prep` 里那个「← 返回备餐列表」是 `exitFocus()` 退回内部列表、不是回上一页，用户感觉"进去了出不去"。index 首页虽有 `history.back()` 但其他页没有，不全站一致。顶栏跳转又全是整页 `<a href>` 链接，点一下就重载。
+  - **原则（写进底层）**：
+    1. **任何页面/视图都必须有「返回」入口**，不允许只给"跳到固定页"的导航而不给返回。
+    2. **返回不得整页重新加载**——走浏览器历史栈（`history.back()` / bfcache），不靠整页跳转（`location.href` 到上一页地址 或 `<a href>`）冒充返回。直接打开（无历史）时退回首页 `/`。
+    3. 弹层/Modal（备餐表等）自身的关闭键即视为"返回等价物"，同样不重载。
+    4. **实施位置（唯一真相源）**：返回键固定在公共顶栏 `topbar.html` 最左侧（`← 返回` 按钮，JS：`history.length>1?history.back():location.href='/'`），所有已登录页面统一 `{% include 'topbar.html' %}`，一处改全站生效；高亮当前页的逻辑须跳过该返回键（否则每页都高亮成"当前页"）。登录页 `login.html` / 落地页 `index.html` 不挂顶栏（无返回需求，正确）。
+  - **修落点**：`templates/topbar.html` 最左加 `← 返回` 按钮 + 高亮循环 `if(a.classList.contains('nav-back'))return;`；全站 9 个已登录页面已 include 顶栏（admin/finance/prep/dashboard/order_detail/config/orders/analytics/menu），无需逐页改。
+  - **验证**：predeploy 全量自检通过（启动/页面/接口全 200，仅因未提交报"不能部署"，提交后即过）；`/prep` 等页顶栏始终可见、返回键在列。
+

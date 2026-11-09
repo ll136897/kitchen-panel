@@ -1,6 +1,8 @@
 {# 公共顶栏（复用 .nav 样式）：登录后刘、孙看到的菜单完全一致，不做角色区分；
    写操作的实际权限由后端按"归属"判定，界面不体现层级。 #}
 <nav class="nav">
+  {# 全局返回入口：任何页面都有，点返回走浏览器历史栈(不整页重载)。有上一层就回上一层，直接打开则回首页 #}
+  <a href="/" class="nav-item nav-back" onclick="(history.length>1?history.back():location.href='/');return false;">← 返回</a>
   <a href="/dashboard" class="nav-item">📊 录入</a>
   <a href="/orders" class="nav-item">📋 订单</a>
   <a href="/prep" class="nav-item">🍱 备餐</a>
@@ -16,6 +18,7 @@
   // 高亮当前页对应的导航项
   var p = location.pathname;
   document.querySelectorAll('.nav .nav-item').forEach(function(a){
+    if (a.classList.contains('nav-back')) return;   // 返回键不参与当前页高亮
     var h = a.getAttribute('href');
     if (h && (p === h || (h !== '/' && p.indexOf(h) === 0))) a.classList.add('active');
   });
