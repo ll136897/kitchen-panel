@@ -1032,10 +1032,11 @@ function boardPeople(o){
   return n;
 }
 // ===== 备餐批次：备餐时间 / 时间档 / 主套餐规格 =====
-// 备餐时间：外地（非青龙湖）要提前 1 小时送 → 用餐时间减 1 小时，
+// 备餐时间：非本店（非青龙湖二期）要提前 1 小时送 → 用餐时间减 1 小时，
 // 这样它自然落到更早的时间档（用户口径："相同时间上提一档"）。
+// 本店 = 青龙湖二期；青龙湖一期等其他一律算"其他地址"（不享本店待遇）。
 function boardIsLocal(o){
-  return ((o.addr_group||o.address||'').indexOf('青龙湖') >= 0);
+  return ((o.addr_group||o.address||'').indexOf('青龙湖二期') >= 0);
 }
 function boardPrepTime(o){
   const t = boardTime(o);
@@ -1115,11 +1116,9 @@ function renderBoard(orders){
     return (a.id||0)-(b.id||0);
   });
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
-  const undel=orders.filter(o=>!o.delivered).length;
-  const unser=orders.filter(o=>!o.served).length;
   let sumHtml=`${orders.length}单 · ${totalPeople}人`;
-  sumHtml += undel>0 ? ` · <span style="color:#c0562f">未送达${undel}</span>` : ` · 已全送达`;
-  sumHtml += unser>0 ? ` · <span style="color:#c0562f">未出餐${unser}</span>` : ` · 已全出餐`;
+  const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
+  if(ob) sumHtml += ` · ${ob}`;
   sumEl.innerHTML=sumHtml;
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
@@ -1144,7 +1143,7 @@ function renderBoard(orders){
       ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
     const addrLine = `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
     return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
-      <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地区·外地配送'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
+      <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地址'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
         <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}<span class="btime">${t||'—'}</span></div>
@@ -1428,77 +1427,36 @@ function updateMainCheckAllBtn(cm, ingCats, pk, tw, tools){
 }
 
 function renderByOrder(){
+  // 一级界面：只列订单信息（套餐/地址/时间/姓名/归属/备注），不再内联铺开每单的备餐食材
+  // 点某单 → enterFocus 下钻到该单整页备餐明细（带勾选），返回即回此列表
   const d = prepData;
   const box = document.getElementById('orderView');
   box.style.display='';
   const todayStr = todayDateStr || document.getElementById('datePick').value;
   box.innerHTML = d.orders.map(o=>{
-    // 日期显示：今天只显示时间，非今天显示 MM.DD + 星期
     const oDate = o.booking_date || '';
     const oDiff = oDate ? dayDiff(oDate, todayStr) : null;
-    // 只显示一个时间（订单时间/用餐时间视为同一个）
-    const t = orderTimeOf(o);
-    let dateLabel = '';
+    const t = orderTimeOf(o) || '—';
+    let dateText2 = '待定';
     if(oDate){
-      if(oDiff===0) dateLabel = `今天 ${t}`;
-      else if(oDiff===1) dateLabel = `明天 ${t}`;
-      else if(oDiff===-1) dateLabel = `昨天 ${t}`;
-      else dateLabel = `${mdOf(oDate)} ${weekdayOf(oDate)} ${t}`;
-    } else {
-      dateLabel = t || '待定';
+      if(oDiff===0) dateText2 = '今天';
+      else if(oDiff===1) dateText2 = '明天';
+      else if(oDiff===-1) dateText2 = '昨天';
+      else dateText2 = `${mdOf(oDate)} ${weekdayOf(oDate)}`;
     }
     const pkgsTxt = fmtPkgsTotal(o, true);
-    return `<div class="card" id="ord-${o.id}"><div class="sec-toolbar">
-      <h3 style="margin:0">🍱 ${pkgsTxt||'套餐未记录'} · 📍 ${o.address||'—'} · 📅 ${dateLabel} · 👤 ${o.contact_name||'—'}</h3>
-      <span>
-        <button class="check-all-btn" onclick="window.open('/orders/${o.id}/ticket','_blank')" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#27ae60;color:#fff;cursor:pointer;font-weight:700">🖨 小票</button>
-        <button class="check-all-btn" onclick="doConsume(${o.id})" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#8e44ad;color:#fff;cursor:pointer;font-weight:700">📦 出库</button>
-        <button class="check-all-btn" onclick="checkAllOrder(${o.id},true)" style="font-size:13px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:700">✅ 全选</button>
-      </span>
-    </div><details class="raw-drop"><summary>📄 原录入订单</summary><pre>${esc(o.own_raw_text || o.raw_text || '—')}</pre></details><div class="muted" style="padding:16px">加载中...</div></div>`;
+    const nm = o.contact_name || '—';
+    const nt = o.note || '';
+    return `<div class="orow" onclick="enterFocus(${o.id})" title="点一下 → 看这单的备餐明细">
+      ${prepOwnerDot(o)}
+      <span class="c-pkg">🍱 ${pkgsTxt||'套餐未记录'}</span>
+      <span class="c-addr">📍 ${o.address||'—'}</span>
+      <span class="c-date">${dateText2}</span>
+      <span class="c-time">${t}</span>
+      <span class="c-name">👤 ${nm}</span>
+      ${nt ? `<span class="c-note">📝 ${nt}</span>` : ''}
+    </div>`;
   }).join('');
-  d.orders.forEach(o=>{
-    fetch('/api/orders/'+o.id+'/requirements').then(r=>r.json()).then(res=>{
-      if(!res.ok) return;
-      const r = res.data;
-      const container = document.querySelector('#ord-'+o.id+' .muted');
-      if(!container) return;
-      let html = '';
-      // 按分类分组
-      const byCat = {};
-      for(const it of r.ingredients){
-        const c = subcatFor(it.name, it.category||'other');
-        byCat[c] = byCat[c] || [];
-        byCat[c].push(it);
-      }
-      // 工具归入 byCat['tool']，由 CAT_ORDER 统一排序
-      if(r.tools.length){
-        byCat['tool'] = r.tools.map(it=>({
-          id:it.id, name:it.name, unit:'', per_package:it.per_package,
-          total_packages:it.order_qty, order_count:1, total:it.need,
-          shortage:it.shortage, order_ids:[o.id], isTool:true
-        }));
-      }
-      for(const cat of CAT_ORDER){
-        if(!byCat[cat]) continue;
-        // 固定顺序排序，不在列表的按用量降序
-        byCat[cat].sort((a,b)=>{
-          const ia = getFixedIdx(a.name, cat);
-          const ib = getFixedIdx(b.name, cat);
-          if(ia!==ib) return ia-ib;
-          return (b.need||0)-(a.need||0);
-        });
-        const type = (cat==='tool') ? 'tool' : 'ing';
-        html += catBlock(cat, byCat[cat].map(it=>({
-          id:it.id, name:it.name, unit:it.unit||'', per_package:it.per_package,
-          portion_size:it.portion_size, total_portions:it.total_portions,
-          total_packages:it.total_packages||it.order_qty, order_count:1, total:it.total||it.need,
-          shortage:it.shortage, order_ids:it.order_ids||[o.id]
-        })), type, {});
-      }
-      container.outerHTML = html || '<div class="muted" style="padding:16px">无需求</div>';
-    });
-  });
 }
 
 // ===== 点订单行 → 看"这一单具体要备什么菜" =====
