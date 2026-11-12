@@ -1169,9 +1169,10 @@ function renderBoard(orders){
     let inner='';
     garr.forEach(([k,sub0])=>{
       const ppl=sub0.reduce((s,o)=>s+boardPeople(o),0);
+      let grpHtml='';
       // 「时间未定」不单独显示框（多余），仅排到最后；其余时间档照常显示小标题
       if(k.indexOf('时间未定')<0){
-        inner += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
+        grpHtml += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
       }
       // 档内按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
       const specMap=new Map();
@@ -1186,6 +1187,7 @@ function renderBoard(orders){
         if(ra!==rb) return ra-rb;
         return (parseInt(a[0])||0)-(parseInt(b[0])||0);
       });
+      let rowsHtml='';
       specArr.forEach(([sk,sub])=>{
         sub.sort((a,b)=>{
           const ra=addrRankOf(a), rb=addrRankOf(b);
@@ -1193,8 +1195,10 @@ function renderBoard(orders){
           const ta=boardPrepTime(a)||'99:99', tb=boardPrepTime(b)||'99:99';
           return ta<tb?-1:ta>tb?1:0;                                // 再按备餐时间先后
         });
-        inner += sub.map(rowHtml).join('');
+        rowsHtml += sub.map(rowHtml).join('');
       });
+      grpHtml += `<div class="bgrid">${rowsHtml}</div>`;           // 恢复双列网格（一排两个）
+      inner += grpHtml;
     });
     return inner;
   };
