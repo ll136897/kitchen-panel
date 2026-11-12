@@ -100,7 +100,10 @@ def calc_order_tool_needs(order_id, only_setup=False):
                 tool_demand[_tid2] = {"total": _n, "per_package": _n, "order_qty": setup_qty}
 
         # 其余工具（卡式炉/烤盘/燃气罐/夹子/剪刀等）：按套餐 package_tools 现有配置累加
-        for pk in pkgs:
+        # ⚠️ 2026-11-13 修（用户报「半包多算了工具」）：只累加**搭建套餐**（setup_pkgs）。
+        # 半包（不搭建）套餐不配这些装备，默认只有 5 项一次性餐具（见 calc_order_ingredient_net）；
+        # 半包若备注要卡式炉等，由下方「备注 extra_tools」按 add/set 规则补上。
+        for pk in setup_pkgs:
             cur.execute("""
                 SELECT pt.per_package, t.id, t.name
                 FROM package_tools pt
@@ -161,7 +164,18 @@ def list_reserving_orders():
 
 
 def get_tool_reserved():
-    """各装备被"未完成订单"占用的数量。占用完全由订单推导，无需人工登记。"""
+    """各装备被"未完成订单"占用的数量。占用完全由订单推导，无需人工登记。
+
+    2026-11-13：新增「一键解除占用」开关 `settings.tool_reserve_enabled`（默认 "0" = 关闭）。
+    用户没有"归还装备/点入库"的习惯，未完成订单会一直占着装备，导致"可用库存"比实际少、
+    影响判断（用户原话：要么取消这个功能，要么一键解除）。默认关闭 = 库存直接用实际库存；
+    需要时可把该设置改成 "1" 恢复自动占用。
+    """
+    with get_db() as conn:
+        _row = conn.execute("SELECT value FROM settings WHERE key='tool_reserve_enabled'").fetchone()
+    _val = (_row["value"] if _row else "0")
+    if str(_val or "").strip().lower() in ("0", "false", "off", ""):
+        return {}
     reserved = {}
     for o in list_reserving_orders():
         for tid, info in calc_order_tool_needs(o["id"]).items():
@@ -402,7 +416,7 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
     if _pkgs is None:
         with get_db() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT op.package_id, op.quantity FROM order_packages op WHERE op.order_id=?", (order_id,))
+            cur.execute("SELECT op.package_id, op.quantity, op.setup_flag FROM order_packages op WHERE op.order_id=?", (order_id,))
             _pkgs = [dict(r) for r in cur.fetchall()]
     pkgs = _pkgs
     if _order is None:
@@ -539,6 +553,40 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                                  "portion_count": 1, "total_portions": 0, "cost_only": False}
         ing_demand[to_id]["total"] += add
         ing_demand[to_id]["swapped_in"] = True
+
+    # ===== 半包（不搭建）默认餐具只留 5 项 + 备注「多拿N套餐具」计入（2026-11-13 用户定）=====
+    # 用户口径：半包默认只有「三格蘸碟(=三格底料盒)/塑料勺(勺子)/筷子/纸杯/纸巾」，
+    # 不提供 一次性桌布/围裙/垃圾袋/油 等；备注可再增补（"多拿4套餐具" = 这 5 项各 +4）。
+    _HALF_UTENSILS = ("三格底料盒", "勺子", "筷子", "纸杯", "纸巾")
+    _is_half = bool(pkgs) and all((p.get("setup_flag") == 0) for p in pkgs)
+    with get_db() as conn:
+        _cur = conn.cursor()
+        _all_ids = list(ing_demand.keys())
+        _meta = {}
+        if _all_ids:
+            _ph = ",".join("?" * len(_all_ids))
+            for _r in _cur.execute("SELECT id,name,category FROM ingredients WHERE id IN (%s)" % _ph, _all_ids):
+                _meta[_r["id"]] = (_r["name"], _r["category"])
+        _half_ids = {_r["id"]: _r["name"] for _r in _cur.execute(
+            "SELECT id,name FROM ingredients WHERE category='utensil' AND name IN (%s)"
+            % ",".join("?" * len(_HALF_UTENSILS)), _HALF_UTENSILS)}
+    if _is_half:
+        for _iid in list(ing_demand.keys()):
+            _nm, _cat = _meta.get(_iid, ("", ""))
+            if _cat == "utensil" and _nm not in _HALF_UTENSILS:
+                del ing_demand[_iid]
+    # 备注「多拿/加 N 套餐具」→ 5 项核心餐具各 +N（"套餐具"=一套；用户 2026-11-13 要求计入）
+    if note_now:
+        from parser import _num_from_str as _nfs
+        _m = re.search(r"(\d+|[一二两三四五六七八九十]+)\s*[套份]\s*餐\s*具", note_now)
+        if _m:
+            _n = _nfs(_m.group(1)) or 0
+            if _n > 0:
+                for _iid in _half_ids:
+                    if _iid not in ing_demand:
+                        ing_demand[_iid] = {"total": 0, "per_package": 1, "order_qty": 0,
+                                            "portion_count": 1, "total_portions": 0, "cost_only": False}
+                    ing_demand[_iid]["total"] += _n
 
     return ing_demand
 

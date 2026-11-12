@@ -100,8 +100,11 @@
         💡 现阶段搭建回收外包、不逐笔登记，所以<b>「定期盘点」才是把库存数校准的主要手段</b>——出库点不点都不影响盘点校正。</div>
     </div>
     <div class="card">
-      <h3>🔧 装备占用与剩余 <span class="muted" style="font-weight:400;font-size:12px">接新单前先看这个</span></h3>
-      <div class="sub" style="margin-bottom:8px">
+      <h3>🔧 装备占用与剩余
+        <span class="muted" style="font-weight:400;font-size:12px">接新单前先看这个</span>
+        <button class="btn btn-sm" id="reserveToggleBtn" onclick="toggleToolReserve()" style="float:right">…</button>
+      </h3>
+      <div class="sub" style="margin-bottom:8px" id="reserveHint">
         「占用」= <b>还没做完的订单</b>要用的装备，按套餐自动算出来；订单做完 / 取消 / 日期过了会<b>自动释放</b>，不需要你登记。<br>
         「剩余」= 总库存 − 占用 = 还能给新订单用的量。
       </div>
@@ -366,6 +369,7 @@ function loadOverview(){
 
 // 装备占用与剩余（接新单参考）
 function loadToolPlan(){
+  loadReserveState();
   fetch('/api/tools').then(r=>r.json()).then(d=>{
     const ts = d.data||[];
     const el = document.getElementById('toolPlan');
@@ -384,6 +388,30 @@ function loadToolPlan(){
       </div>`;
     }).join('') : '<div class="muted" style="padding:12px;text-align:center">暂无装备</div>';
   });
+}
+
+// 一键解除/恢复「装备占用」（2026-11-13 用户要求：没有归还习惯，占用会把库存算少）
+let _toolReserveOn = false;
+function loadReserveState(){
+  fetch('/api/settings').then(r=>r.json()).then(d=>{
+    const v = (d && d.settings && d.settings.tool_reserve_enabled) ? String(d.settings.tool_reserve_enabled.value) : '0';
+    _toolReserveOn = !(v==='0' || v==='' || v.toLowerCase()==='false' || v.toLowerCase()==='off');
+    renderReserveState();
+  }).catch(()=>{ renderReserveState(); });
+}
+function renderReserveState(){
+  const btn = document.getElementById('reserveToggleBtn');
+  const hint = document.getElementById('reserveHint');
+  if(btn) btn.textContent = _toolReserveOn ? '🔒 解除占用（按实际库存）' : '✅ 已解除占用 · 点此恢复自动占用';
+  if(hint) hint.innerHTML = _toolReserveOn
+    ? '「占用」= <b>还没做完的订单</b>要用的装备（按套餐自动算）。订单做完 / 取消 / 日期过了会自动释放。<br>「剩余」= 总库存 − 占用。'
+    : '<b style="color:#1e8449">已解除占用</b>：库存直接按<b>实际库存</b>显示，不再扣未完成订单的占用（适合没有"归还装备点入库"习惯的情况）。点右上按钮可恢复自动占用。';
+}
+function toggleToolReserve(){
+  const next = _toolReserveOn ? '0' : '1';
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool_reserve_enabled: next})})
+    .then(r=>r.json()).then(()=>{ loadReserveState(); loadToolPlan(); loadOverview && loadOverview(); })
+    .catch(()=>{ if(typeof showToast==='function') showToast('操作失败，稍后重试'); });
 }
 
 // 各"未完成订单"要用哪些装备
