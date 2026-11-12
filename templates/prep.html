@@ -250,13 +250,11 @@
   /* 备注：独立一行，完整显示（放得下一排就一排，不硬拆） */
   .bline4{font-size:11px;margin-top:1px}
   .bnote{color:#c0392b;font-weight:700}
-  /* 左侧细色条：几乎不占版面，点击切换备餐状态；色条颜色 = 时间档（早=橙 / 午=蓝 / 晚=紫灰），已备=绿覆盖（原版排版） */
+  /* 左侧细色条：几乎不占版面，点击切换备餐状态；色条只分两种颜色 = 地址（绿=青龙湖二期·本店 / 橙=其他地区·外地），已备=同色淡化（不引入第三色） */
   .bstat{width:5px;align-self:stretch;border-radius:3px;background:#ddd3c4;flex:0 0 auto;cursor:pointer}
-  .bstat.s-morning{background:#e8a33d}
-  .bstat.s-noon{background:#4a90d9}
-  .bstat.s-night{background:#9b8aa6}
-  .bstat.s-none{background:#ddd3c4}
-  .bstat.on{background:#27ae60 !important;box-shadow:0 0 0 1px #1b7a43 inset}
+  .bstat.loc-local{background:#27ae60}
+  .bstat.loc-outside{background:#e67e22}
+  .bstat.on{opacity:.45;box-shadow:0 0 0 2px rgba(0,0,0,.15) inset}
   /* 套餐人数放大：备餐最关心先备哪份、哪些能一起备 → 人数做主视觉 */
   .bnum{font-size:16px;font-weight:900;color:#c0562f;padding:0 1px}
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
@@ -1058,16 +1056,8 @@ function boardTimeSlot(o){
   if(mins < 14*60) return '☀️ 午档（12–14点）';
   return '🌆 晚档（14点后）';
 }
-// 色条着色：原版按时间档（早=橙/午=蓝/晚=紫灰），已备=绿（.on 覆盖）
-function boardSlotClass(o){
-  const t = boardPrepTime(o);
-  if(!t || !/^\d{1,2}:\d{2}$/.test(t)) return 's-none';
-  const [h,m] = t.split(':').map(Number);
-  const mins = h*60 + m;
-  if(mins < 12*60) return 's-morning';
-  if(mins < 14*60) return 's-noon';
-  return 's-night';
-}
+// 色条着色：仅按地址两种颜色（绿=青龙湖二期·本店 / 橙=其他地区·外地）；已备由 .on 淡化表示，不引入第三色
+function boardLocClass(o){ return boardIsLocal(o) ? 'loc-local' : 'loc-outside'; }
 // 主套餐规格：取该单人数最大的套餐（如"10人餐+3人餐"→ 10人餐），
 // 同规格的单归到一起 → 这几份可以一起备。
 function boardSpecKey(o){
@@ -1135,8 +1125,8 @@ function renderBoard(orders){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
   }
-  // 简略表：按时间档分组（早→午→晚，沿用"备餐批次"规则）；档内先排外地(青龙湖二期外)、再排青龙湖二期（门店在青龙湖二期），
-  //   同地址内按主套餐规格→备餐时间。地址仅通过"排序"体现、不另加栏/框；左侧色条恢复为原版时间档着色。
+  // 简略表：按时间档分组（早→午→晚，沿用"备餐批次"规则）；档内先排外地(青龙湖二期外)、再排青龙湖二期（门店在青龙湖二期）。
+  //   左侧色条仅分两种颜色=地址（绿=青龙湖二期·本店 / 橙=其他地区·外地），已备=淡化；不另加地址栏/框。
   const rowHtml=o=>{
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
@@ -1154,7 +1144,7 @@ function renderBoard(orders){
       ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
     const addrLine = `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
     return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
-      <div class="bstat ${done?'on':boardSlotClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'}${boardIsLocal(o)?'':'（外地：需提前1小时送）'}"
+      <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地区·外地配送'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
         <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}<span class="btime">${t||'—'}</span></div>
