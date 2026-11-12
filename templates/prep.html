@@ -280,6 +280,10 @@
   .raw-drop[open]>summary:before{content:'▾ '}
   .raw-drop pre{white-space:pre-wrap;word-break:break-all;background:#faf5ed;color:#6b5b4a;
     border-radius:8px;padding:8px 10px;margin:4px 0 0;font-family:inherit;font-size:12.5px;line-height:1.5}
+  /* 简略表点单弹出的「原始录入信息」（复用 os 弹层样式） */
+  .rawpre{white-space:pre-wrap;word-break:break-all;background:#faf5ed;color:#3a2c20;
+    border-radius:8px;padding:10px 12px;margin:0;font-family:inherit;font-size:13px;line-height:1.6}
+  .raw-empty{color:#9a8b6a;padding:16px;text-align:center}
 
   /* 顶部摘要条 */
   .summary-bar{
@@ -451,6 +455,20 @@
     <div class="os-foot">
       <button class="os-btn ghost" onclick="osOpenOrderPage()">📄 订单详情</button>
       <button class="os-btn primary" onclick="osOpenTicket()">🖨 小票</button>
+    </div>
+  </div>
+
+  <!-- 简略表点订单 → 直接弹「原始录入信息」（不跳页） -->
+  <div class="os-mask" id="rawMask" onclick="closeRaw()"></div>
+  <div class="os-sheet" id="rawSheet" role="dialog" aria-modal="true" aria-labelledby="rawTitle">
+    <div class="os-head">
+      <div class="os-title" id="rawTitle">原始录入</div>
+      <button class="os-close" onclick="closeRaw()" aria-label="关闭">✕</button>
+    </div>
+    <div class="os-body" id="rawBody"></div>
+    <div class="os-foot">
+      <button class="os-btn ghost" onclick="closeRaw()">关闭</button>
+      <button class="os-btn primary" onclick="rawToFocus()">📋 看这单备餐明细</button>
     </div>
   </div>
 </div>
@@ -1155,7 +1173,7 @@ function renderBoard(orders){
     const noteLine = (note||tagHtml)
       ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
     const addrLine = `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
-    return `<div class="brow ${done?'bdone':''}" onclick="enterFocus(${o.id})">
+    return `<div class="brow ${done?'bdone':''}" onclick="showRaw(${o.id})" title="点一下 → 看这单原始录入信息">
       <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地址'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
@@ -1578,8 +1596,33 @@ function closeOrderSheet(){
 }
 function osOpenTicket(){ if(_osOid) window.open('/orders/'+_osOid+'/ticket','_blank'); }
 function osOpenOrderPage(){ if(_osOid) window.open('/orders/'+_osOid,'_blank'); }
+
+// ===== 简略表点订单 → 直接弹「原始录入信息」弹窗（不跳页） =====
+let _rawOid = null;
+function showRaw(oid){
+  const o = ((prepData && prepData.orders) || []).find(x=>x.id===oid);
+  if(!o) return;
+  _rawOid = oid;
+  const raw = (o.own_raw_text && String(o.own_raw_text).trim()) ? o.own_raw_text
+            : ((o.raw_text && String(o.raw_text).trim()) ? o.raw_text : '');
+  document.getElementById('rawTitle').textContent =
+    `📄 原始录入 · ${o.contact_name||'—'}${o.contact_phone?(' · '+o.contact_phone):''}`;
+  document.getElementById('rawBody').innerHTML = raw
+    ? `<pre class="rawpre">${esc(raw)}</pre>`
+    : '<div class="raw-empty">这单没有原始录入信息</div>';
+  document.getElementById('rawMask').classList.add('on');
+  document.getElementById('rawSheet').classList.add('on');
+}
+function closeRaw(){
+  const m=document.getElementById('rawMask'), sh=document.getElementById('rawSheet');
+  if(m) m.classList.remove('on');
+  if(sh) sh.classList.remove('on');
+  _rawOid = null;
+}
+function rawToFocus(){ const oid=_rawOid; closeRaw(); if(oid) enterFocus(oid); }
+
 document.addEventListener('keydown', function(e){
-  if(e.key === 'Escape') closeOrderSheet();
+  if(e.key === 'Escape'){ closeOrderSheet(); closeRaw(); }
 });
 
 // 简单子分类（按订单视图用，按名字细分）
