@@ -261,7 +261,7 @@
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
   /* 青龙湖二期(本店)与外地(其他区域)之间：仅一条细横线分隔，几乎不占空间 */
-  .bsep{border:none;border-top:1px solid #e5ddd0;margin:5px 2px;height:0}
+  .bsep{border:none;border-top:1px solid #e5ddd0;margin:2px 0;height:0}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
   .bwho{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap}
   .bwho.w-liu{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
@@ -1126,8 +1126,8 @@ function renderBoard(orders){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
   }
-  // 简略表：按时间档分组（早→午→晚，沿用"备餐批次"规则）；档内先排外地(青龙湖二期外)、再排青龙湖二期（门店在青龙湖二期）。
-  //   左侧色条仅分两种颜色=地址（绿=青龙湖二期·本店 / 橙=其他地区·外地），已备=淡化；不另加地址栏/框。
+  // 简略表：整张表上下拆成两块 —— 上块=其他地址(外地/青龙湖一期等)，下块=青龙湖二期(本店)；
+  //   两块之间仅一条细横线分隔(几乎不占空间)，不另加地址栏/标题框。每块内部仍按时间档(早→午→晚)分组、档内按「主套餐规格→备餐时间」排。
   const rowHtml=o=>{
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
@@ -1155,9 +1155,8 @@ function renderBoard(orders){
       </div>
     </div>`;
   };
-  // 时间档分组（早→午→晚）；档内再把订单拆成「外地(其他区域)」与「青龙湖二期(本店)」两块，
-  //   中间仅一条细横线分隔（几乎不占空间），不另加地址栏/标题框。两块内部各自按「主套餐规格→备餐时间」排。
-  const renderTimeGroups=(arr)=>{
+  // 把一批订单按时间档(早→午→晚)分组渲染（块内再按规格→备餐时间排），不含地址拆分
+  const renderBlockByTime=(arr)=>{
     const gKey=o=>boardTimeSlot(o);
     const groups=new Map();
     arr.forEach(o=>{
@@ -1167,8 +1166,8 @@ function renderBoard(orders){
     });
     let garr=[...groups.entries()];
     garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));   // 早→午→晚（时间未定最后）
-    // 渲染一个地址块（外地 or 本店）：块内按规格→备餐时间排，规格相同的挨一起
-    const renderBlock=(block)=>{
+    // 块内按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
+    const renderSpecBlock=(block)=>{
       const specMap=new Map();
       block.forEach(o=>{
         const sk=boardSpecKey(o);
@@ -1186,24 +1185,25 @@ function renderBoard(orders){
       });
       return `<div class="bgrid">${rowsHtml}</div>`;
     };
-    let inner='';
+    let html='';
     garr.forEach(([k,sub0])=>{
       const ppl=sub0.reduce((s,o)=>s+boardPeople(o),0);
-      let grpHtml='';
       // 「时间未定」不单独显示框（多余），仅排到最后；其余时间档照常显示小标题
       if(k.indexOf('时间未定')<0){
-        grpHtml += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
+        html += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
       }
-      const outside = sub0.filter(o=>!boardIsLocal(o));   // 其他区域（外地）：先备先送，排在前面
-      const local   = sub0.filter(o=> boardIsLocal(o));   // 青龙湖二期·本店：排在后面
-      if(outside.length) grpHtml += renderBlock(outside);
-      if(outside.length && local.length) grpHtml += `<hr class="bsep">`;   // 仅一条细横线分隔，不占额外版面
-      if(local.length)   grpHtml += renderBlock(local);
-      inner += grpHtml;
+      html += renderSpecBlock(sub0);
     });
-    return inner;
+    return html;
   };
-  list.innerHTML = renderTimeGroups(orders);
+  // 整表拆成上下两块：上=其他地址，下=青龙湖二期；中间仅一条细横线（极小间距）
+  const outside = orders.filter(o=>!boardIsLocal(o));   // 其他地址：排上面，先备先送
+  const local   = orders.filter(o=> boardIsLocal(o));   // 青龙湖二期·本店：排下面
+  let html='';
+  if(outside.length) html += renderBlockByTime(outside);
+  if(outside.length && local.length) html += `<hr class="bsep">`;   // 仅一条细横线分隔，不占额外版面
+  if(local.length)   html += renderBlockByTime(local);
+  list.innerHTML = html;
 }
 
 function render(){
