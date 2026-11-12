@@ -1274,19 +1274,32 @@ def calc_merged_prep(order_ids):
             try:
                 from addresses import canonical_address as _ca
                 _addr = (o.get("address") or "").strip()
-                _g = _ca(_addr) or _addr          # 归一值：分组用（青龙湖 / 江家艺苑）
-                o["addr_group"] = _g or "未填地点"
-                _d = ""
-                if _g and _g in _addr:
-                    _d = _addr.replace(_g, "", 1).strip(" 　·、,，-—~(")
-                # 细节很短（"二期" / "一期" / "A区"…）说明它只是地名后缀、不是独立点位：
-                # 不单独占一行浪费版面 —— 一级地点直接显示完整原地址（"青龙湖二期"）。
-                if _d and len(_d) <= 3:
-                    o["addr_main"] = _addr or "未填地点"
+                # 一级地点（2026-11-13 用户定）：青龙湖一期 / 青龙湖二期 都是独立的一级地址，
+                # 整段原样显示（如"青龙湖一期游船码头""青龙湖二期"），不再拆成"青龙湖 / 一期游船码头"。
+                # 这样一期与二期在简略表里是同样的"完整一级地址"格式（二期此前靠 len<=3 巧合成了完整格式，
+                # 一期带更长后缀时却被拆开，现统一处理）。分组/是否本店仍按原口径：只有"青龙湖二期"算本店。
+                _first_level = None
+                if _addr.startswith("青龙湖二期"):
+                    _first_level = "青龙湖二期"
+                elif _addr.startswith("青龙湖一期"):
+                    _first_level = "青龙湖一期"
+                if _first_level:
+                    o["addr_group"] = _first_level
+                    o["addr_main"] = _addr
                     o["addr_detail"] = ""
                 else:
-                    o["addr_main"] = _g or _addr or "未填地点"
-                    o["addr_detail"] = _d
+                    _g = _ca(_addr) or _addr      # 归一值：分组用（青龙湖 / 江家艺苑）
+                    o["addr_group"] = _g or "未填地点"
+                    _d = ""
+                    if _g and _g in _addr:
+                        _d = _addr.replace(_g, "", 1).strip(" 　·、,，-—~(")
+                    # 细节很短（"二期" / "A区"…）说明它只是地名后缀、不是独立点位：不单独占一行。
+                    if _d and len(_d) <= 3:
+                        o["addr_main"] = _addr or "未填地点"
+                        o["addr_detail"] = ""
+                    else:
+                        o["addr_main"] = _g or _addr or "未填地点"
+                        o["addr_detail"] = _d
             except Exception:
                 o["addr_group"] = o.get("address") or "未填地点"
                 o["addr_main"] = o.get("address") or "未填地点"
@@ -1330,6 +1343,8 @@ def calc_merged_prep(order_ids):
                     "id": tl["id"], "name": tl["name"], "total": 0,
                     "stock": tl["stock"], "threshold": tl["threshold"], "order_ids": [],
                     "per_package_samples": [], "total_packages": 0,
+                    # 物理库存（未扣占用）；合并后用于还原"本批自己占掉的那部分"，避免假缺口
+                    "total_stock": tl.get("total_stock", tl["stock"]),
                 }
             tool_merge[key]["total"] += tl["need"]
             tool_merge[key]["order_ids"].append(o["id"])
@@ -1365,6 +1380,13 @@ def calc_merged_prep(order_ids):
         samples = [p for p, _ in v["per_package_samples"] if p]
         v["per_package"] = max(samples) if samples else v["total"]
         v["order_count"] = len(v["order_ids"])
+        # ⚠️ 2026-11-13 修（用户报"需要14个卡式炉却显示缺11"）：tl["stock"] 是"总库存−全部未完成订单占用"，
+        # 而本批这些单自己就是占用来源，等于把本批需求重复扣了一次 → 3库存/缺11 的假警报。
+        # 合并表看的是"这一批够不够"，应把本批自身占用加回：可用 = min(物理库存, 原可用 + 本批需求)。
+        # 本批需求=13 时 3+14=17（=物理库存）；14 需求 vs 17 物理库存 → 不缺。跨批的其它占用仍被扣掉。
+        _total_stock = v.get("total_stock")
+        if _total_stock is not None:
+            v["stock"] = min(_total_stock, (v["stock"] or 0) + (v["total"] or 0))
         v["shortage"] = max(0, v["total"] - v["stock"])
 
     # 勾选状态：从 prep_checklist 查，某合并项只有当所有相关 order 的该 item 都勾了才算勾

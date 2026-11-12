@@ -525,6 +525,11 @@ def _parse_extra_tools(note):
     """
     if not note:
         return {}
+    # ⚠️ 2026-11-13 修：段首/分隔符后的"+"表示"在套餐基础上再加"（"+2把椅子"=加2把），
+    # 但下面按"+"切分会把这个语义丢掉、误判成"总数2把"（3-4人餐本配4把，反被改成2把）。
+    # 这里先把"段首的+"换成"加"字，让 _detect_mode 正确识别为 add；"2桌子+3椅子"这种
+    # 夹在两件物品中间的"+"仍是分隔符（前面不是分隔符/开头），不受影响。
+    note = re.sub(r"(^|[，,。；;、\s])\+", r"\1加", note)
     # 拆分成段：按 + ，,。；;、 空格 切分
     segments = re.split(r"[+，,。；;、\s]+", note)
     # 过滤时间相关段（含"X点"的不是工具数量需求）
@@ -548,9 +553,16 @@ def _parse_extra_tools(note):
         events = []
         for m in num_re.finditer(seg):
             events.append((m.start(), 'num', _num_from_str(m.group(1)), m.end()))
-        for name, std in pairs:
+        tool_spans = []                              # 已匹配工具的区间，用于去重
+        for name, std in pairs:                      # pairs 已按别名长度降序
             for m in re.finditer(re.escape(name), seg):
-                events.append((m.start(), 'tool', (name, std), m.end()))
+                s, e = m.start(), m.end()
+                # 同一位置的长短别名只算一次（"椅子"命中后，单字"椅"不再重复计入；
+                # 否则第二个匹配会走"加…椅 默认1"分支，把已算出的 2 把覆盖成 1 把）
+                if any(ts <= s and e <= te for ts, te, _ in tool_spans):
+                    continue
+                tool_spans.append((s, e, std))
+                events.append((s, 'tool', (name, std), e))
         events.sort(key=lambda e: e[0])
         num = None
         ptr = 0                      # 上一个事件结束位置

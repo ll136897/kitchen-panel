@@ -267,6 +267,9 @@
   .bwho.w-liu{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
   .bwho.w-sun{background:#fff1dc;color:#b45309;border:1px solid #f3d5ab}
   .bwho.w-none{background:#f2efe9;color:#9a8b6a;border:1px solid #e3dbcd}
+  /* 半包（不搭建）小徽标：与归属人徽标同尺寸，绿色；放在归属人图标左边，不额外占行 */
+  .bhalf{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap;
+    background:#27ae60;color:#fff;border:1px solid #1e8449}
   /* 换菜/加菜等备注要点徽标 */
   .btag{font-size:11px;color:#c0392b;font-weight:800;margin-left:4px;white-space:nowrap}
   /* 原录入订单：默认收起，只占一行摘要，不占版面；点开才显示原文 */
@@ -1040,6 +1043,12 @@ function boardPeople(o){
 function boardIsLocal(o){
   return ((o.addr_group||o.address||'').indexOf('青龙湖二期') >= 0);
 }
+// 半包 = 不搭建订单（所有套餐都不搭建）。放到归属人图标左边显示一个绿色「半」字，不额外占一行。
+function boardIsNosetup(o){
+  const pkgs = (o && o.packages) || [];
+  if(!pkgs.length) return false;
+  return pkgs.every(p => (p.setup_flag === 0 || p.pkg_setup === 0));
+}
 function boardPrepTime(o){
   const t = boardTime(o);
   if(!t || !/^\d{1,2}:\d{2}$/.test(t)) return t || '';
@@ -1138,6 +1147,8 @@ function renderBoard(orders){
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
     const whoHtml = (who&&who!=='未标注')
       ? `<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>` : '';
+    // 半包（不搭建）徽标：绿色「半」字，放在归属人徽标左边，同尺寸、不占额外版面
+    const halfHtml = boardIsNosetup(o) ? '<span class="bhalf" title="半包（不搭建）">半</span>' : '';
     // 排版（2026-10-25 重做）：左侧细色条=备餐状态（不再用占地方的方块）
     //   行1 名字(单行) + 归属 + 时间 ｜ 行2 套餐 ｜ 行3 地点(+小地区小字) ｜ 行4 备注(独立一行，完整)
     const detailHtml = o.addr_detail ? `<span class="bdetail">↳ ${o.addr_detail}</span>` : '';
@@ -1148,7 +1159,7 @@ function renderBoard(orders){
       <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地址'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${whoHtml}<span class="btime">${t||'—'}</span></div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${halfHtml}${whoHtml}<span class="btime">${t||'—'}</span></div>
         <div class="bline2">🍱 ${boardPkgTxt(o).replace(/(\d+)人餐/g,'<span class="bnum">$1</span>人餐')}</div>
         ${addrLine}
         ${noteLine}
@@ -1449,8 +1460,9 @@ function renderByOrder(){
     const pkgsTxt = fmtPkgsTotal(o, true);
     const nm = o.contact_name || '—';
     const nt = o.note || '';
+    const halfO = boardIsNosetup(o) ? '<span class="bhalf" title="半包（不搭建）">半</span>' : '';
     return `<div class="orow" onclick="enterFocus(${o.id})" title="点一下 → 看这单的备餐明细">
-      ${prepOwnerDot(o)}
+      ${halfO}${prepOwnerDot(o)}
       <span class="c-pkg">🍱 ${pkgsTxt||'套餐未记录'}</span>
       <span class="c-addr">📍 ${o.address||'—'}</span>
       <span class="c-date">${dateText2}</span>
