@@ -554,10 +554,12 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
         ing_demand[to_id]["total"] += add
         ing_demand[to_id]["swapped_in"] = True
 
-    # ===== 半包（不搭建）默认餐具只留 5 项 + 备注「多拿N套餐具」计入（2026-11-13 用户定）=====
-    # 用户口径：半包默认只有「三格蘸碟(=三格底料盒)/塑料勺(勺子)/筷子/纸杯/纸巾」，
-    # 不提供 一次性桌布/围裙/垃圾袋/油 等；备注可再增补（"多拿4套餐具" = 这 5 项各 +4）。
+    # ===== 半包（不搭建）默认餐具只留 5 项 + 备注「多加餐具」按默认 3 项计入（2026-11-13 用户定）=====
+    # ① 半包默认只有「三格蘸碟(=三格底料盒)/塑料勺(勺子)/筷子/纸杯/纸巾」，不配 桌布/围裙/垃圾袋/油。
+    # ② 备注「多加N套餐具/工具」→ **默认只加 筷子/三格底料盒/纸杯 这 3 项各 +N**；
+    #    其他（勺子/纸巾/桌布/围裙/垃圾袋…）**除非备注单独点名**（如"加2把勺子""纸巾1包"）才加，否则不加。
     _HALF_UTENSILS = ("三格底料盒", "勺子", "筷子", "纸杯", "纸巾")
+    _EXTRA_DEFAULT = ("三格底料盒", "筷子", "纸杯")          # "多加餐具"默认项（用户 2026-11-13 定）
     _is_half = bool(pkgs) and all((p.get("setup_flag") == 0) for p in pkgs)
     with get_db() as conn:
         _cur = conn.cursor()
@@ -567,26 +569,46 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
             _ph = ",".join("?" * len(_all_ids))
             for _r in _cur.execute("SELECT id,name,category FROM ingredients WHERE id IN (%s)" % _ph, _all_ids):
                 _meta[_r["id"]] = (_r["name"], _r["category"])
-        _half_ids = {_r["id"]: _r["name"] for _r in _cur.execute(
-            "SELECT id,name FROM ingredients WHERE category='utensil' AND name IN (%s)"
-            % ",".join("?" * len(_HALF_UTENSILS)), _HALF_UTENSILS)}
+        _ut_by_name = {_r["name"]: _r["id"] for _r in _cur.execute(
+            "SELECT id,name FROM ingredients WHERE category='utensil'")}
     if _is_half:
         for _iid in list(ing_demand.keys()):
             _nm, _cat = _meta.get(_iid, ("", ""))
             if _cat == "utensil" and _nm not in _HALF_UTENSILS:
                 del ing_demand[_iid]
-    # 备注「多拿/加 N 套餐具」→ 5 项核心餐具各 +N（"套餐具"=一套；用户 2026-11-13 要求计入）
+
+    def _add_ut(_iid, _q):
+        if not _iid or not _q or _q <= 0:
+            return
+        if _iid not in ing_demand:
+            ing_demand[_iid] = {"total": 0, "per_package": 1, "order_qty": 0,
+                                "portion_count": 1, "total_portions": 0, "cost_only": False}
+        ing_demand[_iid]["total"] += _q
+        ing_demand[_iid]["cost_only"] = False
+
     if note_now:
         from parser import _num_from_str as _nfs
+        # ① 通用「多加/加 N 套餐具(份餐具)」→ 默认 3 项各 +N
         _m = re.search(r"(\d+|[一二两三四五六七八九十]+)\s*[套份]\s*餐\s*具", note_now)
         if _m:
             _n = _nfs(_m.group(1)) or 0
-            if _n > 0:
-                for _iid in _half_ids:
-                    if _iid not in ing_demand:
-                        ing_demand[_iid] = {"total": 0, "per_package": 1, "order_qty": 0,
-                                            "portion_count": 1, "total_portions": 0, "cost_only": False}
-                    ing_demand[_iid]["total"] += _n
+            for _nm in _EXTRA_DEFAULT:
+                _add_ut(_ut_by_name.get(_nm), _n)
+        # ② 单独点名的餐具/耗材（"加2把勺子""纸巾1包"…）→ 按名字 +数量（长名优先防重复命中）
+        _aliases = [("三格蘸碟", "三格底料盒"), ("三格碟", "三格底料盒"), ("蘸碟", "三格底料盒"),
+                    ("三格底料盒", "三格底料盒"), ("塑料勺", "勺子"), ("勺子", "勺子"),
+                    ("筷子", "筷子"), ("纸杯", "纸杯"), ("杯子", "纸杯"),
+                    ("餐巾纸", "纸巾"), ("纸巾", "纸巾"), ("一次性桌布", "一次性桌布"),
+                    ("桌布", "一次性桌布"), ("围裙", "围裙"), ("垃圾袋", "垃圾袋")]
+        _aliases.sort(key=lambda x: -len(x[0]))
+        _alt = "|".join(re.escape(_a) for _a, _ in _aliases)
+        _namemap = {_a: _s for _a, _s in _aliases}
+        #   写法一：数量在前（"加2把勺子"）
+        for _mm in re.finditer(r"(\d+|[一二两三四五六七八九十]+)\s*[个把双包张套份]?\s*(" + _alt + ")", note_now):
+            _add_ut(_ut_by_name.get(_namemap.get(_mm.group(2))), _nfs(_mm.group(1)) or 0)
+        #   写法二：名称在前（"纸巾1包""勺子2把"）
+        for _mm in re.finditer(r"(" + _alt + r")\s*(\d+|[一二两三四五六七八九十]+)\s*[个把双包张套份]?", note_now):
+            _add_ut(_ut_by_name.get(_namemap.get(_mm.group(1))), _nfs(_mm.group(2)) or 0)
 
     return ing_demand
 
