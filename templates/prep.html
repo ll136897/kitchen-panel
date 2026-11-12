@@ -224,6 +224,11 @@
   .bgrp{margin:6px 0 2px;font-size:13px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:6px;
     background:#faf5ee;padding:3px 8px;border-radius:6px}
   .bgrp .bmeta{font-size:11px;color:var(--muted);font-weight:600}
+  /* 一级分组：地址（外地 / 青龙湖二期）—— 比时间档更醒目 */
+  .baddr{margin:10px 0 4px;font-size:13px;font-weight:800;color:#1b5e3a;display:flex;align-items:center;gap:6px;
+    background:#eaf6ee;padding:5px 9px;border-radius:7px;border-left:4px solid #27ae60}
+  .baddr.outside{color:#1f4e79;background:#eaf1fa;border-left-color:#4a90d9}
+  .baddr .bmeta{font-size:11px;color:var(--muted);font-weight:600}
   /* 双列小卡网格：手机一屏塞约 2 倍订单、基本不翻页 */
   #boardList .bgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0 10px}
   @media(max-width:360px){ #boardList .bgrid{grid-template-columns:1fr} }
@@ -1134,17 +1139,9 @@ function renderBoard(orders){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
   }
-  // 简略表固定按「备餐批次」分组（时间档），其余分组维度已移除
-  const gKey=o=>boardTimeSlot(o);
-  const groups=new Map();
-  orders.forEach(o=>{
-    const k=gKey(o);
-    if(!groups.has(k)) groups.set(k,[]);
-    groups.get(k).push(o);
-  });
-  let garr=[...groups.entries()];
-  // 早档 → 午档 → 晚档（时间未定最后）
-  garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));
+  // 简略表固定分组（门店在青龙湖二期）：
+  //   一级 = 地址：外地(青龙湖二期外)排最前先备先送，青龙湖二期(本店)单独排最后；
+  //   二级 = 时间档（早→午→晚），档内按主套餐规格→备餐时间（沿用原"备餐批次"逻辑）。
   const rowHtml=o=>{
     const t=boardTime(o);
     const note=(o.note&&o.note!=='无')?o.note:'';
@@ -1172,27 +1169,55 @@ function renderBoard(orders){
       </div>
     </div>`;
   };
-  list.innerHTML = garr.map(([k,arr])=>{
-    const ppl=arr.reduce((s,o)=>s+boardPeople(o),0);
-    let html = `<div class="bgrp">${k} <span class="bmeta">${arr.length}单 · ${ppl}人</span></div>`;
-    // 档内再按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
-    const specMap = new Map();
+  // 二级：时间档分组 + 档内按规格/备餐时间（封装复用，两个地址组都用）
+  const renderTimeGroups=(arr)=>{
+    const gKey=o=>boardTimeSlot(o);
+    const groups=new Map();
     arr.forEach(o=>{
-      const sk = boardSpecKey(o);
-      if(!specMap.has(sk)) specMap.set(sk,[]);
-      specMap.get(sk).push(o);
+      const k=gKey(o);
+      if(!groups.has(k)) groups.set(k,[]);
+      groups.get(k).push(o);
     });
-    const specArr = [...specMap.entries()].sort((a,b)=>
-      (parseInt(a[0])||0) - (parseInt(b[0])||0));      // 规格从小到大，先备小份
-    let inner = '';
-    specArr.forEach(([sk,sub])=>{
-      sub.sort((a,b)=>{
-        const ta = boardPrepTime(a)||'99:99', tb = boardPrepTime(b)||'99:99';
-        return ta < tb ? -1 : ta > tb ? 1 : 0;         // 组内按备餐时间先后
+    let garr=[...groups.entries()];
+    garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));   // 早→午→晚（未定最后）
+    let inner='';
+    garr.forEach(([k,sub0])=>{
+      const ppl=sub0.reduce((s,o)=>s+boardPeople(o),0);
+      inner += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
+      // 档内再按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
+      const specMap=new Map();
+      sub0.forEach(o=>{
+        const sk=boardSpecKey(o);
+        if(!specMap.has(sk)) specMap.set(sk,[]);
+        specMap.get(sk).push(o);
       });
-      inner += sub.map(rowHtml).join('');              // 不再为每种规格插一行小标题（太占空间）；同规格仍挨在一起
+      const specArr=[...specMap.entries()].sort((a,b)=>
+        (parseInt(a[0])||0)-(parseInt(b[0])||0));      // 规格从小到大，先备小份
+      specArr.forEach(([sk,sub])=>{
+        sub.sort((a,b)=>{
+          const ta=boardPrepTime(a)||'99:99', tb=boardPrepTime(b)||'99:99';
+          return ta<tb?-1:ta>tb?1:0;                   // 组内按备餐时间先后
+        });
+        inner += sub.map(rowHtml).join('');
+      });
     });
-    html += `<div class="bgrid">${inner}</div>`;
+    return inner;
+  };
+  // 一级：地址分组（外地优先、青龙湖二期最后）
+  const addrKey=o=> boardIsLocal(o) ? 'local' : 'outside';   // outside=外地(先), local=青龙湖二期(后)
+  const addrRank=k=> k==='outside' ? 0 : 1;
+  const addrLabel=k=> k==='outside' ? '🚚 外地配送（先备先送）' : '🏠 青龙湖二期·本店';
+  const addrGroups=new Map();
+  orders.forEach(o=>{
+    const k=addrKey(o);
+    if(!addrGroups.has(k)) addrGroups.set(k,[]);
+    addrGroups.get(k).push(o);
+  });
+  let addrArr=[...addrGroups.entries()].sort((a,b)=> addrRank(a[0]) - addrRank(b[0]));
+  list.innerHTML = addrArr.map(([k,arr])=>{
+    const ppl=arr.reduce((s,o)=>s+boardPeople(o),0);
+    let html = `<div class="baddr${k==='outside'?' outside':''}">${addrLabel(k)} <span class="bmeta">${arr.length}单 · ${ppl}人</span></div>`;
+    html += `<div class="bgrid">${renderTimeGroups(arr)}</div>`;
     return html;
   }).join('');
 }
