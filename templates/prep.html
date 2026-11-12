@@ -260,6 +260,8 @@
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
+  /* 青龙湖二期(本店)与外地(其他区域)之间：仅一条细横线分隔，几乎不占空间 */
+  .bsep{border:none;border-top:1px solid #e5ddd0;margin:5px 2px;height:0}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
   .bwho{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap}
   .bwho.w-liu{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
@@ -1153,7 +1155,8 @@ function renderBoard(orders){
       </div>
     </div>`;
   };
-  // 时间档分组（早→午→晚），档内按「地址(外地先)→主套餐规格→备餐时间」排序；不另加地址栏、不显示"时间未定"框
+  // 时间档分组（早→午→晚）；档内再把订单拆成「外地(其他区域)」与「青龙湖二期(本店)」两块，
+  //   中间仅一条细横线分隔（几乎不占空间），不另加地址栏/标题框。两块内部各自按「主套餐规格→备餐时间」排。
   const renderTimeGroups=(arr)=>{
     const gKey=o=>boardTimeSlot(o);
     const groups=new Map();
@@ -1164,7 +1167,25 @@ function renderBoard(orders){
     });
     let garr=[...groups.entries()];
     garr.sort((a,b)=> boardSlotRank(a[0]) - boardSlotRank(b[0]));   // 早→午→晚（时间未定最后）
-    const addrRankOf=o=> boardIsLocal(o) ? 1 : 0;                  // 外地(0)排在青龙湖二期(1)前
+    // 渲染一个地址块（外地 or 本店）：块内按规格→备餐时间排，规格相同的挨一起
+    const renderBlock=(block)=>{
+      const specMap=new Map();
+      block.forEach(o=>{
+        const sk=boardSpecKey(o);
+        if(!specMap.has(sk)) specMap.set(sk,[]);
+        specMap.get(sk).push(o);
+      });
+      const specArr=[...specMap.entries()].sort((a,b)=>(parseInt(a[0])||0)-(parseInt(b[0])||0)); // 规格从小到大
+      let rowsHtml='';
+      specArr.forEach(([sk,sub])=>{
+        sub.sort((a,b)=>{
+          const ta=boardPrepTime(a)||'99:99', tb=boardPrepTime(b)||'99:99';
+          return ta<tb?-1:ta>tb?1:0;                                // 块内按备餐时间先后
+        });
+        rowsHtml += sub.map(rowHtml).join('');
+      });
+      return `<div class="bgrid">${rowsHtml}</div>`;
+    };
     let inner='';
     garr.forEach(([k,sub0])=>{
       const ppl=sub0.reduce((s,o)=>s+boardPeople(o),0);
@@ -1173,30 +1194,11 @@ function renderBoard(orders){
       if(k.indexOf('时间未定')<0){
         grpHtml += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
       }
-      // 档内按「主套餐规格」分组：相同规格的挨在一起 → 这几份可以一起备
-      const specMap=new Map();
-      sub0.forEach(o=>{
-        const sk=boardSpecKey(o);
-        if(!specMap.has(sk)) specMap.set(sk,[]);
-        specMap.get(sk).push(o);
-      });
-      // 规格组排序：先按地址（外地在前），再按规格大小（先备小份）
-      const specArr=[...specMap.entries()].sort((a,b)=>{
-        const ra=addrRankOf(a[1][0]), rb=addrRankOf(b[1][0]);
-        if(ra!==rb) return ra-rb;
-        return (parseInt(a[0])||0)-(parseInt(b[0])||0);
-      });
-      let rowsHtml='';
-      specArr.forEach(([sk,sub])=>{
-        sub.sort((a,b)=>{
-          const ra=addrRankOf(a), rb=addrRankOf(b);
-          if(ra!==rb) return ra-rb;                                // 同规格内也外地先
-          const ta=boardPrepTime(a)||'99:99', tb=boardPrepTime(b)||'99:99';
-          return ta<tb?-1:ta>tb?1:0;                                // 再按备餐时间先后
-        });
-        rowsHtml += sub.map(rowHtml).join('');
-      });
-      grpHtml += `<div class="bgrid">${rowsHtml}</div>`;           // 恢复双列网格（一排两个）
+      const outside = sub0.filter(o=>!boardIsLocal(o));   // 其他区域（外地）：先备先送，排在前面
+      const local   = sub0.filter(o=> boardIsLocal(o));   // 青龙湖二期·本店：排在后面
+      if(outside.length) grpHtml += renderBlock(outside);
+      if(outside.length && local.length) grpHtml += `<hr class="bsep">`;   // 仅一条细横线分隔，不占额外版面
+      if(local.length)   grpHtml += renderBlock(local);
       inner += grpHtml;
     });
     return inner;
