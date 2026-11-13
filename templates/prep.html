@@ -260,6 +260,14 @@
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
+  /* 抬头栏：不额外占上下空间，靠颜色区分信息（2026-11-13 用户定） */
+  .board-h{margin-bottom:5px;flex-wrap:wrap}
+  .board-title{font-size:14px;font-weight:700;color:#6b5b4a}
+  .board-sum{margin-left:6px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:baseline;flex-wrap:wrap;gap:1px 0;line-height:1.35}
+  .board-sum .bsum-cnt{color:#8a7f75}
+  .board-sum .bsum-ppl{color:#2d6cdf}
+  .board-sum .bsum-pkg{color:#e67e22}
+  .board-sum .bsum-sep{color:#cdbfae;margin:0 5px;font-weight:400}
   /* 已出餐：整行灰色区分（点开原始录入弹窗里的「出餐」按钮切换） */
   .brow.bserved{background:#eef0f2;border-color:#dcdfe3}
   .brow.bserved .bname,.brow.bserved .bline2,.brow.bserved .bline3,.brow.bserved .btime{opacity:.5}
@@ -332,7 +340,7 @@
   /* 订单行：点一下看"这一单具体要备什么菜" */
   .orow{cursor:pointer}
   .orow::after{content:'›';color:var(--muted);font-weight:700;margin-left:auto;font-size:16px;line-height:1}
-  .ord-hint{font-size:12px;color:var(--muted);margin:-4px 0 8px}
+  .ord-hint{font-size:11px;color:var(--muted);margin:-3px 0 6px}
   /* 这一单的菜（手机=底部抽屉，电脑=居中弹窗） */
   .os-mask{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60}
   .os-mask.on{display:block}
@@ -423,10 +431,10 @@
   <!-- 简略备餐表：固定按「备餐批次」排（时间档 → 套餐规格 → 备餐时间）。
        已移除原来的分组切换（时间/套餐/地点/出餐/送达）——只留这一套，更精简。 -->
   <div class="card" id="boardCard">
-    <h3><span class="dot" style="background:#1b7a43"></span>🧾 简略备餐表
-      <span id="boardSum" class="muted" style="font-size:13px;font-weight:600;margin-left:6px"></span></h3>
+    <h3 class="board-h"><span class="dot" style="background:#1b7a43"></span><span class="board-title">🧾 简略备餐表</span>
+      <span id="boardSum" class="board-sum"></span></h3>
     <div id="boardList"></div>
-    <div class="ord-hint">点左侧色条 = 标记已备 / 未备；点任意一行 = 看这单要备什么</div>
+    <div class="ord-hint">左侧色条 = 已备 / 未备；点行 = 看这单要备什么</div>
   </div>
 
   <!-- 备餐核对清单（按菜单分类顺序：牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具） -->
@@ -1055,6 +1063,20 @@ function fmtPkgsTotal(o, showNosetup){
   return label;
 }
 function boardPkgTxt(o){ return fmtPkgsTotal(o, true); }
+// 抬头汇总：把全场套餐按「人数上限」归类合计，如 3人餐×6 5人餐×3（半包也计入，算的是份数非搭建）
+function boardPkgSummary(orders){
+  const map = {};
+  orders.forEach(o=>{
+    (o.packages||[]).forEach(p=>{
+      const n = (p.people||0), q = (p.quantity||1);
+      if(!n) return;
+      map[n] = (map[n]||0) + q;
+    });
+  });
+  const keys = Object.keys(map).map(Number).sort((a,b)=>a-b);
+  if(!keys.length) return '';
+  return keys.map(k=>`<span class="bsum-pkg">${k}人餐×${map[k]}</span>`).join('<span class="bsum-sep"> </span>');
+}
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function boardPeople(o){
   let n=0;
@@ -1152,9 +1174,12 @@ function renderBoard(orders){
     return (a.id||0)-(b.id||0);
   });
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
-  let sumHtml=`${orders.length}单 · ${totalPeople}人`;
+  const pkgSum=boardPkgSummary(orders);     // 如 3人餐×6 5人餐×3（按人数上限归类合计）
+  let sumHtml=`<span class="bsum-cnt">${orders.length}单</span>`;
+  if(totalPeople>0) sumHtml+=`<span class="bsum-sep">·</span><span class="bsum-ppl">${totalPeople}人</span>`;
+  if(pkgSum) sumHtml+=`<span class="bsum-sep">·</span>${pkgSum}`;
   const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
-  if(ob) sumHtml += ` · ${ob}`;
+  if(ob) sumHtml+=`<span class="bsum-sep">·</span>${ob}`;
   sumEl.innerHTML=sumHtml;
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
