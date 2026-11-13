@@ -260,14 +260,23 @@
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
-  /* 抬头栏：不额外占上下空间，靠颜色区分信息（2026-11-13 用户定） */
-  .board-h{margin-bottom:5px;flex-wrap:wrap}
-  .board-title{font-size:14px;font-weight:700;color:#6b5b4a}
-  .board-sum{margin-left:6px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:baseline;flex-wrap:wrap;gap:1px 0;line-height:1.35}
-  .board-sum .bsum-cnt{color:#8a7f75}
-  .board-sum .bsum-ppl{color:#2d6cdf}
-  .board-sum .bsum-pkg{color:#e67e22}
-  .board-sum .bsum-sep{color:#cdbfae;margin:0 5px;font-weight:400}
+  /* 抬头栏：标题在左，套餐数在右并排；每排最多 2 个套餐、各套餐不同颜色，归属人订单数跟在第一排两个套餐后（2026-11-13 用户定） */
+  .board-h{margin-bottom:5px;display:flex;align-items:flex-start;gap:8px;flex-wrap:nowrap}
+  .board-title{font-size:14px;font-weight:700;color:#6b5b4a;flex:0 0 auto;line-height:1.5}
+  .board-sum{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .bsum-row{display:flex;align-items:center;flex-wrap:wrap;gap:7px;line-height:1.5}
+  .bsum-cnt{color:#8a7f75;font-weight:700;font-size:12.5px}
+  .bsum-ppl{color:#2d6cdf;font-weight:700;font-size:12.5px}
+  .bsum-pkg{font-weight:800;font-size:13px}
+  /* 归属人订单数（孙6 刘6）：彩色小徽标，跟在第一排两个套餐后 */
+  .obd{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:800;padding:1px 6px;border-radius:6px;margin-left:6px}
+  .obd .obd-dot{width:7px;height:7px;border-radius:50%}
+  .obd.who-me{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
+  .obd.who-other{background:#fff1dc;color:#b45309;border:1px solid #f3d5ab}
+  .obd.who-none{background:#f2efe9;color:#9a8b6a;border:1px solid #e3dbcd}
+  .obd.who-me .obd-dot{background:#1a5fb4}
+  .obd.who-other .obd-dot{background:#b45309}
+  .obd.who-none .obd-dot{background:#9a8b6a}
   /* 已出餐：整行灰色区分（点开原始录入弹窗里的「出餐」按钮切换） */
   .brow.bserved{background:#eef0f2;border-color:#dcdfe3}
   .brow.bserved .bname,.brow.bserved .bline2,.brow.bserved .bline3,.brow.bserved .btime{opacity:.5}
@@ -1063,20 +1072,6 @@ function fmtPkgsTotal(o, showNosetup){
   return label;
 }
 function boardPkgTxt(o){ return fmtPkgsTotal(o, true); }
-// 抬头汇总：把全场套餐按「人数上限」归类合计，如 3人餐×6 5人餐×3（半包也计入，算的是份数非搭建）
-function boardPkgSummary(orders){
-  const map = {};
-  orders.forEach(o=>{
-    (o.packages||[]).forEach(p=>{
-      const n = (p.people||0), q = (p.quantity||1);
-      if(!n) return;
-      map[n] = (map[n]||0) + q;
-    });
-  });
-  const keys = Object.keys(map).map(Number).sort((a,b)=>a-b);
-  if(!keys.length) return '';
-  return keys.map(k=>`<span class="bsum-pkg">${k}人餐×${map[k]}</span>`).join('<span class="bsum-sep"> </span>');
-}
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function boardPeople(o){
   let n=0;
@@ -1174,13 +1169,35 @@ function renderBoard(orders){
     return (a.id||0)-(b.id||0);
   });
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
-  const pkgSum=boardPkgSummary(orders);     // 如 3人餐×6 5人餐×3（按人数上限归类合计）
-  let sumHtml=`<span class="bsum-cnt">${orders.length}单</span>`;
-  if(totalPeople>0) sumHtml+=`<span class="bsum-sep">·</span><span class="bsum-ppl">${totalPeople}人</span>`;
-  if(pkgSum) sumHtml+=`<span class="bsum-sep">·</span>${pkgSum}`;
+  // 套餐按「人数上限」归类合计（半包也计入，算份数非搭建）
+  const pkgMap={};
+  orders.forEach(o=>{(o.packages||[]).forEach(p=>{const n=p.people||0,q=p.quantity||1;if(n)pkgMap[n]=(pkgMap[n]||0)+q;});});
+  const pkgKeys=Object.keys(pkgMap).map(Number).sort((a,b)=>a-b);
+  // 颜色盘：每个套餐一种不同颜色（按人数排序取色，保证稳定不乱跳）
+  const palette=['#e67e22','#2d6cdf','#27ae60','#c0392b','#8e44ad','#16a085','#d35400','#2980b9'];
   const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
-  if(ob) sumHtml+=`<span class="bsum-sep">·</span>${ob}`;
-  sumEl.innerHTML=sumHtml;
+  // 首行：单/人 + 前两个套餐 + 归属人订单数；其后每行最多 2 个套餐
+  let rows=''; let firstRowDone=false;
+  for(let i=0;i<pkgKeys.length;i+=2){
+    let row='';
+    const pair=pkgKeys.slice(i,i+2);
+    pair.forEach((k,idx)=>{ const color=palette[(i+idx)%palette.length]; row+=`<span class="bsum-pkg" style="color:${color}">${k}人餐×${pkgMap[k]}</span>`; });
+    if(!firstRowDone){
+      let lead=`<span class="bsum-cnt">${orders.length}单</span>`;
+      if(totalPeople>0) lead+=`<span class="bsum-ppl">${totalPeople}人</span>`;
+      row=lead+row;                          // 单/人作为首行前置（紧贴标题右边）
+      if(ob) row+=ob;                        // 归属人订单数跟在第一排两个套餐后
+      firstRowDone=true;
+    }
+    rows+=`<div class="bsum-row">${row}</div>`;
+  }
+  if(!pkgKeys.length){                       // 无套餐记录时退化为 单/人/归属
+    let alone=`<span class="bsum-cnt">${orders.length}单</span>`;
+    if(totalPeople>0) alone+=`<span class="bsum-ppl">${totalPeople}人</span>`;
+    if(ob) alone+=ob;
+    rows=`<div class="bsum-row">${alone}</div>`;
+  }
+  sumEl.innerHTML=rows;
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
