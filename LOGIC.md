@@ -287,7 +287,13 @@
 
 ## 变更记录
 
-- 2026-11-13（简略表抬头套餐数）：抬头栏新增套餐数汇总（`boardPkgSummary`，按人数上限归类如 `3人餐×6`），并严守"不增上下空间"——标题缩到 14px、靠颜色区分信息（单数灰/人数蓝/套餐数橙/归属 chip）、`h3` 下边距压到 5px、提示语精简。实现：`renderBoard` 组装彩色 `boardSum`，CSS `.board-h/.board-title/.board-sum/.bsum-*`。
+- 2026-11-13（简略表抬头套餐数 · 定稿）：抬头栏套餐数汇总按「人数上限」归类（如 `3人餐×6`），**与标题并排、不另起一行**：`.board-h` 用 `display:flex;flex-wrap:nowrap`，标题 `flex:0 0 auto` 在左、`.board-sum` 是右侧竖排容器；利用标题上方原有留白铺开，**不新增上下空间**。每条硬规则：
+  ① **每排封顶 2 个套餐**，多出来的移到下一排（`pkgKeys` 每 2 个切成一条 `.bsum-row`）；
+  ② **各套餐颜色不同**（`palette` 按人数排序取色，橙/蓝/绿/红/紫…），颜色只用于区分规格，不参与业务语义；
+  ③ **归属人订单数（孙6 刘6）紧跟首排两个套餐之后**，用彩色 `.obd` 徽标；首排另带「N单 / N人」（灰 / 蓝）作前置；
+  ④ 标题仍 14px、`h3` 下边距 5px；无套餐记录时退化为「N单 / N人 / 归属」一行，不留空行。
+  实现：`renderBoard` 组装 `.bsum-row` 多行 HTML，CSS `.board-h/.board-title/.board-sum/.bsum-row/.bsum-*/.obd`；旧的单行 `boardPkgSummary` 已删除（避免两套口径）。
+- 2026-11-13（推送边界补充：远端自动备份含 db 时怎么合并）：`db_backup.py` 的 `auto: backup kitchen.db` 提交会把 `kitchen.db` 推进远端；此时本地 skip-worktree 开启会让 `git merge FETCH_HEAD` 静默中止（报 "local changes to kitchen.db would be overwritten"）。**这与上面「数据库真相源纪律」不冲突**：那条禁的是"把本地过期镜像当真相、据此汇报或主动 push 旧 db"；这里只是合并必需的 dance，且远端那份 db 本身就是线上最新备份。安全流程：① 先 `cp kitchen.db _kitchen.db.bak` 留一份；② `git update-index --no-skip-worktree kitchen.db` → `git checkout -- kitchen.db` → `git merge FETCH_HEAD -X theirs -m "merge 远端自动备份"`；③ **必须验证** `git show HEAD:kitchen.db | md5sum` 与远端最新备份提交的 db md5 一致（本次 `d332428…` 一致，证明没把旧版本推回线上）；④ push 后 `git update-index --skip-worktree kitchen.db` 恢复标记、删备份。另外 github.com:443 间歇不可达，**fetch/push 要重试 2–4 次且不许吞输出**（本次 fetch 第 4 次才通）。
 - 2026-11-13（已出餐标记）：简略表原始录入弹窗加「✅ 出餐」按钮切换 `served`，已出餐整行变灰（`.brow.bserved`）+「✓已出餐」徽标，可撤回；评估双击不稳（单击已弹窗 + 手机 dblclick 不可靠）故用按钮。实现：`rawToggleServed/renderRawServeBtn`（走 `/api/prep/board-flag`）。
 - 2026-11-13（简略表点单弹原始录入）：简略表订单行由「点开跳整页备餐明细」改为**直接弹窗显示该单原始录入原文**（`own_raw_text`，不跳页）；弹窗底部保留「看这单备餐明细」按钮可下钻。实现：`showRaw/closeRaw/rawToFocus` + `#rawMask/#rawSheet`。
 - 2026-11-13（半包规则 + 套餐具 + 占用解除）：
