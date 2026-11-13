@@ -260,6 +260,12 @@
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
+  /* 已出餐：整行灰色区分（点开原始录入弹窗里的「出餐」按钮切换） */
+  .brow.bserved{background:#eef0f2;border-color:#dcdfe3}
+  .brow.bserved .bname,.brow.bserved .bline2,.brow.bserved .bline3,.brow.bserved .btime{opacity:.5}
+  .brow.bserved .bstat{opacity:.35}
+  .bserved-tag{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap;
+    background:#6b7280;color:#fff;border:1px solid #4b5563}
   /* 青龙湖二期(本店)与外地(其他区域)之间：仅一条细横线分隔，几乎不占空间 */
   .bsep{border:none;border-top:1px solid #e5ddd0;margin:2px 0;height:0}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
@@ -468,7 +474,8 @@
     <div class="os-body" id="rawBody"></div>
     <div class="os-foot">
       <button class="os-btn ghost" onclick="closeRaw()">关闭</button>
-      <button class="os-btn primary" onclick="rawToFocus()">📋 看这单备餐明细</button>
+      <button class="os-btn primary" id="rawServeBtn" onclick="rawToggleServed()">✅ 出餐</button>
+      <button class="os-btn ghost" onclick="rawToFocus()">📋 备餐明细</button>
     </div>
   </div>
 </div>
@@ -1160,6 +1167,7 @@ function renderBoard(orders){
     const note=(o.note&&o.note!=='无')?o.note:'';
     // 备餐状态：pending=未备，其余=已备；点左边小方块切换，用颜色区分（不额外占版面）
     const done = !!o.status && o.status !== 'pending';
+    const served = !!o.served;              // 已出餐（原始录入弹窗里的「出餐」按钮切换）
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
     const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'');
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
@@ -1167,17 +1175,19 @@ function renderBoard(orders){
       ? `<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>` : '';
     // 半包（不搭建）徽标：绿色「半」字，放在归属人徽标左边，同尺寸、不占额外版面
     const halfHtml = boardIsNosetup(o) ? '<span class="bhalf" title="半包（不搭建）">半</span>' : '';
+    // 已出餐徽标（与归属徽标同尺寸），配合整行灰色区分「已出餐」
+    const servedTag = served ? '<span class="bserved-tag">✓已出餐</span>' : '';
     // 排版（2026-10-25 重做）：左侧细色条=备餐状态（不再用占地方的方块）
     //   行1 名字(单行) + 归属 + 时间 ｜ 行2 套餐 ｜ 行3 地点(+小地区小字) ｜ 行4 备注(独立一行，完整)
     const detailHtml = o.addr_detail ? `<span class="bdetail">↳ ${o.addr_detail}</span>` : '';
     const noteLine = (note||tagHtml)
       ? `<div class="bline4">${note?`<span class="bnote">📝 ${note}</span>`:''}${tagHtml}</div>` : '';
     const addrLine = `<div class="bline3">📍 ${o.addr_main||'—'}${detailHtml}</div>`;
-    return `<div class="brow ${done?'bdone':''}" onclick="showRaw(${o.id})" title="点一下 → 看这单原始录入信息">
+    return `<div class="brow ${served?'bserved':(done?'bdone':'')}" onclick="showRaw(${o.id})" title="${served?'已出餐（点开可撤回）':'点一下 → 看这单原始录入信息'}">
       <div class="bstat ${done?'on':boardLocClass(o)}" title="${done?'已备餐（点一下改回未备）':'未备餐（点一下标记已备）'} · ${boardIsLocal(o)?'青龙湖二期·本店':'其他地址'}${boardIsLocal(o)?'':'（需提前1小时送）'}"
            onclick="boardTogglePrep(${o.id},'${o.status||'pending'}',event)"></div>
       <div class="bmain">
-        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${halfHtml}${whoHtml}<span class="btime">${t||'—'}</span></div>
+        <div class="bline1"><span class="bname">👤 ${o.contact_name||'—'}</span>${servedTag}${halfHtml}${whoHtml}<span class="btime">${t||'—'}</span></div>
         <div class="bline2">🍱 ${boardPkgTxt(o).replace(/(\d+)人餐/g,'<span class="bnum">$1</span>人餐')}</div>
         ${addrLine}
         ${noteLine}
@@ -1612,6 +1622,7 @@ function showRaw(oid){
     : '<div class="raw-empty">这单没有原始录入信息</div>';
   document.getElementById('rawMask').classList.add('on');
   document.getElementById('rawSheet').classList.add('on');
+  renderRawServeBtn(o);
 }
 function closeRaw(){
   const m=document.getElementById('rawMask'), sh=document.getElementById('rawSheet');
@@ -1620,6 +1631,30 @@ function closeRaw(){
   _rawOid = null;
 }
 function rawToFocus(){ const oid=_rawOid; closeRaw(); if(oid) enterFocus(oid); }
+
+// 「出餐」按钮：切换该单 served（简略表整行变灰=已出餐）。双击不稳(单击已弹窗+手机dblclick不可靠)，故用按钮。
+function renderRawServeBtn(o){
+  const btn = document.getElementById('rawServeBtn');
+  if(!btn) return;
+  const served = !!(o && o.served);
+  btn.textContent = served ? '↩️ 撤回出餐' : '✅ 出餐';
+  btn.classList.toggle('primary', !served);
+  btn.classList.toggle('ghost', served);
+}
+function rawToggleServed(){
+  const o = ((prepData && prepData.orders) || []).find(x=>x.id===_rawOid);
+  if(!o) return;
+  const next = o.served ? 0 : 1;
+  fetch('/api/prep/board-flag', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({order_id:o.id, flag:'served', value:next})})
+  .then(r=>r.json()).then(d=>{
+    if(!d || !d.ok){ if(typeof showToast==='function') showToast((d&&d.msg)||'操作失败'); return; }
+    o.served = next;
+    try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+    if(currentMode==='board' && typeof renderBoard==='function') renderBoard(prepData.orders);
+    renderRawServeBtn(o);
+  }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
+}
 
 document.addEventListener('keydown', function(e){
   if(e.key === 'Escape'){ closeOrderSheet(); closeRaw(); }
