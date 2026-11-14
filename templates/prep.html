@@ -260,21 +260,28 @@
   /* 档内不再显示「套餐规格」小标题（用户要求更紧凑，2026-10-26）；同规格订单仍相邻 */
   /* 已备餐的行：淡绿底，一眼分辨（不增加行高/版面） */
   .brow.bdone{background:#f3fbf5;border-color:#cfe9d7}
-  /* 抬头栏：标题在左，套餐数在右并排；每排最多 2 个套餐、各套餐不同颜色，归属人订单数跟在第一排两个套餐后（2026-11-13 用户定）
-     ⚠️ static/style.css 有 .card h3{align-items:center;margin-bottom:12px}（特异性 0,1,1），
-        必须用 .card h3.board-h（0,2,1）才盖得住，否则标题会被垂直居中到中间排、第一排套餐飘到标题上方。 */
-  .card h3.board-h{margin-bottom:5px;display:flex;align-items:flex-start;gap:8px;flex-wrap:nowrap}
-  .card h3.board-h .dot{margin-top:6px;flex:0 0 auto}
-  .board-title{font-size:14px;font-weight:700;color:#6b5b4a;flex:0 0 auto;line-height:1.5;white-space:nowrap}
-  /* 单/人数贴标题右侧，不放进套餐排（首排要严格只放 2 个套餐 + 归属，窄屏才不挤） */
-  .board-meta{flex:0 0 auto;line-height:1.5;white-space:nowrap;font-size:12.5px;font-weight:700}
-  .bsum-sep{color:#cdbfae;margin:0 3px;font-weight:400}
-  .board-sum{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
-  .bsum-row{display:flex;align-items:center;flex-wrap:wrap;gap:7px;line-height:1.5;white-space:nowrap}
+  /* 抬头栏（2026-11-14 用户定稿）：
+     ① 第一排严格按「总单数 → 总人数 → 归属人」顺序，套餐不插在这三者中间；
+     ② 套餐排在这三者之后：电脑同排继续往后接，手机独占第二行 → 总高度不超过两排字；
+     ③ 行高/间距压到最小；卡片上内边距 9px，把抬头上方那块留白吃掉。
+     ⚠️ static/style.css 有 .card h3{align-items:center;margin-bottom:12px}（0,1,1），
+        必须用 .card h3.board-h（0,2,1）才盖得住。 */
+  .card h3.board-h{margin:0 0 4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.25}
+  .card h3.board-h .dot{margin-top:0;flex:0 0 auto}
+  .board-title{font-size:14px;font-weight:700;color:#6b5b4a;flex:0 0 auto;line-height:1.25;white-space:nowrap}
+  /* 第一排：总单数 · 总人数 · 归属人（顺序固定） */
+  .board-meta{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;line-height:1.25;white-space:nowrap;font-size:12.5px;font-weight:700}
+  .board-meta .obd{font-size:11px;padding:0 5px;margin-left:2px}
+  .bsum-sep{color:#cdbfae;margin:0 2px;font-weight:400}
+  .board-sum{flex:1 1 auto;min-width:0;display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:6px;line-height:1.25}
   .bsum-cnt{color:#8a7f75;font-weight:700;font-size:12.5px}
   .bsum-ppl{color:#2d6cdf;font-weight:700;font-size:12.5px}
-  .bsum-pkg{font-weight:800;font-size:13px}
-  /* 归属人订单数（孙6 刘6）：彩色小徽标，跟在第一排两个套餐后 */
+  .bsum-pkg{font-weight:800;font-size:13px;white-space:nowrap}
+  /* 手机：套餐独占整行（370px 一次排完 5 个套餐），第一排仍是单/人/归属 */
+  @media(max-width:600px){ .board-sum{flex:0 0 100%;flex-wrap:wrap;gap:5px 8px;margin-top:1px} }
+  /* 抬头上方留白压掉，把内容整体上提 */
+  #boardCard{padding-top:9px}
+  /* 归属人订单数（孙6 刘6）：彩色小徽标，紧跟总人数之后 */
   .obd{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:800;padding:1px 6px;border-radius:6px;margin-left:6px}
   .obd .obd-dot{width:7px;height:7px;border-radius:50%}
   .obd.who-me{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
@@ -1176,31 +1183,23 @@ function renderBoard(orders){
     return (a.id||0)-(b.id||0);
   });
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
-  // ① 单/人数贴标题右侧（独立区，不进套餐排，避免窄屏首排被挤爆）
+  // ① 第一排固定顺序：总单数 → 总人数 → 归属人（用户 2026-11-14 定，套餐不插中间）
   const metaEl=document.getElementById('boardMeta');
+  const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
   if(metaEl){
     let m=`<span class="bsum-cnt">${orders.length}单</span>`;
     if(totalPeople>0) m+=`<span class="bsum-sep">·</span><span class="bsum-ppl">${totalPeople}人</span>`;
+    if(ob) m+=ob;
     metaEl.innerHTML=m;
   }
-  // ② 套餐按「人数上限」归类合计（半包也计入，算份数非搭建）
+  // ② 套餐按「人数上限」归类合计（半包也计入，算份数非搭建），一次排完不切排：
+  //    电脑同排接在归属后，手机由 CSS 让 .board-sum 独占第二行（总高度 ≤ 两排字）
   const pkgMap={};
   orders.forEach(o=>{(o.packages||[]).forEach(p=>{const n=p.people||0,q=p.quantity||1;if(n)pkgMap[n]=(pkgMap[n]||0)+q;});});
   const pkgKeys=Object.keys(pkgMap).map(Number).sort((a,b)=>a-b);
   // 颜色盘：每个套餐一种不同颜色（按人数排序取色，保证稳定不乱跳）
   const palette=['#e67e22','#2d6cdf','#27ae60','#c0392b','#8e44ad','#16a085','#d35400','#2980b9'];
-  const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
-  // 每排封顶 2 个套餐；仅第一排两个套餐后跟归属人订单数
-  let rows=''; let firstRowDone=false;
-  for(let i=0;i<pkgKeys.length;i+=2){
-    let row='';
-    const pair=pkgKeys.slice(i,i+2);
-    pair.forEach((k,idx)=>{ const color=palette[(i+idx)%palette.length]; row+=`<span class="bsum-pkg" style="color:${color}">${k}人餐×${pkgMap[k]}</span>`; });
-    if(!firstRowDone){ if(ob) row+=ob; firstRowDone=true; }   // 归属人订单数跟在第一排两个套餐后
-    rows+=`<div class="bsum-row">${row}</div>`;
-  }
-  if(!pkgKeys.length && ob) rows=`<div class="bsum-row">${ob}</div>`;   // 无套餐记录时至少保留归属
-  sumEl.innerHTML=rows;
+  sumEl.innerHTML=pkgKeys.map((k,i)=>`<span class="bsum-pkg" style="color:${palette[i%palette.length]}">${k}人餐×${pkgMap[k]}</span>`).join('');
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
     return;
@@ -1318,7 +1317,9 @@ function render(){
     if(currentMode==='board'){
       document.getElementById('ordersCard').style.display='none';
       document.getElementById('boardCard').style.display='';
-      document.getElementById('boardSum').textContent='0单';
+      // 第一排按固定顺序：总单数 → 总人数 → 归属人；空单时只有「0单」，套餐区清空、不残留上批数据
+      const _bm=document.getElementById('boardMeta'); if(_bm) _bm.innerHTML='<span class="bsum-cnt">0单</span>';
+      const _bs=document.getElementById('boardSum'); if(_bs) _bs.textContent='';
       document.getElementById('boardList').innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:16px">${emptyHint}</div>`;
     } else {
       document.getElementById('boardCard').style.display='none';

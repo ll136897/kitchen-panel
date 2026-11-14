@@ -287,15 +287,15 @@
 
 ## 变更记录
 
-- 2026-11-13（简略表抬头套餐数 · 定稿）：抬头栏套餐数汇总按「人数上限」归类（如 `3人餐×6`），**与标题并排、不另起一行、不空一行**：`h3.board-h` 用 `display:flex;flex-wrap:nowrap`，左侧 `<span class="board-title">` + `<span id="boardMeta" class="board-meta">`，右侧 `.board-sum` 是竖排容器；利用标题上方原有留白铺开，**不新增上下空间**。每条硬规则：
-  ① **每排封顶 2 个套餐**，多出来的移到下一排（`pkgKeys` 每 2 个切成一条 `.bsum-row`）；
-  ② **各套餐颜色不同**（`palette` 按人数排序取色，橙/蓝/绿/红/紫…），颜色只用于区分规格，不参与业务语义；
-  ③ **归属人订单数（孙6 刘6）紧跟首排两个套餐之后**，用彩色 `.obd` 徽标，且**只在首排**出现一次；
-  ④ **「N单 / N人」放标题右侧独立区 `#boardMeta`**（灰 / 蓝），**不塞进套餐排**——否则窄屏首排会被挤爆、右侧徽标被切；
-  ⑤ 标题仍 14px、`h3` 下边距 5px；无套餐记录时套餐区只保留归属（单/人数仍在 meta 区），不留空行。
-  ⚠️ **CSS 特异性坑**：`static/style.css` 有 `.card h3{display:flex;align-items:center;margin-bottom:12px}`（0,1,1），会盖掉 `.board-h{...}`（0,1,0）——导致标题被垂直居中到中间排、第一排套餐飘到标题上方、`margin-bottom` 变 12px。**必须写成 `.card h3.board-h{...}`（0,2,1）并显式 `align-items:flex-start`**，另给 `.card h3.board-h .dot{margin-top:6px}` 让圆点随首行对齐。
-  实现：`renderBoard` 组装 `#boardMeta` + `.bsum-row` 多行 HTML，CSS `.card h3.board-h/.board-title/.board-meta/.board-sum/.bsum-row/.bsum-*/.obd`；旧的单行 `boardPkgSummary` 已删除（避免两套口径）。
-  ⭐ 实测口径（skill `chrome-headless-ui-diagnose`）：用真实 CSS + 真实生成 HTML 拼静态预览页，`--headless=old --dump-dom` 量数字而非目测截图（截图受 Windows DPI 缩放：给 390 实际 innerWidth≈500，右侧"被裁"是假象）。判据：`bodyScrollW == clientWidth`（无横向溢出）、`titleTop == metaTop == row1Top`（标题/人数/首排同一水平线）、`row1H ≈ 20`（首排未被挤成两行）。本次 390/1280 两档均通过。
+- 2026-11-14（简略表抬头 · **现行定稿**，覆盖 11-13 版）：用户否决"电脑右边空一半 + 手机堆 4 排 + 归属夹在套餐中间"，定三条硬约束：① **第一排严格按「总单数 → 总人数 → 归属人」顺序**，套餐不插在这三者中间；② **上下空间不超过两排字**；③ 行距压到最小、抬头上方那块"还能放一排字"的留白要吃掉。
+  - ⭐ **根因**：不是套餐太多，是**套餐被 flex 挤在标题右边只剩 152px**（真机 390）。让 `.board-sum` 拿到整行宽度就能一排排完 5 个套餐。
+  - **现行结构**：`#boardMeta` 顺序写死 = `<span class="bsum-cnt">N单</span> · <span class="bsum-ppl">N人</span> + ownerBreakdown(孙6 刘6)`；`#boardSum` 只放**全部套餐**（`pkgKeys.map` 一次排完，**不再切每排 2 个**、不再有 `.bsum-row`）。归属由 `renderBoard` 拼进 `#boardMeta`，**不在套餐区**。
+  - **两端布局**：`.card h3.board-h{flex-wrap:wrap;align-items:center;line-height:1.25;gap:6px;margin:0 0 4px}`；`.board-sum{flex:1 1 auto;flex-direction:row;flex-wrap:nowrap;gap:6px}` → **电脑同排**（1 行 18px）；`@media(max-width:600px){.board-sum{flex:0 0 100%;flex-wrap:wrap;gap:5px 8px;margin-top:1px}}` → **手机套餐独占第二行**（2 行 41px）。`#boardCard{padding-top:9px}`（原 18/14）把抬头整体上提，文字离上框 10px。
+  - 套餐仍**每种一色**（`palette` 按人数排序取色），颜色只用于区分规格、不参与业务语义。
+  - **空单兜底**：`renderAll` 里 `!orders.length` 分支必须同时把 `#boardMeta` 置为「0单」、`#boardSum` 清空，否则残留上批数据（旧代码只写 `boardSum.textContent='0单'`，会破坏顺序）。
+  - ⚠️ **CSS 特异性坑（仍在）**：`static/style.css` 的 `.card h3{...margin-bottom:12px}`（0,1,1）会盖掉 `.board-h`（0,1,0），**必须写 `.card h3.board-h`（0,2,1）**。
+  - ⭐ 实测口径（skill `chrome-headless-ui-diagnose`）：用**真实模板抽出的 HTML/CSS/JS** 拼预览，不用手写原型（手写会掩盖真实响应式）；`--headless=old --dump-dom` 量数字，判据 `scrollW<=clientW`、`lines<=2`、`h3H<=42`。本次电脑 1 行 18px / 手机 2 行 41px 均通过。
+  - ⚠️ 教训：**给用户看的原型图若没写进代码、没部署，用户手机上看到的仍是线上旧版**——必须明确告知"线上跑的是哪一版"，别让用户以为改动已生效。
 - 2026-11-13（推送边界补充：远端自动备份含 db 时怎么合并）：`db_backup.py` 的 `auto: backup kitchen.db` 提交会把 `kitchen.db` 推进远端；此时本地 skip-worktree 开启会让 `git merge FETCH_HEAD` 静默中止（报 "local changes to kitchen.db would be overwritten"）。**这与上面「数据库真相源纪律」不冲突**：那条禁的是"把本地过期镜像当真相、据此汇报或主动 push 旧 db"；这里只是合并必需的 dance，且远端那份 db 本身就是线上最新备份。安全流程：① 先 `cp kitchen.db _kitchen.db.bak` 留一份；② `git update-index --no-skip-worktree kitchen.db` → `git checkout -- kitchen.db` → `git merge FETCH_HEAD -X theirs -m "merge 远端自动备份"`；③ **必须验证** `git show HEAD:kitchen.db | md5sum` 与远端最新备份提交的 db md5 一致（本次 `d332428…` 一致，证明没把旧版本推回线上）；④ push 后 `git update-index --skip-worktree kitchen.db` 恢复标记、删备份。另外 github.com:443 间歇不可达，**fetch/push 要重试 2–4 次且不许吞输出**（本次 fetch 第 4 次才通）。
 - 2026-11-13（已出餐标记）：简略表原始录入弹窗加「✅ 出餐」按钮切换 `served`，已出餐整行变灰（`.brow.bserved`）+「✓已出餐」徽标，可撤回；评估双击不稳（单击已弹窗 + 手机 dblclick 不可靠）故用按钮。实现：`rawToggleServed/renderRawServeBtn`（走 `/api/prep/board-flag`）。
 - 2026-11-13（简略表点单弹原始录入）：简略表订单行由「点开跳整页备餐明细」改为**直接弹窗显示该单原始录入原文**（`own_raw_text`，不跳页）；弹窗底部保留「看这单备餐明细」按钮可下钻。实现：`showRaw/closeRaw/rawToFocus` + `#rawMask/#rawSheet`。
