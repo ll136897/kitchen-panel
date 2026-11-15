@@ -666,6 +666,39 @@ def _parse_extra_ingredients(note):
             # 工具/耗材整段跳过（交由 _parse_extra_tools 处理）
             if any(kw in seg for kw in TOOL_NAME_KW):
                 continue
+            # ⭐ 赠送菜（2026-11-15 修，398 吕女士「送五花和松板」引出）：
+            #   「送/赠送/多送 + 菜品」是免费送给客户、但**仍要备货**的菜，按加菜(add)计入备餐与成本。
+            #   ⚠️「送餐/送到/送回/送上门/送滴滴/送游客中心」是物流语义，绝不能当菜；
+            #      装备耗材（送3罐气、送两张一次性桌布、送一个夹子）交由 extra_tools，不在这里收。
+            gm = re.match(r"^(?:多送|赠送|送)\s*(.+)$", seg)
+            if gm:
+                rest = gm.group(1).strip()
+                if not rest or any(k in rest for k in ("餐", "到", "回", "上门", "滴滴", "游客",
+                                                       "货", "地址", "位置")):
+                    continue
+                # 「和」连接两样菜：送五花和松板 → 五花 + 松板。
+                # 仅当「和」两边都是 ≥2 字的菜名才拆，避免把「和牛」这类菜名切坏。
+                if re.match(r"^[\u4e00-\u9fa5]{2,}和[\u4e00-\u9fa5]{2,}", rest):
+                    parts = re.split(r"和", rest)
+                else:
+                    parts = re.split(r"[、,，+]", rest)
+                for gp in parts:
+                    gp = gp.strip()
+                    if not gp:
+                        continue
+                    mm = RE0.match(gp)          # 送2份五花 / 送一个五花肉：带数量词
+                    if mm:
+                        gname, gn = mm.group(2), _num_from_str(mm.group(1))
+                    else:
+                        gname, gn = gp, 1
+                    gname = re.sub(r"^(?:个|份|盘|把|只|条|块|串|袋|瓶|盒)+", "", gname).strip()
+                    if not _is_pure_dish(gname):
+                        continue
+                    if any(kw in gname for kw in ("夹", "剪", "炉", "盘", "罐", "桌", "椅", "天幕",
+                                                  "餐具", "筷", "勺", "杯", "纸巾", "桌布", "气")):
+                        continue
+                    results.append({"name": gname, "qty": gn or 1, "mode": "add"})
+                continue
             mode = _detect_mode(seg)
             # ⚠️ 集体份数「各X份」或子句含增量词(加/多加/再加/多X) → 整句都按「增量(add)」。
             # 吴先生单(372)「各一份」四项都加；王睿先生单(367)「加4份A、1份B、3份C…」整条都加。
@@ -781,6 +814,12 @@ def _parse_dish_swaps(note):
             continue
 
         left, right = m.group(1).strip(), m.group(2).strip()
+        # ⭐ 备注常用空格分隔两件事（398「送五花和松板 鸡尖换蔬菜」）：
+        #    换菜的 from 只取紧邻「换」字的最后一段，前面是赠送/装备子句，交给各自解析器。
+        #    否则会把「送五花和松板 鸡尖」整段当成换出项，换菜与加菜一起失效。
+        #    并列 from 仍按顿号/逗号（原口径），空格不用于并列。
+        if re.search(r"\s", left):
+            left = re.split(r"\s+", left)[-1]
         # 去掉"不要/把"等前缀
         left = re.sub(r"^(?:不要了|不要|去掉|不加|没有|无|把)\s*", "", left).strip()
         if not left and pending_src:
