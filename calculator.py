@@ -300,6 +300,31 @@ def parse_time_str(t):
     return h, mi
 
 
+def norm_order_time(*vals):
+    """把订单时间字段归一成标准 'HH:MM'（简略表分档/排序/提前量的唯一口径）。
+
+    背景（2026-11-15 修）：前端 boardTime 原来只认冒号 HH:MM，而实际录单习惯是
+    '12.30' / '16.00' / '晚上6点' 等写法；358 单里 342 单非冒号 → 几乎全被判
+    「时间未定」，导致：① 分档错乱（某档只剩 1 单 → 双列网格右边空格、下一档
+    另起一行又冒一个单子）② 外地提前 1 小时送餐不生效 ③ 按原文字符串排序乱序
+    （'9.00' 排到 '15:00' 后面）。
+    本函数复用现成的 parse_time_str 一次归一，由接口随订单一起返回 time_std；
+    前端只读这个字段、不再自己解析原文，解析口径只此一处（LOGIC.md 单一真相源）。
+    按传入顺序取第一个可解析的值（meal_time 优先、booking_time 兜底）；
+    全部无法解析时返回 '' → 前端回退原文，仍归「时间未定」，保持原行为。
+    """
+    for v in vals:
+        if v is None or str(v).strip() == "":
+            continue
+        try:
+            p = parse_time_str(v)
+        except Exception:
+            p = None
+        if p:
+            return "%02d:%02d" % (p[0], p[1])
+    return ""
+
+
 def calc_prep_urgency(order):
     """根据订单日期 + 用餐时间计算备餐紧迫性。
     返回 {level: 'normal'|'soon'|'overdue'|'past'|'future', minutes_to_prep: int|None, label: str}
@@ -1408,6 +1433,8 @@ def calc_merged_prep(order_ids):
                 o["addr_group"] = o.get("address") or "未填地点"
                 o["addr_main"] = o.get("address") or "未填地点"
                 o["addr_detail"] = ""
+            # 标准时间：分档/排序/提前量统一口径（见 norm_order_time），前端只读 time_std
+            o["time_std"] = norm_order_time(o.get("meal_time"), o.get("booking_time"))
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 

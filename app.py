@@ -1995,8 +1995,12 @@ def list_orders():
     orders = [dict(r) for r in cur.fetchall()]
     # 地址归一：给每单算出"归到哪个地方"（青龙湖二期 → 青龙湖）。
     # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
+    # 标准时间：与简略表共用 calculator.norm_order_time 一个口径，订单页排序/显示
+    # 不再吃「12.30」「16.00」这类点号写法的亏（2026-11-15 修）。
+    from calculator import norm_order_time as _norm_time
     for o in orders:
         o["address_key"] = canonical_address(o.get("address"))
+        o["time_std"] = _norm_time(o.get("meal_time"), o.get("booking_time"))
     # 加套餐明细；同时按"价格"推导 搭建（手工填过 setup_flag 的优先，否则用和销售流水表一致的规则）
     for o in orders:
         cur.execute("""

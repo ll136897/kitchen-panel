@@ -635,7 +635,7 @@ function localToday(){
   return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
 }
 // 出餐时间：订单时间与用餐时间视为同一个，只取一个显示（用餐 > 预约 > 收餐）
-function orderTimeOf(o){ return ((o&&(o.meal_time||o.booking_time||o.pickup_time))||'').trim(); }
+function orderTimeOf(o){ return (((o && (o.time_std || o.meal_time || o.booking_time || o.pickup_time)) || '')+'').trim(); }
 
 // 用浏览器本地日期做初始值（仅占位，loadPrepDates 会按后端"今天"修正）
 document.getElementById('datePick').value = localToday();
@@ -834,7 +834,9 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-function prepCacheKey(d){ return 'prep_cache_' + d; }
+// v2（2026-11-15）：订单开始带 time_std，旧缓存不含该字段会回退原文 → 分档又变回错的。
+// 换 key 让旧缓存自然失效，避免部署后第一次打开还短暂显示旧版「空格/孤单一单」。
+function prepCacheKey(d){ return 'prep_cache_v2_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1077,7 +1079,9 @@ function urgBadge(u){
 }
 
 // ===== 简略备餐表（白板式）：按 时间/套餐/地点/出餐/送达 分组，送/出 直接打勾 =====
-function boardTime(o){ return ((o.meal_time||o.booking_time||'')+'').trim(); }
+// 时间统一读后端归一后的标准字段 time_std（HH:MM，见 calculator.norm_order_time）。
+// 老缓存/其它数据源没有该字段时才回退原文，避免旧数据直接崩或又走回只认冒号的老路。
+function boardTime(o){ return (((o && (o.time_std || o.meal_time || o.booking_time)) || '')+'').trim(); }
 // 套餐简略格式：所有套餐的区间档（如 2-3人餐）都取「人数上限」显示「3人餐」。
 // 单套餐：直接缩写；混单（多套餐）：每个照样缩写，但按「搭建 / 非搭建」分组，避免看不清哪份要搭建。
 function pkgShort(name){
