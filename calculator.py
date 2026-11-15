@@ -586,14 +586,48 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
         ing_demand[_iid]["total"] += _q
         ing_demand[_iid]["cost_only"] = False
 
+    def _set_ut(_iid, _q):
+        """把某项餐具的总量**覆盖**成客户确定的数量（不是累加）。"""
+        if not _iid or not _q or _q <= 0:
+            return
+        if _iid not in ing_demand:
+            ing_demand[_iid] = {"total": 0, "per_package": 1, "order_qty": 0,
+                                "portion_count": 1, "total_portions": 0, "cost_only": False}
+        ing_demand[_iid]["total"] = _q
+        ing_demand[_iid]["cost_only"] = False
+
     if note_now:
         from parser import _num_from_str as _nfs
-        # ① 通用「多加/加 N 套餐具(份餐具)」→ 默认 3 项各 +N
-        _m = re.search(r"(\d+|[一二两三四五六七八九十]+)\s*[套份]\s*餐\s*具", note_now)
-        if _m:
-            _n = _nfs(_m.group(1)) or 0
-            for _nm in _EXTRA_DEFAULT:
-                _add_ut(_ut_by_name.get(_nm), _n)
+        # ① 客户在备注里明确报了餐具数量 → **以客户确定的数量为准（覆盖套餐默认配量）**
+        #    用户 2026-11-15 定：套餐默认多备 2 个是商家自己防意外的兜底；客户一旦主动报了数，
+        #    就按客户那个数备，不再叠加兜底（客户已确认数量，后续损耗与商家无关）。
+        #    两种写法分别处理：
+        #      · 增量「多拿/多加/多要/加 N 套餐具」→ 目标 = 本单总人数 + N（6人餐多拿4套 → 10）
+        #      · 总数「N 份/套 餐具」              → 目标 = N（10人餐"14份餐具" → 14，不再 10+14=24）
+        #    默认 3 项（三格底料盒/筷子/纸杯）统一设为目标值；勺子/纸巾等仍由 ② 单独点名才加。
+        _N = r"(\d+|[一二两三四五六七八九十]+)"
+        # 兼容录单里的各种写法：4套餐具 / 14份餐具 / 4副餐具 / 6个餐具 / 11餐具 / 餐具11
+        _m_any = re.search(_N + r"\s*[套份副个]?\s*餐\s*具", note_now) or \
+                 re.search(r"餐\s*具\s*" + _N, note_now)
+        if _m_any:
+            _inc = (re.search(r"(多拿|多加|多要|加)\s*" + _N + r"\s*[套份副个]?\s*餐\s*具", note_now)
+                    or re.search(r"餐\s*具\s*(?:多拿|多加|多要|加)\s*" + _N, note_now))
+            _n = _nfs(_inc.group(2) if _inc else _m_any.group(1)) or 0
+            if _inc:
+                # 本单总人数：优先用已预取的套餐数据，取不到再按订单查一次
+                _ppl = sum((p.get("people") or 0) * (p.get("quantity") or 1) for p in pkgs)
+                if _ppl <= 0:
+                    with get_db() as _c2:
+                        _row = _c2.execute(
+                            "SELECT COALESCE(SUM(people*quantity),0) AS p FROM order_packages WHERE order_id=?",
+                            (order_id,)).fetchone()
+                        _ppl = (_row["p"] if _row else 0) or 0
+                _target = _ppl + _n
+            else:
+                _target = _n
+            if _target > 0:
+                for _nm in _EXTRA_DEFAULT:
+                    _set_ut(_ut_by_name.get(_nm), _target)
         # ② 单独点名的餐具/耗材（"加2把勺子""纸巾1包"…）→ 按名字 +数量（长名优先防重复命中）
         _aliases = [("三格蘸碟", "三格底料盒"), ("三格碟", "三格底料盒"), ("蘸碟", "三格底料盒"),
                     ("三格底料盒", "三格底料盒"), ("塑料勺", "勺子"), ("勺子", "勺子"),
