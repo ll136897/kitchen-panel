@@ -103,19 +103,21 @@ def check_git():
     else:
         ok("工作区干净")
     head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    ls_remote = run(["git", "ls-remote", "origin", "main"]).stdout.split()
-    if not ls_remote:
-        # GitHub:443 间歇不可达时 ls-remote 返回空——以前这里 split()[0] 直接 IndexError 崩掉，
-        # 现在干净地判 ❌（没确认推上去就不许部署），并提示重试
-        bad("本地提交都已在远端", "无法确认：git ls-remote 无返回（GitHub 网络不通？稍后重跑本脚本）")
-        return
+    # ⚠️ 2026-11-15 修：去掉单独的 `git ls-remote` 网络探测。
+    #    GitHub:443 会间歇性返回空，推送明明成功却报「ls-remote 无返回」的假红灯；
+    #    而下面的 fetch 本身就会验证网络，多一次往返只会制造误报。
     # ⚠️ 保活脚本(db_backup.py)会持续推 kitchen.db 备份，远端 main 一直在前进。
     #    不能用 ls-remote 拿到的裸 sha 做 merge-base：那个 commit 对象本地还没 fetch 到，
     #    merge-base 直接返回非 0 → 误判"没推上去"（我的代码其实早就在远端历史里）。
-    #    正确口径：判断"本地 HEAD 是否已在远端 main 的历史里"，用 fetch 后的 origin/main。
+    #    正确口径：判断"本地 HEAD 是否已在远端 main 的历史里"。
     f = run(["git", "fetch", "origin", "main"])
+    # GitHub 网络间歇不可达 → fetch 重试 2 次再判失败（记忆里的老坑）
+    for _ in range(2):
+        if f.returncode == 0:
+            break
+        f = run(["git", "fetch", "origin", "main"])
     if f.returncode != 0:
-        bad("本地提交都已在远端", "无法确认：git fetch origin main 失败（稍后重跑本脚本）")
+        bad("本地提交都已在远端", "无法确认：git fetch origin main 连试 3 次都失败（稍后重跑本脚本）")
         return
     # `git fetch origin main` 只写 FETCH_HEAD（不会更新 origin/main 这个 tracking ref），
     # 所以必须用 FETCH_HEAD 做祖先判断；用 origin/main 会读到陈旧值。
