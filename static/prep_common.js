@@ -140,9 +140,9 @@
       });
     });
 
-    var toolRows = tools.map(function (t) {
-      return '<tr><td style="text-align:left">' + escHtml(t.name) + '</td>' +
-        '<td style="text-align:center;font-weight:700">' + t.need + '</td>' +
+  var toolRows = tools.map(function (t) {
+    return '<tr><td style="text-align:left">' + escHtml(t.name) + toolExtraBadge(t) + '</td>' +
+      '<td style="text-align:center;font-weight:700">' + t.need + '</td>' +
         '<td style="text-align:center">' + t.stock + '</td>' +
         '<td style="text-align:center" class="' + (t.shortage > 0 ? 'txt-red' : '') + '">' + (t.shortage > 0 ? t.shortage : '✓') + '</td></tr>';
     }).join('');
@@ -163,6 +163,16 @@
     html += '<div style="margin-top:10px;font-size:12px;color:var(--muted)">🔴 换出 = 被换掉的菜（不再备）；🟢 换入 = 换进来的菜。核对无误可去备餐页整体勾选。</div>';
     if (opts.footer) html += opts.footer;
     return html;
+  }
+
+  // ⭐ 备注真追加装备的徽标（2026-11-15）：「+2把椅子/加2把椅子/多2个天幕」是套餐配量上真加，
+  //    数量会变多（椅子6→8），标「➕加N」说明来源，与餐具「按客户报数覆盖」（📋）区分。
+  //    紧凑内联、不换行、不撑高行，与加菜徽标同款样式；口径只此一处，三处渲染共用。
+  //    ⚠️ 必须定义在 renderPrepTable 之外（IIFE 顶层）——window 导出语句在外层，嵌套在函数体里会 ReferenceError。
+  function toolExtraBadge(t) {
+    if (!(t && t.extra_added)) return '';
+    var n = Number(t.extra_qty) || 1;
+    return ' <span title="备注追加装备 ' + n + '（在套餐配量上加的）" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加' + n + '</span>';
   }
 
   // ⭐ 客户报餐具数的徽标（2026-11-15）：餐具数量是「按客户报的数覆盖套餐配量」，
@@ -189,6 +199,7 @@
     return ' <span title="' + tip + '" style="display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">' + txt + '</span>';
   }
 
+  window.toolExtraBadge = toolExtraBadge;
   window.utBadgeText = utBadgeText;
   window.utBadge = utBadge;
   window.renderPrepTable = renderPrepTable;

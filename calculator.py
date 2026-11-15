@@ -145,6 +145,11 @@ def calc_order_tool_needs(order_id, only_setup=False):
                 tool_demand[tid]["total"] = qty
             else:
                 tool_demand[tid]["total"] += qty
+                # ⭐ 2026-11-15：备注「+2把椅子/加2把椅子/多2个天幕」这种**真追加**（mode=add），
+                #   打标记让备餐表显示「➕加N」——不然数量从6变8却看不出原因（388 引出）。
+                #   与餐具「按客户报数覆盖」（📋）区分：这是套餐配量上真加，复用加菜口径。
+                tool_demand[tid]["extra_added"] = True
+                tool_demand[tid]["extra_qty"] = tool_demand[tid].get("extra_qty", 0) + qty
             tool_demand[tid]["per_package"] = qty
     return tool_demand
 
@@ -802,6 +807,8 @@ def calc_order_requirements(order_id):
                     "warning": avail <= (r["threshold"] or 0),
                     "per_package": info["per_package"],
                     "order_qty": info["order_qty"],
+                    "extra_added": bool(info.get("extra_added")),
+                    "extra_qty": round(info.get("extra_qty", 0), 2),
                 })
 
         cur.execute("SELECT id, name, stock, threshold FROM tools")
@@ -1637,11 +1644,17 @@ def calc_merged_prep(order_ids):
                     "per_package_samples": [], "total_packages": 0,
                     # 物理库存（未扣占用）；合并后用于还原"本批自己占掉的那部分"，避免假缺口
                     "total_stock": tl.get("total_stock", tl["stock"]),
+                    # 备注真追加装备（+2把椅子）：合并后若所有来源单都追加且同数 → 显示「➕加N」，混合则不加标
+                    "tool_extra_qtys": [],
+                    "tool_extra_order_ids": [],
                 }
             tool_merge[key]["total"] += tl["need"]
             tool_merge[key]["order_ids"].append(o["id"])
             tool_merge[key]["per_package_samples"].append((tl.get("per_package"), tl.get("order_qty", 1)))
             tool_merge[key]["total_packages"] += tl.get("order_qty", 1)
+            if tl.get("extra_added"):
+                tool_merge[key]["tool_extra_qtys"].append(tl.get("extra_qty") or 0)
+                tool_merge[key]["tool_extra_order_ids"].append(o["id"])
             detail_keys.append((o["id"], "tool", tl["id"]))
 
     # 补全食材 category + 细分 meat + 合并小料类
@@ -1701,6 +1714,14 @@ def calc_merged_prep(order_ids):
         if _total_stock is not None:
             v["stock"] = min(_total_stock, (v["stock"] or 0) + (v["total"] or 0))
         v["shortage"] = max(0, v["total"] - v["stock"])
+        # ⭐ 合并后「➕加N」标记：所有来源单都追加了同一数量 → 显示具体数；混合/部分追加 → 不加标，避免误导
+        _eq = set(v.get("tool_extra_qtys") or [])
+        if _eq and len(_eq) == 1 and len(v.get("tool_extra_order_ids") or []) == len(v["order_ids"]):
+            v["extra_added"] = True
+            v["extra_qty"] = next(iter(_eq))
+        else:
+            v["extra_added"] = False
+            v["extra_qty"] = 0
 
     # 勾选状态：从 prep_checklist 查，某合并项只有当所有相关 order 的该 item 都勾了才算勾
     checked_map = {}

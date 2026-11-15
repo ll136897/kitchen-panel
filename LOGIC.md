@@ -196,6 +196,22 @@
     全库 358 单回归 0 异常（342 无餐具备注 + 15 total + 1 inc，265 语义模糊不命中）；
     388+406 混合时 `ut_mode=''` →「📋按客户数」；node 实测三种文案全对、renderPrepTable 输出含徽标。
   - ⚠️ 缓存 key 同步换 `prep_cache_v6_`（v5 缓存无 `ut_mode/ut_inc` → 增量写法显示不出「多拿N套」）。
+- ⭐ **备注真追加装备（工具）也标「➕加N」（2026-11-15 修，388「+2把椅子」引出）**：
+  备注 `+2把椅子/加2把椅子/多2个天幕`（`_parse_extra_tools` mode='add'）是**套餐配量上真追加**（6人餐椅子 6→8），
+  但工具行从没打过标记，数量变了看不出原因。显示「➕加2」（橙色，与加菜徽标同款）。
+  - **语义三分**（与加菜/餐具互斥不混）：① 食材加菜 → `➕加N份`；② 备注真追加装备（mode=add）→ `➕加N`（不带量词，
+    量词已在单位列显示：椅子=把、天幕=顶）；③ 餐具按客户报数覆盖 → `📋多拿N套`/`📋报N份`/`📋按客户数`。
+    mode='set'（"2把椅子"没写加/多 = 总数设定）**不打**加标。
+  - **实现**：`calc_order_tool_needs` mode=add 分支打 `extra_added/extra_qty` → `calc_order_requirements` tools_result 透传 →
+    `calc_merged_prep` tool_merge 收集 `tool_extra_qtys/tool_extra_order_ids`（所有来源单都追加且同数才置标记，混合不加标防误导）；
+    文案函数 `static/prep_common.js` 的 `window.toolExtraBadge()` **一处定义**，`renderPrepTable` toolRows 与 `prep.html`
+    `itemRow`（isTool 分支）/ os-row（cat==='tool' 分支）共用；紧凑内联样式、不加列不加行。
+    ⚠️ **该函数必须定义在 `renderPrepTable` 之外（IIFE 顶层）**——window 导出在外层，嵌套在函数体里会 ReferenceError（第一版踩过）。
+  - **验证**：388 椅子 `extra_added=True/extra_qty=2`、合并级一致；混合 [388+265] 不加标；
+    全库 358 单回归 **14 单**带标（椅子+2×6 / 椅子+1×5 / 椅子+3×1 / 蛋卷桌+1 / 卡式炉+1），set 写法（329 等）0 误标、0 异常；
+    真实 renderPrepTable 渲染「椅子 ➕加2 需求8」截图确认，utBadge 等原有导出不受影响。
+  - ⚠️ 缓存 key 同步换 `prep_cache_v7_`（v6 缓存的工具无 `extra_added/extra_qty` → 「➕加2」不显示）。
+    dashboard 的 tool_panel 是全工具聚合视图（非某单明细），不显示单单追加标记，属有意为之。
 - ⭐ **装备占用默认已解除（2026-11-13 用户定）**：`get_tool_reserved()` 先读 `settings.tool_reserve_enabled`，
   缺省 `"0"`（关闭）→ 返回 `{}` → **库存=实际库存**，不扣"未完成订单占用"。
   原因：用户没有"归还装备点入库"的习惯，未完成订单会一直占着装备，把可用库存算得比实际少、误导判断。
@@ -353,6 +369,7 @@
     - v4：订单新增 `raw_changes / extra_qty / swap_qty / swap_out_qty`，v3 缓存里没有 → 徽标份数会兜底成 1、原单弹窗也没有「后来改过什么」标注。
     - v5：订单/食材新增 `ut_specified / ut_specified_exact`，v4 缓存里没有 → 客户报餐具数的「📋报N份」标识不显示（406 付先生「餐具11」引出的漏标）。
     - v6：订单/食材新增 `ut_mode / ut_inc`（增量/总数写法），v5 缓存里没有 → 「多拿4套餐具」显示不出「📋多拿4套」、仍是旧「📋报10份」（388 杨女士引出：要能看出相较原数量加了多少）。
+    - v7：工具新增 `extra_added / extra_qty`（备注真追加装备），v6 缓存里没有 → 「+2把椅子」的「➕加2」不显示（388 引出）。
 - 单一真相源：`prep.html` 的 `boardPrepTime / boardTimeSlot / boardSpecKey`；
   改档位边界或提前量只改这几处。**这是简略表唯一的分组逻辑**——2026-10-25 按用户
   「去掉筛选项，更精简」的要求，原分组切换 chips（时间/套餐/地点/出餐/送达）连同

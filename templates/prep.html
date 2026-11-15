@@ -838,11 +838,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v6（2026-11-15）：v5 存的数据没有 ut_mode/ut_inc → 增量写法（多拿4套餐具）无法显示
-// 「📋多拿4套」，只会显示旧的「📋报10份」（388 杨女士引出：要能看出加了多少）。
+// v7（2026-11-15）：v6 存的订单/工具没有 extra_added/extra_qty（工具行）→ 备注「+2把椅子」的
+// 「➕加2」标识不显示（388 引出：椅子数量从6变8却看不出原因）。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
-// v5 起因：ut_specified 餐具标识；v4 起因：补 raw_changes / swap_qty；v3 起因：赠送菜解析；v2 起因：订单开始带 time_std。
-function prepCacheKey(d){ return 'prep_cache_v6_' + d; }
+// v6 起因：ut_mode/ut_inc 餐具增量标识；v5 起因：ut_specified 餐具标识；v4 起因：补 raw_changes / swap_qty；v3 起因：赠送菜解析；v2 起因：订单开始带 time_std。
+function prepCacheKey(d){ return 'prep_cache_v7_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1495,7 +1495,7 @@ function itemRow(it, type, checkedMap){
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':''}${typeof utBadge==='function'?utBadge(it):''}</div>
+    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${isTool?'':(it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':'')}${isTool&&typeof toolExtraBadge==='function'?toolExtraBadge(it):''}${typeof utBadge==='function'?utBadge(it):''}</div>
     <div class="pr-ord">${totPkg}</div>
     <div class="pr-per">${perSize||'—'}</div>
     <div class="pr-unit">${unit}</div>
@@ -1701,7 +1701,7 @@ function osRenderList(oid){
   }
   if((r.tools||[]).length){
     byCat['tool'] = r.tools.map(it=>({name:it.name, unit:TOOL_UNIT[it.name]||'个',
-      need:it.need, shortage:it.shortage}));
+      need:it.need, shortage:it.shortage, extra_added:it.extra_added, extra_qty:it.extra_qty}));
   }
   let html = '';
   for(const cat of CAT_ORDER){
@@ -1715,7 +1715,10 @@ function osRenderList(oid){
     html += `<div class="os-cat">${CAT_LABEL[cat]||cat}</div>` + items.map(it=>{
       const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
       const sw = it.swapped_in ? ' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>' : '';
-      const ex = it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '';
+      const isToolRow = cat==='tool';
+      const ex = isToolRow
+        ? (typeof toolExtraBadge==='function'?toolExtraBadge(it):'')
+        : (it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '');
       return `<div class="os-row"><span class="nm">${it.name}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
              `<span class="qt">${osQty(it)}${short}</span></div>`;
     }).join('');
