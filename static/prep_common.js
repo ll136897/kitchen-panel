@@ -168,14 +168,28 @@
   // ⭐ 客户报餐具数的徽标（2026-11-15）：餐具数量是「按客户报的数覆盖套餐配量」，
   //    不是「加 N 份」，所以另用一个图标 + 文案，三处共用渲染都调这个函数，口径只此一处。
   //    紧凑内联样式与加菜/换菜徽标一致：不换行、不撑高行、不新增版面。
-  function utBadge(i) {
+  //    ⭐ 文案分两种写法（用户定：只显示最终数看不出加了多少）：
+  //      增量（多拿4套餐具）→「📋多拿4套」＝显示相较原数量的增量，与备注原文对得上；
+  //      总数（餐具11/14份餐具）→「📋报11份」＝客户报的就是最终数；
+  //      多单混合（写法不同/增量不同）→「📋按客户数」兜底。
+  function utBadgeText(i) {
     var n = Number((i && i.ut_specified) || 0);
     if (!n) return '';
     var exact = (i.ut_specified_exact === undefined) ? true : !!i.ut_specified_exact;
-    var txt = exact ? ('📋报' + n + '份') : '📋按客户数';
-    return ' <span title="备注报了餐具数：按客户确定的数量备，不再叠加商家兜底" style="display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">' + txt + '</span>';
+    if (!exact) return '📋按客户数';
+    if (i.ut_mode === 'inc' && Number(i.ut_inc) > 0) return '📋多拿' + Number(i.ut_inc) + '套';
+    return '📋报' + n + '份';
+  }
+  function utBadge(i) {
+    var txt = utBadgeText(i);
+    if (!txt) return '';
+    var tip = (i && i.ut_mode === 'inc')
+      ? '备注写的是「多拿N套餐具」：三项统一按 人数+N 备（覆盖套餐原配量），徽标显示的是增量'
+      : '备注报了餐具数：按客户确定的数量备，不再叠加商家兜底';
+    return ' <span title="' + tip + '" style="display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">' + txt + '</span>';
   }
 
+  window.utBadgeText = utBadgeText;
   window.utBadge = utBadge;
   window.renderPrepTable = renderPrepTable;
 })();

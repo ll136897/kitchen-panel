@@ -838,11 +838,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v5（2026-11-15）：v4 存的订单/食材没有 ut_specified 字段 → 部署后第一次打开
-// 「餐具11」这类客户报数依然没有「📋报N份」标识（406 付先生引出的漏标）。
+// v6（2026-11-15）：v5 存的数据没有 ut_mode/ut_inc → 增量写法（多拿4套餐具）无法显示
+// 「📋多拿4套」，只会显示旧的「📋报10份」（388 杨女士引出：要能看出加了多少）。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
-// v4 起因：补 raw_changes / swap_qty；v3 起因：赠送菜解析；v2 起因：订单开始带 time_std。
-function prepCacheKey(d){ return 'prep_cache_v5_' + d; }
+// v5 起因：ut_specified 餐具标识；v4 起因：补 raw_changes / swap_qty；v3 起因：赠送菜解析；v2 起因：订单开始带 time_std。
+function prepCacheKey(d){ return 'prep_cache_v6_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1282,7 +1282,12 @@ function renderBoard(orders){
     const done = !!o.status && o.status !== 'pending';
     const served = !!o.served;              // 已出餐（原始录入弹窗里的「出餐」按钮切换）
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
-    const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'') + (o.ut_specified?' 📋报'+o.ut_specified+'份':'');
+    // ⭐ 餐具徽标文案与备餐表共用 utBadgeText（口径只此一处）：
+    //    增量写法「多拿4套」→ 📋多拿4套；总数写法 → 📋报N份；函数缺失兜底旧文案
+    const utTag = o.ut_specified
+      ? ((typeof utBadgeText === 'function') ? utBadgeText(o) : ('📋报' + o.ut_specified + '份'))
+      : '';
+    const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'') + (utTag?' '+utTag:'');
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
     const whoHtml = (who&&who!=='未标注')
       ? `<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>` : '';
