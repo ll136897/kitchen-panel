@@ -127,6 +127,9 @@
   `matched_id=None` 的占位，录入预览页显示「⚠️ 未匹配到数据库」提示人工写具体菜名 —— **不猜、不静默吞**。
   ⑤ 别名靠包含匹配：`五花`→`精选五花肉薄切`(180g/份)、`松板`→`原切松板肉`(150g/份)、`小香猪`→`沙葱小香猪`(180g/份)。
   全库回归（改动前 parser 逐单对比）：358 单里只有 4 单加菜变化，全是真赠送菜；其余 354 单解析结果完全不动。
+- ⭐ **备餐表要能看出「加菜 / 赠送」来源（2026-11-15 修，398 吕女士二次反馈引出）**：备注加菜把 `need` 从 180 克加到 360 克，但表格只显示数字、没有来源标记，用户看不出多备的量是客户要的 → 会误判成「备注没解析到」（数据其实早就算对了：`calc_merged_prep([398])` 返回 360 / 300 克、`has_extra=True`）。
+  现 `calc_order_ingredient_net` 给命中加菜的食材打 `extra_added=True` + `extra_qty`，经 `calc_order_requirements` / `calc_merged_prep` 透传；三处共用渲染在食材名后加「➕加菜」小徽标（`title` 写明追加份数）：`static/prep_common.js` renderPrepTable、`prep.html` itemRow（`pr-name`）、`prep.html` catBlock（`os-row`）。**只加徽标、不动行列数**（遵守「加维度不加版面」），不改任何计算量与成本口径。
+  ⚠️ 与「缓存 key 铁律」是同一件事的两面：光改计算层不换 `prepCacheKey`，页面仍先用旧缓存撑画面 → 看起来还是没生效。
 - ⭐ **换菜 from 只取紧邻「换」字的最后一段（2026-11-15 修）**：备注常用**空格**分隔两件事
   （398 `送五花和松板 鸡尖换蔬菜`），旧 `_parse_dish_swaps` 按句切分不认空格，把整段
   `送五花和松板 鸡尖` 当成换出项 → 换菜与加菜一起失效。现对 `left` 取 `re.split(r"\s+", left)[-1]`；
@@ -309,7 +312,9 @@
 - **已出餐标记（2026-11-13 用户定）**：原始录入弹窗底部「✅ 出餐」按钮切换 `orders.served`（走 `/api/prep/board-flag`，flag=`served`）；**已出餐的简略表行整行变灰**（`.brow.bserved` + 文字淡化）+ 姓名行加「✓已出餐」徽标，按钮变「↩️ 撤回出餐」。**不用双击**：单击已绑定"弹原文"，双击第一下就弹窗、遮罩挡住第二下，且手机 `dblclick` 不可靠（常被当缩放）——故改用弹窗内按钮。
 - ⭐⭐ **订单时间唯一口径 = 后端 `time_std`（2026-11-15 修）**：实际录单习惯是 `12.30` / `16.00` / `晚上6点`，而旧 `boardTime` 只认冒号 `HH:MM`（且优先取 `meal_time`）→ 358 单里 342 单被判「时间未定」，造成三处连带错误：① **分档错乱**（某档只剩 1 单 → 固定双列网格右边空一格，下一档另起一行又冒出一个孤零零单子，即 11-14「张先生右边空一格」）；② **外地提前 1 小时送餐不生效**（`boardPrepTime` 解析失败直接原文返回，减不了 60 分钟）；③ **按原文字符串排序乱序**（`9.00` 排在 `15:00` 后面）。
   修法：`calculator.norm_order_time()` 复用现成 `parse_time_str` 一次归一成 `HH:MM`，由 `calc_merged_prep`（简略表）和 `app.list_orders`（订单页）随单返回 `time_std`；前端 `boardTime` / `orderTimeOf` **优先读 `time_std`**，仅在老缓存/其它数据源没有该字段时回退原文。**解析口径只此一处，禁止在前端另写一套时间解析**（历史上各页各算各的吃过亏）。无法解析（真没写时间）返回 `''` → 回退原文、仍归「时间未定」，保持原行为。不动数据库，全库下次打开自动生效。
-  ⚠️ **缓存连带**：`prepCacheKey` 已换 `prep_cache_v2_`；旧缓存不含 `time_std`，不换 key 会回退点号原文，部署后第一次打开仍会短暂显示旧分档。以后凡给订单加"影响分档/排序"的字段，都要同步换缓存 key。
+  ⚠️ **缓存连带（铁律，2026-11-15 补）**：`prepCacheKey` 现为 `prep_cache_v3_`。备餐页打开时**先用 localStorage 缓存撑画面、再 fetch 覆盖**，所以凡是改了「影响备餐明细内容 / 分档 / 排序」的字段或解析规则，**都必须同步换缓存 key**，否则部署后旧数据会盖住新结果、看起来像"改了没生效"。
+    - v2：订单开始带 `time_std`，旧缓存不含该字段 → 回退点号原文、仍显示旧分档。
+    - v3：备注「送五花和松板」开始解析成加菜，v2 缓存里还是五花 180 克 / 松板 150 克 / 无「➕加菜」徽标 → 部署后用户看到旧值，正是 11-15 报的「吕女士备注还是没显示」。
 - 单一真相源：`prep.html` 的 `boardPrepTime / boardTimeSlot / boardSpecKey`；
   改档位边界或提前量只改这几处。**这是简略表唯一的分组逻辑**——2026-10-25 按用户
   「去掉筛选项，更精简」的要求，原分组切换 chips（时间/套餐/地点/出餐/送达）连同
@@ -562,6 +567,11 @@
     4. **实施位置（唯一真相源）**：返回键固定在公共顶栏 `topbar.html` 最左侧（`← 返回` 按钮，JS：`history.length>1?history.back():location.href='/'`），所有已登录页面统一 `{% include 'topbar.html' %}`，一处改全站生效；高亮当前页的逻辑须跳过该返回键（否则每页都高亮成"当前页"）。登录页 `login.html` / 落地页 `index.html` 不挂顶栏（无返回需求，正确）。
   - **修落点**：`templates/topbar.html` 最左加 `← 返回` 按钮 + 高亮循环 `if(a.classList.contains('nav-back'))return;`；全站 9 个已登录页面已 include 顶栏（admin/finance/prep/dashboard/order_detail/config/orders/analytics/menu），无需逐页改。
   - **验证**：predeploy 全量自检通过（启动/页面/接口全 200，仅因未提交报"不能部署"，提交后即过）；`/prep` 等页顶栏始终可见、返回键在列。
+- 2026-11-15（**页面内返回键 = 系统返回键**）：用户要求「网页上的后退键和系统带的后退键一个效果」。
+  - **问题**：`/prep` 的「← 返回备餐列表」(`exitFocus`) 与 `/orders` 的「← 返回全部」(`clearGroup`) 只切 JS 状态、**不写浏览器历史**；而系统返回键（手机返回键 / 浏览器后退 / 顶栏 `← 返回`）走历史栈 → 下钻明细后按系统返回键会**直接离开备餐页**，两者不一致。
+  - **原则**：页面内「进入下一层视图」时同时 `history.pushState` 压一条记录；页面上的返回按钮与系统返回键**都走 `history.back()`**，由同一个 `popstate` 处理器恢复视图，结果必然一致。顶栏 `← 返回` 因此也会先退回列表，而不是跳到别的页面。
+  - **实现**：`prep.html` `enterFocus` 压栈 + `backFromFocus()` 走 `history.back()` + `popstate → exitFocus(true)`；`orders.html` `groupByValue` 压栈 + `clearGroup()` 走 `history.back()` + `popstate → _clearGroup(true)`。切换分组值不重复压栈；程序内部退出（非用户触发）用 `replaceState` 把该条历史改回列表态，避免留下「按返回键页面却不动」的幽灵记录；无历史时直接 `exitFocus()` / `_clearGroup(false)` 兜底。`index.html` 的 nav-back 也从 `javascript:` 伪协议改成与 `topbar.html` 一致的写法。
+  - **验证**（真实函数片段 + mock history/popstate）：页面按钮链路 `pushState → history.back → focusOid=null`；系统返回键链路 `popstate → focusOid=null`；程序内部退出 `pushState → replaceState`，三者状态一致且不留幽灵记录。
 - 2026-11-09（肥牛"份数"漏算加菜份数 bug：备注加菜循环未累加 `total_portions`）
   - **问题**：#372 吴先生(11.5) 3-4人餐，基础配方已含肥牛 100g(portion_count=1)，备注「加肥牛一份」再加 100g → 合计 200g(=2份)。但页面显示"份数=1、单份=100克、总=200克"——份数视觉矛盾。根因：`calc_order_ingredient_net` 的**备注加菜循环**只给 `order_qty` 加了份数，却没给 `total_portions` 加，导致 `total_portions` 恒为"基础份数"，把加菜份数漏掉（纯加菜新食材甚至连基础循环的 total_portions=0 都没补，显示 0 份）。`need`(权威总量)本身正确。
   - **修法（`calculator.py` 备注加菜 add 分支）**：`ing_demand[iid]["total_portions"] += ei.get("qty", 1)`——加菜时份数同步累加。纯加菜新食材(total_portions 初值 0)也一并正确。

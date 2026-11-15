@@ -108,6 +108,9 @@
         var unit = i.unit || '';
         var out = i.swapped_out, inn = i.swapped_in;
         var badge = inn ? '<span class="swap-badge in">换入</span>' : (out ? '<span class="swap-badge out">换出</span>' : '');
+        // ⭐ 2026-11-15：备注加菜（含赠送）标记。数字变多但没标来源时，
+        //    用户看不出「五花 360 克」里有 180 克是客户要的，会以为没解析到。
+        var extraBadge = i.extra_added ? ' <span title="备注加菜（含赠送）追加 ' + (i.extra_qty || 1) + ' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700">➕加菜</span>' : '';
         var style = out ? 'text-decoration:line-through;opacity:.55' : '';
         var needStr = (i.need || 0) + unit;
         var sub = '';
@@ -122,7 +125,7 @@
         var stockCell = opts.hideStock ? '' : '<td style="text-align:center">' + (i.stock != null ? i.stock : '-') + '</td>';
         var gap = i.shortage > 0 ? (i.shortage + unit) : '✓';
         rows += '<tr style="' + style + '">' +
-          '<td style="text-align:left">' + escHtml(i.name) + ' ' + badge + sub + '</td>' +
+          '<td style="text-align:left">' + escHtml(i.name) + ' ' + badge + extraBadge + sub + '</td>' +
           '<td style="text-align:center;font-weight:700">' + tp + '</td>' +
           '<td style="text-align:center">' + (ps || '—') + '</td>' +
           '<td style="text-align:center">' + unit + '</td>' +

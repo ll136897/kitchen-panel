@@ -528,6 +528,10 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
             # ⚠️ 备注里显式加的食材必须进备餐清单：解除任何 cost_only 屏蔽
             # （如生菜曾因重复行被标 cost_only，备注加的生菜也要显示，不被连坐）。
             ing_demand[iid]["cost_only"] = False
+        # 标记「这项含备注加菜（含赠送）」：备餐表要能一眼看出多备的量是客户要的，
+        # 而不是套餐自带配量莫名变多（2026-11-15 修，398 吕女士「送五花和松板」引出）。
+        ing_demand[iid]["extra_added"] = True
+        ing_demand[iid]["extra_qty"] = ing_demand[iid].get("extra_qty", 0) + ei.get("qty", 1)
 
     for sw in (parsed.get("dish_swaps") or []):
         to_id = match_ingredient_id_by_name(sw.get("to"))
@@ -728,6 +732,8 @@ def calc_order_requirements(order_id):
                 ingredients_result.append({
                     "id": ing_id, "name": r["name"], "unit": r["unit"],
                     "swapped_in": bool(info.get("swapped_in")),
+                    "extra_added": bool(info.get("extra_added")),
+                    "extra_qty": round(info.get("extra_qty", 0), 2),
                     "need": round(need, 2), "stock": stock,
                     "shortage": round(max(0, need - stock), 2),
                     "threshold": r["threshold"] or 0,
@@ -1457,10 +1463,15 @@ def calc_merged_prep(order_ids):
                     "portion_count_samples": [],  # [(portion_count, order_quantity), ...]
                     "total_packages": 0,
                     "total_portions": 0,
+                    "extra_added": False,
+                    "extra_qty": 0,
                 }
             ing_merge[key]["total"] += ing["need"]
             if ing.get("swapped_in"):
                 ing_merge[key]["swapped_in"] = True
+            if ing.get("extra_added"):
+                ing_merge[key]["extra_added"] = True
+                ing_merge[key]["extra_qty"] += ing.get("extra_qty") or 0
             ing_merge[key]["order_ids"].append(o["id"])
             ing_merge[key]["per_package_samples"].append((ing.get("per_package"), ing.get("order_qty", 1)))
             ing_merge[key]["portion_count_samples"].append((ing.get("portion_count", 1), ing.get("order_qty", 1)))

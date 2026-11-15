@@ -395,6 +395,7 @@ let groupField = null;     // 'address' | 'contact_name' | 'pkg' | 'phone' | nul
 let groupVal = '';         // 点的是哪个值（套餐名 / 电话 / 归一地址 / 联系人）
 let groupAnchorId = null;  // 点的是哪一单（用来高亮 + 作为周/月基准）
 let groupScope = 'all';    // 'all' | 'week' | 'month'
+let groupPushed = false;   // 本次分组是否往浏览器历史里压了一条记录
 let filterText = '';       // 搜索关键字
 let filterDate = '';       // 按日期筛选（''=全部日期）
 let filterMonth = '';      // 按月份筛选（''=全部月份）；选某天后会自动带上它所在的月
@@ -452,14 +453,32 @@ function groupByValue(field, anchorId, idx){
   const a = allOrders.find(o=>o.id===anchorId) || {};
   const v = String(groupValue(a, field, idx));
   if(groupField===field && String(groupVal)===v){ clearGroup(); return; }
+  const wasGroup = !!groupField;
   groupField = field; groupVal = v; groupAnchorId = anchorId; groupScope = 'all';
+  // ⭐ 2026-11-15：页面内分组也写一条浏览器历史，让「← 返回全部」和系统返回键走同一条路。
+  // 从一个分组切到另一个分组不重复压栈（只算一层状态）。
+  if(!wasGroup){
+    try{ history.pushState({kpGroup:true}, '', location.href); groupPushed = true; }
+    catch(e){ groupPushed = false; }
+  }
   renderOrders();
 }
 function groupBy(field, anchorId){ groupByValue(field, anchorId, 0); }
 function clearGroup(){
+  if(groupPushed && history.length > 1){ history.back(); return; }
+  _clearGroup(false);
+}
+function _clearGroup(fromPop){
   groupField = null; groupVal = ''; groupAnchorId = null; groupScope = 'all';
+  if(!fromPop && groupPushed){
+    try{ history.replaceState({kpList:true}, '', location.href); }catch(e){}
+  }
+  groupPushed = false;
   renderOrders();
 }
+window.addEventListener('popstate', function(){
+  if(groupField){ groupPushed = false; _clearGroup(true); }
+});
 function setScope(s){
   groupScope = s;
   document.querySelectorAll('.scope-chip').forEach(b=>b.classList.toggle('active', b.dataset.scope===s));

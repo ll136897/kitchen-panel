@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="nav">  <a href="javascript:history.length>1?history.back():'/'" class="nav-back" title="返回" aria-label="返回">
+<nav class="nav">  <a href="/" class="nav-back" onclick="(history.length>1?history.back():location.href='/');return false;" title="返回" aria-label="返回">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
   </a>
   <div class="nav-brand">
