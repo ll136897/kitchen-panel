@@ -837,11 +837,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v3（2026-11-15）：v2 存的备餐数据里，备注「送五花和松板」还没被解析成加菜
-// （五花只有 180 克、松板 150 克、也没有加菜徽标），部署后页面先用缓存撑画面就会显示旧值。
-// ⚠️ 铁律：凡改了「影响备餐明细内容」的解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
-// v2 起因：订单开始带 time_std，旧缓存不含该字段会回退点号原文 → 分档又变回错的。
-function prepCacheKey(d){ return 'prep_cache_v3_' + d; }
+// v4（2026-11-15）：v3 存的订单没有 raw_changes / swap_qty 字段 → 部署后第一次打开会
+// 显示旧徽标（份数兜底成 1）、原单弹窗也没有「后来改过什么」标注。
+// ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
+// v3 起因：备注「送五花和松板」开始解析成加菜；v2 起因：订单开始带 time_std。
+function prepCacheKey(d){ return 'prep_cache_v4_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
