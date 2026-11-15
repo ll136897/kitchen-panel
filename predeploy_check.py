@@ -103,19 +103,28 @@ def check_git():
     else:
         ok("工作区干净")
     head = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    run(["git", "fetch", "origin"])
     ls_remote = run(["git", "ls-remote", "origin", "main"]).stdout.split()
     if not ls_remote:
         # GitHub:443 间歇不可达时 ls-remote 返回空——以前这里 split()[0] 直接 IndexError 崩掉，
         # 现在干净地判 ❌（没确认推上去就不许部署），并提示重试
         bad("本地提交都已在远端", "无法确认：git ls-remote 无返回（GitHub 网络不通？稍后重跑本脚本）")
         return
-    remote = ls_remote[0]
-    anc = run(["git", "merge-base", "--is-ancestor", head, remote]).returncode == 0
+    # ⚠️ 保活脚本(db_backup.py)会持续推 kitchen.db 备份，远端 main 一直在前进。
+    #    不能用 ls-remote 拿到的裸 sha 做 merge-base：那个 commit 对象本地还没 fetch 到，
+    #    merge-base 直接返回非 0 → 误判"没推上去"（我的代码其实早就在远端历史里）。
+    #    正确口径：判断"本地 HEAD 是否已在远端 main 的历史里"，用 fetch 后的 origin/main。
+    f = run(["git", "fetch", "origin", "main"])
+    if f.returncode != 0:
+        bad("本地提交都已在远端", "无法确认：git fetch origin main 失败（稍后重跑本脚本）")
+        return
+    # `git fetch origin main` 只写 FETCH_HEAD（不会更新 origin/main 这个 tracking ref），
+    # 所以必须用 FETCH_HEAD 做祖先判断；用 origin/main 会读到陈旧值。
+    remote_ref = run(["git", "rev-parse", "FETCH_HEAD"]).stdout.strip()
+    anc = run(["git", "merge-base", "--is-ancestor", head, "FETCH_HEAD"]).returncode == 0
     if anc:
-        ok("本地提交都已在远端", "HEAD=%s" % head[:7])
+        ok("本地提交都已在远端", "HEAD=%s（远端 main 已含此提交；其后可能还有 db 自动备份）" % head[:7])
     else:
-        bad("本地提交都已在远端", "local=%s remote=%s（还没推上去）" % (head[:7], remote[:7]))
+        bad("本地提交都已在远端", "local=%s remote=%s（还没推上去）" % (head[:7], remote_ref[:7]))
 
 
 # ---------------- 2) 远端数据库体检（部署会用到它）----------------
