@@ -166,13 +166,13 @@
   }
 
   // ⭐ 备注真追加装备的徽标（2026-11-15）：「+2把椅子/加2把椅子/多2个天幕」是套餐配量上真加，
-  //    数量会变多（椅子6→8），标「➕加N」说明来源，与餐具「按客户报数覆盖」（📋）区分。
+  //    数量会变多（椅子6→8），标「+2」说明来源。⚠️ 2026-11-16 用户定稿：写「+2」，严禁「➕加2」。
   //    紧凑内联、不换行、不撑高行，与加菜徽标同款样式；口径只此一处，三处渲染共用。
   //    ⚠️ 必须定义在 renderPrepTable 之外（IIFE 顶层）——window 导出语句在外层，嵌套在函数体里会 ReferenceError。
   function toolExtraBadge(t) {
     if (!(t && t.extra_added)) return '';
     var n = Number(t.extra_qty) || 1;
-    return ' <span title="备注追加装备 ' + n + '（在套餐配量上加的）" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加' + n + '</span>';
+    return ' <span title="备注追加装备 ' + n + '（在套餐配量上加的）" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">+' + n + '</span>';
   }
 
   // ⭐ 客户报餐具数的徽标（2026-11-15）：餐具数量是「按客户报的数覆盖套餐配量」，
