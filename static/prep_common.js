@@ -129,7 +129,7 @@
         var stockCell = opts.hideStock ? '' : '<td style="text-align:center">' + (i.stock != null ? i.stock : '-') + '</td>';
         var gap = i.shortage > 0 ? (i.shortage + unit) : '✓';
         rows += '<tr style="' + style + '">' +
-          '<td style="text-align:left">' + escHtml(i.name) + ' ' + badge + extraBadge + sub + '</td>' +
+          '<td style="text-align:left">' + escHtml(i.name) + ' ' + badge + extraBadge + utBadge(i) + sub + '</td>' +
           '<td style="text-align:center;font-weight:700">' + tp + '</td>' +
           '<td style="text-align:center">' + (ps || '—') + '</td>' +
           '<td style="text-align:center">' + unit + '</td>' +
@@ -165,5 +165,17 @@
     return html;
   }
 
+  // ⭐ 客户报餐具数的徽标（2026-11-15）：餐具数量是「按客户报的数覆盖套餐配量」，
+  //    不是「加 N 份」，所以另用一个图标 + 文案，三处共用渲染都调这个函数，口径只此一处。
+  //    紧凑内联样式与加菜/换菜徽标一致：不换行、不撑高行、不新增版面。
+  function utBadge(i) {
+    var n = Number((i && i.ut_specified) || 0);
+    if (!n) return '';
+    var exact = (i.ut_specified_exact === undefined) ? true : !!i.ut_specified_exact;
+    var txt = exact ? ('📋报' + n + '份') : '📋按客户数';
+    return ' <span title="备注报了餐具数：按客户确定的数量备，不再叠加商家兜底" style="display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">' + txt + '</span>';
+  }
+
+  window.utBadge = utBadge;
   window.renderPrepTable = renderPrepTable;
 })();

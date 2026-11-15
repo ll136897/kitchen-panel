@@ -523,6 +523,8 @@
   </div>
 </div>
 
+<!-- 备餐表徽标文案（加菜/换菜/客户报餐具数）共用一处定义，避免各页各写一套 -->
+<script src="/static/prep_common.js"></script>
 <script>
 // 备餐分类顺序（与菜单页/后端 CATEGORY_ORDER 一致）：
 // 牛肉→猪肉→鸡肉→素菜→小菜→小料→赠品→食材包装→客户餐具→主食→其他→工具
@@ -837,11 +839,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v4（2026-11-15）：v3 存的订单没有 raw_changes / swap_qty 字段 → 部署后第一次打开会
-// 显示旧徽标（份数兜底成 1）、原单弹窗也没有「后来改过什么」标注。
+// v5（2026-11-15）：v4 存的订单/食材没有 ut_specified 字段 → 部署后第一次打开
+// 「餐具11」这类客户报数依然没有「📋报N份」标识（406 付先生引出的漏标）。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
-// v3 起因：备注「送五花和松板」开始解析成加菜；v2 起因：订单开始带 time_std。
-function prepCacheKey(d){ return 'prep_cache_v4_' + d; }
+// v4 起因：补 raw_changes / swap_qty；v3 起因：赠送菜解析；v2 起因：订单开始带 time_std。
+function prepCacheKey(d){ return 'prep_cache_v5_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1281,7 +1283,7 @@ function renderBoard(orders){
     const done = !!o.status && o.status !== 'pending';
     const served = !!o.served;              // 已出餐（原始录入弹窗里的「出餐」按钮切换）
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
-    const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'');
+    const tags = (o.has_swap?'🔄换菜':'') + (o.has_extra?' ➕加菜':'') + (o.ut_specified?' 📋报'+o.ut_specified+'份':'');
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
     const whoHtml = (who&&who!=='未标注')
       ? `<span class="bwho ${who==='刘'?'w-liu':(who==='孙'?'w-sun':'w-none')}">${who}</span>` : '';
@@ -1490,7 +1492,7 @@ function itemRow(it, type, checkedMap){
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':''}</div>
+    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':''}${typeof utBadge==='function'?utBadge(it):''}</div>
     <div class="pr-ord">${totPkg}</div>
     <div class="pr-per">${perSize||'—'}</div>
     <div class="pr-unit">${unit}</div>
@@ -1711,7 +1713,7 @@ function osRenderList(oid){
       const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
       const sw = it.swapped_in ? ' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>' : '';
       const ex = it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '';
-      return `<div class="os-row"><span class="nm">${it.name}${sw}${ex}</span>` +
+      return `<div class="os-row"><span class="nm">${it.name}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
              `<span class="qt">${osQty(it)}${short}</span></div>`;
     }).join('');
   }

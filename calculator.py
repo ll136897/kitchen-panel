@@ -619,6 +619,9 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                                 "portion_count": 1, "total_portions": 0, "cost_only": False}
         ing_demand[_iid]["total"] += _q
         ing_demand[_iid]["cost_only"] = False
+        # 单独点名「加2把勺子」= 在套餐配量上追加，复用加菜徽标（➕加N份）
+        ing_demand[_iid]["extra_added"] = True
+        ing_demand[_iid]["extra_qty"] = ing_demand[_iid].get("extra_qty", 0) + _q
 
     def _set_ut(_iid, _q):
         """把某项餐具的总量**覆盖**成客户确定的数量（不是累加）。"""
@@ -629,6 +632,9 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                                 "portion_count": 1, "total_portions": 0, "cost_only": False}
         ing_demand[_iid]["total"] = _q
         ing_demand[_iid]["cost_only"] = False
+        # ⭐ 2026-11-15：客户报了餐具数 → 打「按客户报数」标记，备餐表才看得出来
+        #    这不是「加 N 份」（是覆盖套餐默认配量），所以不能用 extra_added 冒充。
+        ing_demand[_iid]["ut_specified"] = _q
 
     if note_now:
         from parser import _num_from_str as _nfs
@@ -742,6 +748,7 @@ def calc_order_requirements(order_id):
                     "swap_out_qty": round(info.get("swap_out_qty", 0), 2),
                     "extra_added": bool(info.get("extra_added")),
                     "extra_qty": round(info.get("extra_qty", 0), 2),
+                    "ut_specified": info.get("ut_specified") or 0,
                     "need": round(need, 2), "stock": stock,
                     "shortage": round(max(0, need - stock), 2),
                     "threshold": r["threshold"] or 0,
@@ -1564,6 +1571,9 @@ def calc_merged_prep(order_ids):
 
     for o in orders:
         req = calc_order_requirements(o["id"])
+        # 订单级「客户报的餐具数」：供简略表订单行标「📋报N份」，从本单需求里读，不另写解析
+        _ut = [x.get("ut_specified") for x in req["ingredients"] if x.get("ut_specified")]
+        o["ut_specified"] = _ut[0] if _ut else 0
         for ing in req["ingredients"]:
             key = ing["id"]
             if key not in ing_merge:
@@ -1579,8 +1589,11 @@ def calc_merged_prep(order_ids):
                     "extra_qty": 0,
                     "swap_qty": 0,
                     "swap_out_qty": 0,
+                    "ut_vals": [],
                 }
             ing_merge[key]["total"] += ing["need"]
+            if ing.get("ut_specified"):
+                ing_merge[key]["ut_vals"].append(ing["ut_specified"])
             if ing.get("swapped_in"):
                 ing_merge[key]["swapped_in"] = True
                 ing_merge[key]["swap_qty"] += ing.get("swap_qty") or 0
@@ -1635,6 +1648,14 @@ def calc_merged_prep(order_ids):
         v["portion_size"] = round(v["per_package"] / max(1, v["portion_count"]), 2)
         v["order_count"] = len(v["order_ids"])
         v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
+        # 客户报餐具数的标注：所有来源单都报同一个数 → 显示具体数字；混合情况只标「按客户数」，不误导
+        _vals = set(x for x in v.get("ut_vals", []) if x)
+        if _vals:
+            v["ut_specified"] = max(_vals)
+            v["ut_specified_exact"] = (len(_vals) == 1 and len(v["ut_vals"]) == len(v["order_ids"]))
+        else:
+            v["ut_specified"] = 0
+            v["ut_specified_exact"] = False
 
     for v in tool_merge.values():
         samples = [p for p, _ in v["per_package_samples"] if p]
