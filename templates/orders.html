@@ -1171,7 +1171,8 @@ function orawToggle(oid, ev){
     const hs=pkgs.some(p=>p.setup_flag===1), hn=pkgs.some(p=>p.setup_flag===0);
     orawPopCache[oid]={raw_text:o.own_raw_text||o.raw_text||'',
                        setup_flag:(o.setup_flag===0||o.setup_flag===1)?o.setup_flag:null,
-                       has_setup:hs, has_nosetup:hn};
+                       has_setup:hs, has_nosetup:hn,
+                       raw_changes:o.raw_changes||[]};
     done();
   }).catch(()=>{ orawPopCache[oid]={raw_text:'(读取失败，请重试)', setup_flag:null, has_setup:false, has_nosetup:false}; done(); });
 }
@@ -1194,7 +1195,11 @@ function orawRender(oid){
       chk=`<div class="rp-chk no">⚠️ 不一致：原单写「${fromText?'搭建':'不搭建'}」，系统判定「${sys?'搭建':'不搭建'}」，请核对</div>`;
     }
   }
+  // ⭐ 2026-11-15：查原单时标出「这单后来改过什么」（后端 calc_raw_changes 统一算）
+  const chg=(c.raw_changes||[]).map(x=>escHtml(x.label)+'「'+escHtml(x.from)+'」→「'+escHtml(x.to)+'」').join('；');
+  const chgHtml=chg?'<div style="background:#fff7e6;border:1px solid #ffd591;color:#a85b0b;border-radius:6px;padding:5px 8px;margin:6px 0;font-size:12px;line-height:1.45">✏️ 原单后来改过：'+chg+'</div>':'';
   el.innerHTML='<div class="rp-hd">📄 原始录入信息<span class="rp-x">✕</span></div>'
+    + chgHtml
     + (raw?`<div class="rp-body">${escHtml(raw)}</div>`:'<div class="rp-tip">这单没有留存原始录入文字</div>')
     + chk + '<div class="rp-tip">点别处可关闭</div>';
   const xp=el.querySelector('.rp-x'); if(xp) xp.onclick=function(e){ e.stopPropagation(); orawClose(); };

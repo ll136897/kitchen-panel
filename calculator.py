@@ -556,6 +556,7 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                 removed_total += info["total"]
                 info["total"] = 0
                 info["swapped_out"] = True
+                info["swap_out_qty"] = info.get("total_portions", info.get("order_qty", 1)) or 1
             else:
                 tp = info.get("total_portions", info.get("portion_count", 0)) or 0
                 portion = (info["total"] / tp) if tp > 0 else info["total"]
@@ -564,9 +565,11 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                     removed_total += info["total"]
                     info["total"] = 0
                     info["swapped_out"] = True
+                    info["swap_out_qty"] = fqty or (info.get("total_portions", 1) or 1)
                 else:
                     removed_total += rm
                     info["total"] -= rm
+                    info["swap_out_qty"] = fqty or 1
         if use_old:
             add = removed_total
         else:
@@ -582,6 +585,8 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
                                  "portion_count": 1, "total_portions": 0, "cost_only": False}
         ing_demand[to_id]["total"] += add
         ing_demand[to_id]["swapped_in"] = True
+        # 换入份数：备餐表徽标要显示「换了几份」（多条换菜规则命中同一菜时累加）
+        ing_demand[to_id]["swap_qty"] = ing_demand[to_id].get("swap_qty", 0) + to_qty
 
     # ===== 半包（不搭建）默认餐具只留 5 项 + 备注「多加餐具」按默认 3 项计入（2026-11-13 用户定）=====
     # ① 半包默认只有「三格蘸碟(=三格底料盒)/塑料勺(勺子)/筷子/纸杯/纸巾」，不配 桌布/围裙/垃圾袋/油。
@@ -732,6 +737,9 @@ def calc_order_requirements(order_id):
                 ingredients_result.append({
                     "id": ing_id, "name": r["name"], "unit": r["unit"],
                     "swapped_in": bool(info.get("swapped_in")),
+                    "swap_qty": round(info.get("swap_qty", 0), 2),
+                    "swapped_out": bool(info.get("swapped_out")),
+                    "swap_out_qty": round(info.get("swap_out_qty", 0), 2),
                     "extra_added": bool(info.get("extra_added")),
                     "extra_qty": round(info.get("extra_qty", 0), 2),
                     "need": round(need, 2), "stock": stock,
@@ -1345,6 +1353,104 @@ def sort_ingredients(items, name_field="name", cat_field="category"):
     return sorted(items, key=_sort_key)
 
 
+def calc_raw_changes(o):
+    """对比「原始录入原文」与「当前订单」，列出后来被改过的字段。
+
+    2026-11-15 用户定：查询原始单据时，要能一眼看到这单后来改过什么
+    （例：388 原文「4人餐」、现在手改成「6人餐」；336 原文备注「无」、现在「美团纯餐」）。
+    返回 [{line, label, from, to}]；line 是原文行首关键词，供前端定位到对应那一行。
+    ⚠️ 归一规则是重点：时间 `12.30` vs `12:30`、备注引号、`无`=空、地址解析截断
+    都**不算改动**，否则满屏假标注反而没人看。解析口径复用 parse_order_text，一处为准。
+    """
+    from parser import parse_order_text, own_raw_block
+    raw = (o.get("own_raw_text") or "").strip()
+    if not raw:
+        try:
+            raw = own_raw_block(o.get("raw_text") or "", o.get("contact_name") or "",
+                                o.get("contact_phone") or "", o.get("amount"),
+                                o.get("address") or "") or (o.get("raw_text") or "")
+        except Exception:
+            raw = o.get("raw_text") or ""
+    if not raw:
+        return []
+    try:
+        p = parse_order_text(raw) or {}
+    except Exception:
+        return []
+
+    changes = []
+
+    def add(line, label, a, b):
+        if a != b:
+            changes.append({"line": line, "label": label, "from": str(a), "to": str(b)})
+
+    # ① 套餐：原文 packages 用 max_people，当前用 people；按 (人数, 份数) 排序比
+    def _pkg_list(items, key):
+        out = []
+        for x in (items or []):
+            try:
+                n = int(x.get(key) or x.get("people") or 0)
+                q = int(x.get("quantity") or 1)
+                if n:
+                    out.append((n, q))
+            except (TypeError, ValueError):
+                pass
+        return sorted(out)
+
+    old_p = _pkg_list(p.get("packages"), "max_people")
+    new_p = _pkg_list(o.get("packages"), "people")
+    if old_p and new_p and old_p != new_p:
+        fmt = lambda v: "、".join("%d人餐×%d" % (n, q) for n, q in v)
+        add("预约项目", "套餐", fmt(old_p), fmt(new_p))
+
+    # ② 备注：去引号/空白，"无" 视作空（原文常带引号，属格式噪音不算改动）
+    def _note(v):
+        s = str(v or "").strip().strip('"').strip()
+        return "" if s == "无" else s
+
+    a, b = _note(p.get("note")), _note(o.get("note"))
+    if a != b:
+        add("备注", "备注", a or "（无）", b or "（无）")
+
+    # ③ 时间：统一归一成 HH:MM 再比，12.30 与 12:30 不算改动
+    def _time(v):
+        if not v:
+            return ""
+        t = parse_time_str(v)
+        return "%02d:%02d" % t if t else str(v).strip()
+
+    for line, key in (("用餐时间", "meal_time"), ("搭建时间", "setup_time"),
+                      ("预约时间", "booking_time")):
+        a, b = _time(p.get(key)), _time(o.get(key))
+        if a and b and a != b:
+            add(line, line, a, b)
+
+    # ④ 金额/押金：按数字比
+    def _num(v):
+        try:
+            return round(float(v), 2)
+        except (TypeError, ValueError):
+            return None
+
+    for line, key in (("金额", "amount"), ("押金", "deposit")):
+        a, b = _num(p.get(key)), _num(o.get(key))
+        if a is not None and b is not None and abs(a - b) > 0.01:
+            add(line, line, "%g" % a, "%g" % b)
+
+    # ⑤ 地址：原文解析值若是当前值的前缀（解析截断），不算改动
+    a, b = str(p.get("address") or "").strip(), str(o.get("address") or "").strip()
+    if a and b and not (b.startswith(a) or a.startswith(b)):
+        add("预约地址", "地址", a, b)
+
+    # ⑥ 联系人 / 电话
+    for line, label, key in (("联系人", "联系人", "contact_name"),
+                             ("联系电话", "电话", "contact_phone")):
+        a, b = str(p.get(key) or "").strip(), str(o.get(key) or "").strip()
+        if a and b and a != b:
+            add(line, label, a, b)
+    return changes
+
+
 def calc_merged_prep(order_ids):
     """合并多订单的备餐需求。
     返回：
@@ -1364,7 +1470,8 @@ def calc_merged_prep(order_ids):
         for oid in order_ids:
             cur.execute("""
             SELECT id, booking_date, booking_time, meal_time, address, contact_name,
-                   contact_phone, amount, status, note, delivered, served,
+                   contact_phone, amount, deposit, setup_time, pickup_time,
+                   status, note, delivered, served,
                    created_by, created_by_name, raw_text
             FROM orders WHERE id = ?
             """, (oid,))
@@ -1441,6 +1548,11 @@ def calc_merged_prep(order_ids):
                 o["addr_detail"] = ""
             # 标准时间：分档/排序/提前量统一口径（见 norm_order_time），前端只读 time_std
             o["time_std"] = norm_order_time(o.get("meal_time"), o.get("booking_time"))
+            # 原单改动标注：查「原始录入」时能看到这单后来改过哪些字段（见 calc_raw_changes）
+            try:
+                o["raw_changes"] = calc_raw_changes(o)
+            except Exception:
+                o["raw_changes"] = []
             o["urgency"] = calc_prep_urgency(o)
             orders.append(o)
 
@@ -1465,10 +1577,16 @@ def calc_merged_prep(order_ids):
                     "total_portions": 0,
                     "extra_added": False,
                     "extra_qty": 0,
+                    "swap_qty": 0,
+                    "swap_out_qty": 0,
                 }
             ing_merge[key]["total"] += ing["need"]
             if ing.get("swapped_in"):
                 ing_merge[key]["swapped_in"] = True
+                ing_merge[key]["swap_qty"] += ing.get("swap_qty") or 0
+            if ing.get("swapped_out"):
+                ing_merge[key]["swapped_out"] = True
+                ing_merge[key]["swap_out_qty"] += ing.get("swap_out_qty") or 0
             if ing.get("extra_added"):
                 ing_merge[key]["extra_added"] = True
                 ing_merge[key]["extra_qty"] += ing.get("extra_qty") or 0

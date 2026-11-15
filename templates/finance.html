@@ -1322,7 +1322,8 @@ function toggleRawPop(oid, ev){
     rawPopCache[oid] = {raw_text: o.own_raw_text || o.raw_text || '',
                         setup_flag: (o.setup_flag===0||o.setup_flag===1) ? o.setup_flag
                                    : ((o.setup===0||o.setup===1) ? o.setup : null),
-                        has_setup: _hs, has_nosetup: _hn};
+                        has_setup: _hs, has_nosetup: _hn,
+                        raw_changes: o.raw_changes || []};
     done();
   }).catch(function(){
     rawPopCache[oid] = {raw_text: '(读取失败，请重试)', setup_flag: null, has_setup: false, has_nosetup: false};
@@ -1353,7 +1354,11 @@ function renderRawPopHtml(oid){
       chk = `<div class="rp-chk no">⚠️ 不一致：原单写「${fromText ? '搭建' : '不搭建'}」，系统判定「${sys ? '搭建' : '不搭建'}」，请核对</div>`;
     }
   }
+  // ⭐ 2026-11-15：查原单时标出「这单后来改过什么」（与订单页/简略表同一个后端计算）
+  const chg=(c.raw_changes||[]).map(x=>kpiEsc(x.label)+'「'+kpiEsc(x.from)+'」→「'+kpiEsc(x.to)+'」').join('；');
+  const chgHtml=chg?'<div style="background:#fff7e6;border:1px solid #ffd591;color:#a85b0b;border-radius:6px;padding:5px 8px;margin:6px 0;font-size:12px;line-height:1.45">✏️ 原单后来改过：'+chg+'</div>':'';
   el.innerHTML = '<div class="rp-hd">📄 原始订单记录<span class="rp-x">✕</span></div>'
+    + chgHtml
     + (raw ? `<div class="rp-body">${kpiEsc(raw)}</div>` : '<div class="rp-tip">这单没有留存原始录入文字</div>')
     + chk
     + '<div class="rp-tip">点别处可关闭</div>';

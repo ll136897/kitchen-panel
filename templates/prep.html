@@ -329,6 +329,9 @@
   .rawpre{white-space:pre-wrap;word-break:break-all;background:#faf5ed;color:#3a2c20;
     border-radius:8px;padding:10px 12px;margin:0;font-family:inherit;font-size:13px;line-height:1.6}
   .raw-empty{color:#9a8b6a;padding:16px;text-align:center}
+  /* 原单改动标注：一行小条，不另起标题、不新增版面 */
+  .rawchg{background:#fff7e6;border:1px solid #ffd591;color:#a85b0b;border-radius:6px;
+    padding:5px 8px;margin:0 0 8px;font-size:12px;line-height:1.45}
 
   /* 顶部摘要条 */
   .summary-bar{
@@ -1487,7 +1490,7 @@ function itemRow(it, type, checkedMap){
   const shortCls = it.shortage>0 ? '' : 'ok';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换菜" style="color:#c0392b;font-weight:700">🔄换</span>':''}${it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700">➕加菜</span>':''}</div>
+    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':''}</div>
     <div class="pr-ord">${totPkg}</div>
     <div class="pr-per">${perSize||'—'}</div>
     <div class="pr-unit">${unit}</div>
@@ -1706,8 +1709,8 @@ function osRenderList(oid){
     });
     html += `<div class="os-cat">${CAT_LABEL[cat]||cat}</div>` + items.map(it=>{
       const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
-      const sw = it.swapped_in ? ' <span style="color:#c0392b;font-weight:700">🔄换</span>' : '';
-      const ex = it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700">➕加菜</span>' : '';
+      const sw = it.swapped_in ? ' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>' : '';
+      const ex = it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '';
       return `<div class="os-row"><span class="nm">${it.name}${sw}${ex}</span>` +
              `<span class="qt">${osQty(it)}${short}</span></div>`;
     }).join('');
@@ -1732,9 +1735,14 @@ function showRaw(oid){
             : ((o.raw_text && String(o.raw_text).trim()) ? o.raw_text : '');
   document.getElementById('rawTitle').textContent =
     `📄 原始录入 · ${o.contact_name||'—'}${o.contact_phone?(' · '+o.contact_phone):''}`;
+  // ⭐ 2026-11-15：查原始录入时，把这单「后来改过什么」标出来
+  //   （后端 calc_raw_changes 统一算，套餐/备注/金额等按归一后对比，格式噪音不算改动）
+  const chg = (o.raw_changes || []);
+  const chgTxt = chg.map(c => esc(c.label) + '「' + esc(c.from) + '」→「' + esc(c.to) + '」').join('；');
+  const chgHtml = chgTxt ? '<div class="rawchg">✏️ 原单后来改过：' + chgTxt + '</div>' : '';
   document.getElementById('rawBody').innerHTML = raw
-    ? `<pre class="rawpre">${esc(raw)}</pre>`
-    : '<div class="raw-empty">这单没有原始录入信息</div>';
+    ? chgHtml + `<pre class="rawpre">${esc(raw)}</pre>`
+    : chgHtml + '<div class="raw-empty">这单没有原始录入信息</div>';
   document.getElementById('rawMask').classList.add('on');
   document.getElementById('rawSheet').classList.add('on');
   renderRawServeBtn(o);

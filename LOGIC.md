@@ -130,6 +130,17 @@
 - ⭐ **备餐表要能看出「加菜 / 赠送」来源（2026-11-15 修，398 吕女士二次反馈引出）**：备注加菜把 `need` 从 180 克加到 360 克，但表格只显示数字、没有来源标记，用户看不出多备的量是客户要的 → 会误判成「备注没解析到」（数据其实早就算对了：`calc_merged_prep([398])` 返回 360 / 300 克、`has_extra=True`）。
   现 `calc_order_ingredient_net` 给命中加菜的食材打 `extra_added=True` + `extra_qty`，经 `calc_order_requirements` / `calc_merged_prep` 透传；三处共用渲染在食材名后加「➕加菜」小徽标（`title` 写明追加份数）：`static/prep_common.js` renderPrepTable、`prep.html` itemRow（`pr-name`）、`prep.html` catBlock（`os-row`）。**只加徽标、不动行列数**（遵守「加维度不加版面」），不改任何计算量与成本口径。
   ⚠️ 与「缓存 key 铁律」是同一件事的两面：光改计算层不换 `prepCacheKey`，页面仍先用旧缓存撑画面 → 看起来还是没生效。
+- ⭐⭐ **加菜 / 换菜徽标必须把「几份」写在图标上，且不得增加空间（2026-11-15 用户定）**：
+  只写「➕加菜」「🔄换」还得悬停才知道数量，不够。现徽标文案直接带份数：`➕加${extra_qty}份`、`🔄换${swap_qty}份`、`🔄出${swap_out_qty}份`。
+  - 计算层：`calc_order_ingredient_net` 对加菜项打 `extra_added/extra_qty`、换入项打 `swapped_in/swap_qty`、换出项打 `swapped_out/swap_out_qty`（多条换菜规则命中同一菜时份数累加）；经 `calc_order_requirements` / `calc_merged_prep` 透传，**不改任何数量与成本**。
+  - 三处共用渲染一起改：`static/prep_common.js` renderPrepTable、`prep.html` itemRow（`pr-name`）、`prep.html` catBlock（`os-row`）。
+  - **不增空间硬约束**：徽标必须 `display:inline-block` + `white-space:nowrap` + `vertical-align:middle` + `line-height:1` + 小字号（11px）＋ `padding:0 4px`，不加列、不加行、不另起提示行。
+    验证口径：用真实渲染函数把同一份数据渲染两版（带徽标字段 / 去掉徽标字段），headless `--dump-dom` 量**逐行 `getBoundingClientRect().height` 与表格总高**，两者必须完全相等；再量 `scrollWidth==clientWidth`。本次实测 52 行高全等、表格总高均 1613px、无横向溢出。
+- ⭐⭐ **查原始单据时，要标出「这单后来改过什么」（2026-11-15 用户定）**：
+  - **单一真相源**：`calculator.calc_raw_changes(o)` 对比 `parse_order_text(own_raw_text)` 解析出的原文值与当前订单值，返回 `[{line,label,from,to}]`；`calc_merged_prep`、`/api/orders/<id>/detail`、`list_orders` 三处接口都调它，禁止各页各算各的。
+  - **比对字段**：套餐（按 `(人数,份数)` 排序比）、备注、用餐/搭建/预约时间、金额、押金、地址、联系人、电话。
+  - ⚠️ **归一防误报**（否则满屏假标注）：时间用 `parse_time_str` 归一成 `HH:MM`（`12.30` == `12:30`）；备注去引号、`无`=空；金额按数字；**地址解析值若是当前值前缀则视为解析截断、不算改动**。全库 358 单只有 25 单（7%）检出改动，主要为金额 24 单、套餐 2 单、备注 1 单。
+  - **四个查看原单的入口都显示同一条标注**：`prep.html` showRaw 弹窗（`.rawchg`）、`orders.html` 的「📄原单」浮层、`finance.html` 成本明细原单浮层、`order_detail.html` 原单对照弹窗。做成**一行小条**，不另起标题、不新增版面；详情页用 `textContent` 渲染（不要再 `escHtml`，否则实体字符会当字面文字显示）。
 - ⭐ **换菜 from 只取紧邻「换」字的最后一段（2026-11-15 修）**：备注常用**空格**分隔两件事
   （398 `送五花和松板 鸡尖换蔬菜`），旧 `_parse_dish_swaps` 按句切分不认空格，把整段
   `送五花和松板 鸡尖` 当成换出项 → 换菜与加菜一起失效。现对 `left` 取 `re.split(r"\s+", left)[-1]`；

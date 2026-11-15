@@ -141,6 +141,7 @@
   <div class="raw-box">
     <div class="raw-head"><span>📄 录入时的原订单信息</span><button class="raw-close" onclick="hideRawOrder()" aria-label="关闭">✕</button></div>
     <pre class="raw-text" id="rawText"></pre>
+    <div id="rawChanges" style="display:none;background:#fff7e6;border:1px solid #ffd591;color:#a85b0b;border-radius:6px;padding:5px 8px;margin:6px 0;font-size:12px;line-height:1.45"></div>
     <div class="raw-diff" id="rawDiff" style="display:none"></div>
   </div>
 </div>
@@ -188,6 +189,11 @@ function showRawOrder(){
   const o = curOrder || {};
   const t = ((o.raw_text || '') + '').trim();
   document.getElementById('rawText').textContent = t || '（该订单没有保留原始录入文本）';
+  // ⭐ 2026-11-15：查原单时标出「这单后来改过什么」（后端 calc_raw_changes 统一算）
+  const chgEl = document.getElementById('rawChanges');
+  // 用 textContent 渲染（自动防注入），不要先 escHtml 否则会把 &amp; 当字面文字显示
+  const chg = (o.raw_changes || []).map(x => x.label + '「' + x.from + '」→「' + x.to + '」').join('；');
+  if(chgEl){ chgEl.textContent = chg ? ('✏️ 原单后来改过：' + chg) : ''; chgEl.style.display = chg ? 'block' : 'none'; }
   const diff = document.getElementById('rawDiff');
   // 原单里的搭建字样：同时含「搭建」和「不搭建」= 混单（部分套餐搭建、部分半包），
   // 此时只要系统解析结果含搭建（=1）即视为一致，不误报。

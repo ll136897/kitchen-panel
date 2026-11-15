@@ -1721,6 +1721,12 @@ def order_detail(oid):
                                   o.get("contact_phone"), o.get("amount"), o.get("address"))
     except Exception:
         o["own_raw_text"] = o.get("raw_text") or ""
+    # 原单改动标注：订单页 / 财务页的「原始录入」浮层据此显示「后来改过什么」
+    try:
+        from calculator import calc_raw_changes as _crc
+        o["raw_changes"] = _crc(o)
+    except Exception:
+        o["raw_changes"] = []
     # 备餐需求
     from calculator import calc_order_requirements, calc_prep_urgency
     req = calc_order_requirements(oid)
@@ -1997,7 +2003,7 @@ def list_orders():
     # 前端订单页按地址分组/筛选就用这个字段，两个写法会被算作同一个地方。
     # 标准时间：与简略表共用 calculator.norm_order_time 一个口径，订单页排序/显示
     # 不再吃「12.30」「16.00」这类点号写法的亏（2026-11-15 修）。
-    from calculator import norm_order_time as _norm_time
+    from calculator import norm_order_time as _norm_time, calc_raw_changes as _crc2
     for o in orders:
         o["address_key"] = canonical_address(o.get("address"))
         o["time_std"] = _norm_time(o.get("meal_time"), o.get("booking_time"))
@@ -2012,6 +2018,11 @@ def list_orders():
         """, (o["id"],))
         pkgs = cur.fetchall()
         o["packages"] = [dict(r) for r in pkgs]
+        # 原单改动标注（与简略表、订单详情同一个计算函数，保证口径一致）
+        try:
+            o["raw_changes"] = _crc2(o)
+        except Exception:
+            o["raw_changes"] = []
         # 订单级 setup_flag 优先用「各套餐标记汇总」：任一搭建=搭建（混单 10人餐搭建+3人餐不搭建 判为搭建）；
         # 全部不搭建=不搭建；都为空才退回价格推导。这样混单不会被 raw_text 里的「不搭建」误判成不搭建。
         _flags = [r["pkg_setup"] for r in pkgs]
