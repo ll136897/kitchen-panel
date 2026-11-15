@@ -469,14 +469,15 @@ function parseOrder(){
         drink:'#666', other:'#666'
       };
       const catOrder = ['beef','pork','chicken','vegetable','side','sauce','drink','other'];
-      // 表头：食材 | 份数 | 克数/份 | 单位 | 总量 | 库存 | 缺口
-      // 总量列统一为"数字+单位"格式（如 600克、8个）
+      // 表头：食材 | 份数 | 克数/份 | 单位 | 需备量 | 库存 | 缺口
+      // 需备量列统一为"数字+单位"格式（如 600克、8个）
+      // ⚠️ 按个数计的餐具/包装没有「份」概念，份数格统一显示「—」，一行只留一个数量
       const ingHeader = `<thead><tr>
         <th style="min-width:80px">食材</th>
         <th>份数</th>
         <th>克数/份</th>
         <th>单位</th>
-        <th>总量</th>
+        <th>需备量</th>
         <th>库存</th>
         <th>缺口</th>
       </tr></thead>`;
@@ -508,8 +509,9 @@ function parseOrder(){
       if(packaging.length){
         const rows = packaging.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
-          const pkg = i.total_portions||i.total_packages||1;
-          const per = i.portion_size||i.per_package||0;
+          // 按个数计：份数/克数两格留空，只显示「需备量」一个数字
+          const pkg = '—';
+          const per = '—';
           const unit = i.unit||'';
           const needStr = (i.need||0) + unit;
           return `<tr>
@@ -527,8 +529,9 @@ function parseOrder(){
       if(tableware.length){
         const rows = tableware.map(i=>{
           const sc = i.shortage>0?'txt-red':'';
-          const pkg = i.total_portions||i.total_packages||1;
-          const per = i.portion_size||i.per_package||0;
+          // 按个数计：份数/克数两格留空，只显示「需备量」一个数字
+          const pkg = '—';
+          const per = '—';
           const unit = i.unit||'';
           const needStr = (i.need||0) + unit;
           return `<tr>

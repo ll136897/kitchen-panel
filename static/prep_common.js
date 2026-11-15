@@ -99,8 +99,11 @@
         (CAT_LABEL[cat] || cat) + ' · ' + items.length + '项</td></tr>';
       items.forEach(function (i) {
         var sc = (i.shortage > 0) ? 'txt-red' : '';
-        var tp = i.total_portions || i.total_packages || i.order_qty || 1;
+        // ⚠️ 餐具/包装/工具（及可乐雪碧）按「个数」计，没有「份 × 克/份 = 总量」这层关系。
+        //    旧版把套餐自带配量(total_portions)填进「份数」列，与「总量」并排出现两个都像数量的数字
+        //    （如 6人餐纸杯：份数8、总量12个），用户会以为算错。现在按个数计的行只留「需备量」一个数字。
         var isSimple = (cat === 'drink' && /可乐|雪碧/.test(i.name || '')) || (cat === 'packaging' || cat === 'utensil');
+        var tp = isSimple ? '—' : (i.total_portions || i.total_packages || i.order_qty || 1);
         var ps = isSimple ? '—' : (i.portion_size || i.per_package || 0);
         var unit = i.unit || '';
         var out = i.swapped_out, inn = i.swapped_in;
@@ -144,7 +147,7 @@
     if (pkgHtml) html += '<div style="margin-bottom:10px"><b>🍱 套餐</b>：' + pkgHtml + '</div>';
     if (noteHtml) html += noteHtml;
     html += '<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🥩 备餐表（与备餐页最终一致）</h4>' +
-      '<table class="tbl"><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>总克数</th>' +
+      '<table class="tbl"><thead><tr><th>食材</th><th>份数</th><th>克数/份</th><th>单位</th><th>需备量</th>' +
       (opts.hideStock ? '' : '<th>库存</th>') + '<th>缺口</th></tr></thead><tbody>' + rows + '</tbody></table>';
     if (tools.length && !opts.hideTools) {
       html += '<h4 style="margin:10px 0 4px;font-size:13px;color:var(--primary)">🔧 工具 / 装备</h4>' +

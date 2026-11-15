@@ -1446,8 +1446,10 @@ function itemRow(it, type, checkedMap){
   const isTool = type==='tool';
   let unit = it.unit||'';
   if(isTool && !unit){ unit = TOOL_UNIT[it.name] || '个'; }
-  // 工具：份数列=真实件数（3人餐/10人餐能直接看出数量差异）；其余按份数
-  const totPkg = isTool ? round(it.total||0) : round(it.total_portions||it.total_packages||0);
+  // ⚠️ 餐具/包装/饮料（按个数计）没有「份」的概念：旧版把套餐自带配量填进份数列，
+  //    和总量并排出现两个都像数量的数字（6人餐纸杯 份数8 / 总量12个），会被误读成算错。
+  //    现在这类行只留「需备量」一个数字。工具行仍按用户既定规则保留「份数=真实件数」。
+  const totPkg = (isSimple && !isTool) ? '—' : (isTool ? round(it.total||0) : round(it.total_portions||it.total_packages||0));
   const perSize = isSimple ? '' : round(it.portion_size||0);
   const total = round(it.total);
   const totalStr = total + unit;
@@ -1472,7 +1474,7 @@ function headerRow(){
     <div>份数</div>
     <div>克数</div>
     <div>单位</div>
-    <div style="text-align:right">总量</div>
+    <div style="text-align:right">需备量</div>
     <div style="text-align:right">状态</div>
   </div>`;
 }
