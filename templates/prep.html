@@ -221,12 +221,11 @@
   .muted{color:var(--muted)}
 
   /* 简略备餐表（白板）：分组 chips + 行（手机紧凑优先，主次分明） */
-  .bgrp{margin:6px 0 2px;font-size:13px;font-weight:800;color:#4a3b30;display:flex;align-items:center;gap:6px;
-    background:#faf5ee;padding:3px 8px;border-radius:6px}
-  .bgrp .bmeta{font-size:11px;color:var(--muted);font-weight:600}
+  /* ⭐ 2026-11-15 用户定：时间档文字标题（.bgrp / .bmeta）已整体取消 —— 每档一整行太占空间。
+     档之间不新增任何元素，只靠各自独立的 .bgrid 网格自然断开；网格上下间距从 4/10 收到 0/6。 */
   /* 一级分组（地址）已移除：地址改用左侧色条区分（绿=本店/橙=外地），不再单独占一栏 */
   /* 双列小卡网格：手机一屏塞约 2 倍订单、基本不翻页 */
-  #boardList .bgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0 10px}
+  #boardList .bgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 6px}
   @media(max-width:360px){ #boardList .bgrid{grid-template-columns:1fr} }
   .brow{display:flex;align-items:stretch;gap:6px;padding:5px 6px;border:1px solid #ece3d6;border-radius:9px;background:#fff;cursor:pointer}
   .brow:active{background:#faf7f2}
@@ -305,8 +304,8 @@
   .brow.bserved .bstat{opacity:.35}
   .bserved-tag{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap;
     background:#6b7280;color:#fff;border:1px solid #4b5563}
-  /* 青龙湖二期(本店)与外地(其他区域)之间：仅一条细横线分隔，几乎不占空间 */
-  .bsep{border:none;border-top:1px solid #e5ddd0;margin:2px 0;height:0}
+  /* 青龙湖二期(本店)与外地(其他区域)之间：整版唯一一条细横线，margin 清零、不增加任何间隔距离 */
+  .bsep{border:none;border-top:1px solid #e5ddd0;margin:0;height:0}
   /* 归属（刘/孙）小徽标：按人着色，一眼分辨是谁的单 */
   .bwho{font-size:11px;padding:1px 5px;border-radius:6px;font-weight:800;flex:0 0 auto;white-space:nowrap}
   .bwho.w-liu{background:#e3efff;color:#1a5fb4;border:1px solid #bcd6f7}
@@ -1339,12 +1338,11 @@ function renderBoard(orders){
       return `<div class="bgrid">${rowsHtml}</div>`;
     };
     let html='';
+    // ⭐ 2026-11-15 用户定：**取消「🌅早档 / ☀️午档 / 🌆晚档」文字标识**。
+    //    那种带底色的胶囊标题每个档占一整行，会把整版撑出手机一屏；
+    //    现在档与档之间**不新增任何元素**（连横线都不加），档仍是独立 .bgrid 网格、顺序仍是早→午→晚，
+    //    整版只有上下两块之间那一条 .bsep 细线，且它的 margin 已清零 → 间隔距离只减不增。
     garr.forEach(([k,sub0])=>{
-      const ppl=sub0.reduce((s,o)=>s+boardPeople(o),0);
-      // 「时间未定」不单独显示框（多余），仅排到最后；其余时间档照常显示小标题
-      if(k.indexOf('时间未定')<0){
-        html += `<div class="bgrp">${k} <span class="bmeta">${sub0.length}单 · ${ppl}人</span></div>`;
-      }
       html += renderSpecBlock(sub0);
     });
     return html;
