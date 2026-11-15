@@ -287,6 +287,14 @@
 
 ## 变更记录
 
+- 2026-11-15（简略表归属人可点击筛选）：抬头第一排的 `孙6 / 刘6` 徽标变成**筛选开关**，点一下只看该归属人的订单行。规则要点：
+  - ⭐ **抬头汇总始终按全量 `orders` 算**（总单数 / 总人数 / 归属徽标 / 套餐数都不随筛选变）。原因：徽标本身就是筛选开关，若点了「孙6」后刘6 消失，就没有入口切人或取消筛选；筛选后的量仍能从各时间档标题「N单 · N人」看到，信息不丢。
+  - **筛选只作用于列表行**：`viewOrders = boardOwnerFilter ? orders.filter(o=>boardOwnerKey(o)===boardOwnerFilter) : orders`，`outside/local` 拆块与 `renderBlockByTime` 都改用 `viewOrders`，其余分组/排序逻辑不动。
+  - **交互**：`ownerBreakdown` 给每个 `.obd` 加 `data-oid` + `onclick=toggleBoardOwner(this.dataset.oid,event)` + `role=button/tabindex=0/onkeydown`（回车空格可用）；点同一徽标 = 取消；点不同徽标 = 切换；筛选中「N单」变蓝色虚线的「看全部」入口（`clearBoardOwner`）；三者都不新增任何按钮或行。
+  - **选中态**：`.board-meta .obd.on{深色底白字 + 白点}`，`.bsum-cnt.clr` 虚线蓝字；`.board-meta .obd.*` 必须带前缀才能盖过 `static/style.css` 里的 `.obd.who-*`（同特异性靠顺序）。
+  - **状态与边界**：`boardOwnerFilter` 存 `created_by` 字符串（`'0'`=未标注），全局保存 → 勾选备餐/出餐后 `renderBoard` 重绘仍保持筛选；换日期后若该归属不在当天数据里自动复位；空单分支清空筛选态，避免下次进来莫名还是筛选态；`viewOrders` 为空时给「该归属人今天没有单 · 点抬头 N单 看全部」提示，不留白表。
+  - ⚠️ **没有复用 `prepBy`/`setPrepBy`**：那是走服务端 `/api/prep/merged?by=` 的全局筛选（影响所有页面数据、会重新拉接口）；这里要的是简略表内即时筛选、抬头 totals 不变，两者语义不同，各管各的。
+  - 实测：真实模板抽出的 JS 模拟点击（点孙→6 行 / 再点→12 行 / 点刘→6 行 / 点 N单→12 行，抬头 totals 与套餐数全程不变）+ headless 手机 390 模拟点击（`rows=6`、`onCount=1`、`lines=2`、`h3H=41`、`scrollW<=clientW`）。
 - 2026-11-14（简略表抬头 · **现行定稿**，覆盖 11-13 版）：用户否决"电脑右边空一半 + 手机堆 4 排 + 归属夹在套餐中间"，定三条硬约束：① **第一排严格按「总单数 → 总人数 → 归属人」顺序**，套餐不插在这三者中间；② **上下空间不超过两排字**；③ 行距压到最小、抬头上方那块"还能放一排字"的留白要吃掉。
   - ⭐ **根因**：不是套餐太多，是**套餐被 flex 挤在标题右边只剩 152px**（真机 390）。让 `.board-sum` 拿到整行宽度就能一排排完 5 个套餐。
   - **现行结构**：`#boardMeta` 顺序写死 = `<span class="bsum-cnt">N单</span> · <span class="bsum-ppl">N人</span> + ownerBreakdown(孙6 刘6)`；`#boardSum` 只放**全部套餐**（`pkgKeys.map` 一次排完，**不再切每排 2 个**、不再有 `.bsum-row`）。归属由 `renderBoard` 拼进 `#boardMeta`，**不在套餐区**。

@@ -290,6 +290,15 @@
   .obd.who-me .obd-dot{background:#1a5fb4}
   .obd.who-other .obd-dot{background:#b45309}
   .obd.who-none .obd-dot{background:#9a8b6a}
+  /* 归属徽标 = 筛选开关：点一下只看这人的单，再点一下看全部；不新增任何按钮/行
+     ⚠️ static/style.css 也有 .obd.who-*（同特异性），这里的 .board-meta .obd.* 才能稳盖住 */
+  .board-meta .obd{cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+  .board-meta .obd:focus-visible{outline:2px solid #2d6cdf;outline-offset:1px}
+  .board-meta .obd.on{background:#2b3a4a;color:#fff;border-color:#2b3a4a;box-shadow:0 0 0 1px #2b3a4a}
+  .board-meta .obd.on .obd-dot{background:#fff}
+  .board-meta .obd:active{transform:scale(.94)}
+  /* 筛选中：总单数变成「看全部」入口，虚线提示可点，仍不占额外版面 */
+  .bsum-cnt.clr{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;color:#1a5fb4;-webkit-tap-highlight-color:transparent}
   /* 已出餐：整行灰色区分（点开原始录入弹窗里的「出餐」按钮切换） */
   .brow.bserved{background:#eef0f2;border-color:#dcdfe3}
   .brow.bserved .bname,.brow.bserved .bline2,.brow.bserved .bline3,.brow.bserved .btime{opacity:.5}
@@ -538,19 +547,35 @@ function prepOwnerDot(o){
   const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
   return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}</span>`;
 }
-// 一组订单的归属数量拆分（用在日期/汇总处）
+// 归属筛选：只作用于简略表的订单行；抬头汇总始终按全量算（徽标本身是开关，不能被筛掉）
+let boardOwnerFilter = '';                       // ''=全部；否则=created_by 字符串（'0'=未标注）
+function boardOwnerKey(o){ return (o && o.created_by) ? String(o.created_by) : '0'; }
+function toggleBoardOwner(id, ev){
+  if(ev) ev.stopPropagation();
+  boardOwnerFilter = (boardOwnerFilter === id) ? '' : id;
+  if(typeof renderBoard==='function') renderBoard((prepData && prepData.orders) || []);
+}
+function clearBoardOwner(ev){
+  if(ev) ev.stopPropagation();
+  if(!boardOwnerFilter) return;
+  boardOwnerFilter = '';
+  if(typeof renderBoard==='function') renderBoard((prepData && prepData.orders) || []);
+}
+// 一组订单的归属数量拆分 → 抬头彩色徽标（可点击筛选）
 function ownerBreakdown(list){
   if(!list || !list.length) return '';
   const m = {};
   list.forEach(o=>{
-    const id = (o && o.created_by) ? String(o.created_by) : '0';
+    const id = boardOwnerKey(o);
     if(!m[id]) m[id] = {name:(o && o.created_by_name) || '未标注', n:0};
     m[id].n++;
   });
   return Object.keys(m).sort((a,b)=> m[b].n - m[a].n).map(id=>{
     const label = id==='0' ? '未标注' : prepOwnerSign(m[id].name);
     const cls = id==='0' ? 'who-none' : (label==='刘' ? 'who-me' : 'who-other');
-    return `<span class="obd ${cls}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
+    const on = (boardOwnerFilter === id) ? ' on' : '';
+    const oid = String(id).replace(/["'<>]/g,'');
+    return `<span class="obd ${cls}${on}" data-oid="${oid}" role="button" tabindex="0" title="只看${label}的${m[id].n}单（再点一次看全部）" onclick="toggleBoardOwner(this.dataset.oid,event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleBoardOwner(this.dataset.oid,event)}"><i class="obd-dot"></i>${label}${m[id].n}</span>`;
   }).join('');
 }
 let SIGNERS = [];
@@ -1184,10 +1209,12 @@ function renderBoard(orders){
   });
   const totalPeople=orders.reduce((s,o)=>s+boardPeople(o),0);
   // ① 第一排固定顺序：总单数 → 总人数 → 归属人（用户 2026-11-14 定，套餐不插中间）
+  //    ⚠️ 抬头全部按「全量 orders」算：徽标是筛选开关，不能随筛选消失，否则无法取消/切换
   const metaEl=document.getElementById('boardMeta');
   const ob=ownerBreakdown(orders);          // 如 孙6 刘6（按归属人各自多少单）
   if(metaEl){
-    let m=`<span class="bsum-cnt">${orders.length}单</span>`;
+    const clr = boardOwnerFilter ? ' onclick="clearBoardOwner(event)" title="点这里 → 看全部（当前只看某人的单）"' : '';
+    let m=`<span class="bsum-cnt${boardOwnerFilter?' clr':''}"${clr}>${orders.length}单</span>`;
     if(totalPeople>0) m+=`<span class="bsum-sep">·</span><span class="bsum-ppl">${totalPeople}人</span>`;
     if(ob) m+=ob;
     metaEl.innerHTML=m;
@@ -1200,8 +1227,16 @@ function renderBoard(orders){
   // 颜色盘：每个套餐一种不同颜色（按人数排序取色，保证稳定不乱跳）
   const palette=['#e67e22','#2d6cdf','#27ae60','#c0392b','#8e44ad','#16a085','#d35400','#2980b9'];
   sumEl.innerHTML=pkgKeys.map((k,i)=>`<span class="bsum-pkg" style="color:${palette[i%palette.length]}">${k}人餐×${pkgMap[k]}</span>`).join('');
+  // ③ 归属筛选：只过滤下面要渲染的订单行；抬头汇总不变
+  //    若选中的归属在当天数据里已不存在（换日期/数据刷新），自动复位，避免"空白表无入口"
+  if(boardOwnerFilter && !orders.some(o=>boardOwnerKey(o)===boardOwnerFilter)) boardOwnerFilter='';
+  const viewOrders = boardOwnerFilter ? orders.filter(o=>boardOwnerKey(o)===boardOwnerFilter) : orders;
   if(!orders.length){
     list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 没有待备订单</div>';
+    return;
+  }
+  if(!viewOrders.length){
+    list.innerHTML='<div class="muted" style="padding:24px;text-align:center">🍖 该归属人今天没有单 · 点抬头「N单」看全部</div>';
     return;
   }
   // 简略表：整张表上下拆成两块 —— 上块=其他地址(外地/青龙湖一期等)，下块=青龙湖二期(本店)；
@@ -1280,8 +1315,8 @@ function renderBoard(orders){
     return html;
   };
   // 整表拆成上下两块：上=其他地址，下=青龙湖二期；中间仅一条细横线（极小间距）
-  const outside = orders.filter(o=>!boardIsLocal(o));   // 其他地址：排上面，先备先送
-  const local   = orders.filter(o=> boardIsLocal(o));   // 青龙湖二期·本店：排下面
+  const outside = viewOrders.filter(o=>!boardIsLocal(o));   // 其他地址：排上面，先备先送
+  const local   = viewOrders.filter(o=> boardIsLocal(o));   // 青龙湖二期·本店：排下面
   let html='';
   if(outside.length) html += renderBlockByTime(outside);
   if(outside.length && local.length) html += `<hr class="bsep">`;   // 仅一条细横线分隔，不占额外版面
@@ -1318,6 +1353,7 @@ function render(){
       document.getElementById('ordersCard').style.display='none';
       document.getElementById('boardCard').style.display='';
       // 第一排按固定顺序：总单数 → 总人数 → 归属人；空单时只有「0单」，套餐区清空、不残留上批数据
+      boardOwnerFilter='';   // 换到没单的日期：清掉归属筛选，避免下次进来还是筛选态
       const _bm=document.getElementById('boardMeta'); if(_bm) _bm.innerHTML='<span class="bsum-cnt">0单</span>';
       const _bs=document.getElementById('boardSum'); if(_bs) _bs.textContent='';
       document.getElementById('boardList').innerHTML = `<div class="muted" style="padding:24px;text-align:center;font-size:16px">${emptyHint}</div>`;
