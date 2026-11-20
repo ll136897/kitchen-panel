@@ -1502,10 +1502,12 @@ function itemRow(it, type, checkedMap){
   const shortTxt = isOut ? '已换出' : (it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足');
   const shortCls = isOut ? 'ok' : (it.shortage>0 ? '' : 'ok');
   const outBadge = isOut ? ` <span title="按备注换出 ${it.swap_out_qty||1} 份（原${round(it.base_need||0)}${unit}）" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">-${it.swap_out_qty||1}份</span>` : '';
+  // ⭐ 2026-11-20：只划「菜名文字」，-N份 徽标不划不淡（划了会被误读成"减2份已撤销"）
   const nameStyle = isOut ? 'text-decoration:line-through;opacity:.55' : '';
+  const nameHtml = `<span style="${nameStyle}">${it.name}</span>`;
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name" style="${nameStyle}">${it.name}${outBadge}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">+'+(it.swap_qty||1)+'份</span>':''}${isTool?'':(it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':'')}${isTool&&typeof toolExtraBadge==='function'?toolExtraBadge(it):''}${typeof utBadge==='function'?utBadge(it):''}</div>
+    <div class="pr-name">${nameHtml}${outBadge}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">+'+(it.swap_qty||1)+'份</span>':''}${isTool?'':(it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':'')}${isTool&&typeof toolExtraBadge==='function'?toolExtraBadge(it):''}${typeof utBadge==='function'?utBadge(it):''}</div>
     <div class="pr-ord">${totPkg}</div>
     <div class="pr-per">${isOut?'0':(perSize||'—')}</div>
     <div class="pr-unit">${unit}</div>
@@ -1732,8 +1734,10 @@ function osRenderList(oid){
       const ex = isToolRow
         ? (typeof toolExtraBadge==='function'?toolExtraBadge(it):'')
         : (it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '');
+      // ⭐ 只划菜名文字，-N份 徽标不划不淡（防误读成减2份已撤销）
       const nmStyle = isOut ? 'text-decoration:line-through;opacity:.55' : '';
-      return `<div class="os-row"><span class="nm" style="${nmStyle}">${it.name}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
+      const nmHtml = `<span style="${nmStyle}">${it.name}</span>`;
+      return `<div class="os-row"><span class="nm">${nmHtml}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
              `<span class="qt">${isOut?'0':osQty(it)}${short}</span></div>`;
     }).join('');
   }
