@@ -1177,14 +1177,25 @@ function loadPrep(){
       return;
     }
     prepStaleNote('');
+    // ⭐ 地址筛选：自动刷新(每60s)/勾选刷新时保留当前勾选，不被重置成全部。
+    //    只保留在新数据里仍然存在的地址；换日期/归属后地址对不上则自然回退到全选。
+    const _prevSel = new Set(prepAddrSelected);
+    const _newGroups = addrGroupsOf(d2.data.orders);
+    const _keep = Array.from(_prevSel).filter(function(g){ return _newGroups.indexOf(g)>=0; });
     prepData = d2.data;
     prepData.__date = d;
-    // ⭐ 地址筛选：保存本次全量数据，默认全部地址选中（换日期/归属后重新选）
     prepAddrFull = d2.data;
-    prepAddrSelected = new Set(addrGroupsOf(d2.data.orders));
+    // 之前是全选(全部)、或勾选地址已不存在 → 恢复全选；否则保留用户勾选
+    const _wasAll = _prevSel.size===0 || _newGroups.every(function(g){ return _prevSel.has(g); });
+    prepAddrSelected = (_wasAll || !_keep.length) ? new Set(_newGroups) : new Set(_keep);
     prepCacheSave(d, d2.data);
     osClearCache();     // 数据刷新了 -> "这一单的菜"也重新取，别显示旧的
-    render();
+    // ⭐ 若正处于地址筛选态，刷新后按保留的勾选重新拉筛选明细（否则画面会变回全量）
+    if(currentMode==='merged' && !addrAllSelected()){
+      applyAddrFilter();
+    } else {
+      render();
+    }
     renderDateChips();  // 重新渲染 chips 以更新 active 状态
   });
 }
