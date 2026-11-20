@@ -763,23 +763,41 @@ def _clean_swap_name(s):
     # 量词前缀：两份/三份/一份/两/2份 等（"两份五花肉"→"五花肉"）
     s = re.sub(r"^[一二三四五六七八九十两\d]+\s*份", "", s)
     s = re.sub(r"^(?:成|为|上|的|要|来|个|份|盘)", "", s)
-    # 量词后缀：五花肉一份 → 五花肉
+    # 量词后缀：五花肉一份 → 五花肉；馒头×2 → 馒头（2026-11-20 补乘号）
     s = re.sub(r"[一二三四五六七八九十两\d]+\s*份$", "", s)
     s = re.sub(r"(?:一份|两份|二份|三份|1份|2份|3份|\d+份)$", "", s)
+    s = re.sub(r"[×xX＊*]\s*[一二三四五六七八九十两\d]+\s*$", "", s)
+    # 量词前缀：×2馒头 → 馒头（数量在前写法兜底）
+    s = re.sub(r"^\s*[×xX＊*]\s*[一二三四五六七八九十两\d]+", "", s)
     s = re.sub(r"[，,。;；、：:\s]+$", "", s)
     return s.strip()
 
 
 def _parse_qty_prefix(name):
-    """从 '两份五花肉' / '五花肉三份' 提取 (份数, 清理后菜名)；无数量词返回 (None, name)。"""
+    """从 '两份五花肉' / '五花肉三份' / '馒头×2' 提取 (份数, 清理后菜名)；无数量词返回 (None, name)。
+
+    ⭐ 2026-11-20 修（421 梁祝先生「馒头×2换生菜×2」引出）：录单习惯也用**乘号**写份数
+    （× / x / X / ＊ / *），旧版只认「份」→「馒头×2」整串被当菜名（数量None）、
+    「生菜×2」当换入 1 份 → 馒头没扣、生菜只加1份。现把乘号当数量词识别，
+    与「N份」等价：名称在前（馒头×2）和数量在前（×2馒头）都支持。
+    """
     if not name:
         return None, ''
-    m = re.match(r"^\s*([一二三四五六七八九十两\d]+)\s*份\s*(.+)$", name)
+    _N = r"([一二三四五六七八九十两\d]+)"
+    # ①「份」写法：量词在数量后 —— 两份五花肉 / 五花肉三份
+    m = re.match(r"^\s*" + _N + r"\s*份\s*(.+)$", name)
     if m:
         return _num_from_str(m.group(1)), m.group(2).strip()
-    m2 = re.match(r"^\s*(.+?)\s*([一二三四五六七八九十两\d]+)\s*份\s*$", name)
+    m2 = re.match(r"^\s*(.+?)\s*" + _N + r"\s*份\s*$", name)
     if m2:
         return _num_from_str(m2.group(2)), m2.group(1).strip()
+    # ②「乘号」写法：量词在数量**前** —— 馒头×2（最常见）/ ×2馒头（数量在前兜底）
+    m3 = re.match(r"^\s*(.+?)\s*[×xX＊*]\s*" + _N + r"\s*$", name)
+    if m3:
+        return _num_from_str(m3.group(2)), m3.group(1).strip()
+    m4 = re.match(r"^\s*[×xX＊*]\s*" + _N + r"\s*(.+)$", name)
+    if m4:
+        return _num_from_str(m4.group(1)), m4.group(2).strip()
     return None, name.strip()
 
 
