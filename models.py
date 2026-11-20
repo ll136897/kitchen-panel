@@ -662,6 +662,21 @@ def init_db():
         except Exception as _e:
             print("[迁移] 三样食材单位口径修正跳过：", _e)
 
+        # 一次性迁移 v2（2026-11-20 修正上面的 v1）：馒头「每份8个」应写在 *每份数量* 字段(portion_grams=8)，
+        # 采购单位仍是「个」、每个 ¥0.27（第一行）；v1 错把它改成采购单位「份」、factor=8，
+        # 把第一行的「每个多少钱」弄丢了。用户明确：第一行=采购单位(每个价)，第二行=每份8个。
+        # 用**新标记**确保已跑过 v1 的线上库也执行这次修正。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_menu_units_v2_20261120','1','一次性迁移v2：馒头恢复采购单位=个、每份8个写portion_grams（修正v1错误）')"
+            )
+            if cur.rowcount:
+                cur.execute("UPDATE ingredients SET purchase_unit='个', purchase_factor=1, portion_grams=8 WHERE name='奶香小馒头'")
+                print("[迁移] 馒头单位口径已修正（第一行每个价、第二行每份8个）")
+        except Exception as _e:
+            print("[迁移] 馒头单位口径修正v2跳过：", _e)
+
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
         #   expenses            —— 每笔支出一条

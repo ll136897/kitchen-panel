@@ -4569,7 +4569,7 @@ def finance_order_cost_detail(oid):
         SELECT pi.per_package, pi.portion_count, pi.cost_only,
                op.quantity as order_qty,
                i.id as ingredient_id, i.name, i.unit, i.cost, i.category,
-               i.purchase_unit, i.purchase_factor, i.portion_grams
+               i.purchase_unit, i.purchase_factor, i.portion_grams, i.stock
         FROM order_packages op
         JOIN package_ingredients pi ON pi.package_id = op.package_id
         JOIN ingredients i ON pi.ingredient_id = i.id
@@ -4594,6 +4594,7 @@ def finance_order_cost_detail(oid):
             "purchase_unit": r["purchase_unit"] or r["unit"],
             "purchase_factor": factor,
             "portion_grams": r["portion_grams"],
+            "stock": r["stock"],  # 库存（财务页明细展示用）
             "total_cost": round(total_cost, 2),
             "category": r["category"],
         })

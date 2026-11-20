@@ -746,7 +746,7 @@ function loadIngs(){
           <div class="ic-grid">
             <span>库存 <b>${x.stock}${x.unit||''}</b>${x.unit==='g'?`<span class="muted"> (${((x.stock||0)/1000).toFixed(2)}kg${(x.portion_grams>0)?(' ≈'+Math.round((x.stock||0)/x.portion_grams)+'份'):''})</span>`:''}</span>
             <span>采购 <b>¥${((x.cost||0)*(parseFloat(x.purchase_factor)||1)).toFixed(2)}</b>/${x.purchase_unit||x.unit||''}</span>
-            ${(x.portion_grams>0)?`<span>每份(${x.portion_grams}g) <b style="color:#c0392b">¥${(x.portion_grams*(x.cost||0)).toFixed(2)}</b></span>`:''}
+            ${(x.portion_grams>0)?`<span>每份(${Number.isInteger(x.portion_grams)?x.portion_grams:Number(x.portion_grams).toFixed(2)}${x.unit||''}) <b style="color:#c0392b">¥${(x.portion_grams*(x.cost||0)).toFixed(2)}</b></span>`:''}
             <span>小计 <b style="color:#c0392b">¥${sub.toFixed(2)}</b></span>
           </div>
           <div class="ic-act"><input type="number" id="adjm-ingredient-${x.id}" class="inbound-input" placeholder="±">

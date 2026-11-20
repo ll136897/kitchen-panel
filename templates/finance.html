@@ -689,7 +689,7 @@
       <div id="pfBody"></div>
       <div style="margin-top:10px;display:none" id="pfFoodBox">
         <div style="font-weight:700;font-size:13px;margin-bottom:4px">食材明细（改单价会影响所有订单）</div>
-        <table class="fin-tbl"><thead><tr><th>食材</th><th>用量</th><th>采购价</th><th>成本</th><th>改采购价</th></tr></thead>
+        <table class="fin-tbl"><thead><tr><th>食材</th><th>用量</th><th>库存</th><th>采购价</th><th>每份价格</th><th>成本</th><th>改采购价</th></tr></thead>
         <tbody id="pfFoodTbody"></tbody></table>
       </div>
     </div>
@@ -2071,16 +2071,22 @@ function loadPfFood(oid){
       const pu = i.purchase_unit || i.unit || '';
       const pp = (parseFloat(i.purchase_price||0) || (i.unit_cost||0)*f);
       const pg = parseFloat(i.portion_grams||0);
+      // ⭐ 每份价格：portion_grams 对克食材是「克/份」、对馒头是「个/份」、对豆腐是「份/份」——
+      //    单位都跟食材自身 unit 走，不再写死 g。第一行采购价保持「每个/每袋多少钱」。
       const perP = pg > 0 ? (pg * (i.unit_cost||0)) : null;
+      const perLabel = perP!==null ? `每份${Number.isInteger(pg)?pg:pg.toFixed(2)}${i.unit}≈¥${perP.toFixed(2)}` : '—';
+      const stockTxt = (i.stock!=null) ? `${i.stock}${i.unit}` : '—';
       return `<tr>
-        <td style="text-align:left">${i.name}${perP!==null?`<span class="muted" style="font-size:10px"> 每份${pg}g≈¥${perP.toFixed(2)}</span>`:''}</td>
+        <td style="text-align:left">${i.name}</td>
         <td>${i.total_amount}${i.unit}</td>
+        <td style="font-size:11px">${stockTxt}</td>
         <td>¥${pp.toFixed(2)}<span class="muted" style="font-size:10px">/${pu}</span></td>
+        <td style="font-size:11px;color:#c0392b">${perLabel}</td>
         <td style="font-weight:700;color:#c0392b">¥${i.total_cost.toFixed(2)}</td>
         <td><input type="number" class="select-mini" style="width:72px" value="${pp.toFixed(2)}" step="0.1"
           onchange="editPPrice(${i.ingredient_id}, this.value, '${pu}', ${f}, true)"></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="5" class="muted" style="text-align:center">无</td></tr>';
+    }).join('') || '<tr><td colspan="7" class="muted" style="text-align:center">无</td></tr>';
   });
 }
 // 在利润弹窗里直接改某食材的采购价（改的是全局单价，影响所有订单）
