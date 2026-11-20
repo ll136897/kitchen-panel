@@ -283,7 +283,9 @@
 - **实现（纯前端 + 复用现成接口，未改后端）**：
   - 地址来源：`calc_merged_prep` 的 orders 里 `addr_group`（青龙湖二期/锦城湖等，经 `canonical_address` 归一）。
   - 筛选条 `prepAddrBar`（prep.html，复用 .sign-bar/.sign-chip 样式）：仅**合并视图 + 当天≥2单**时显示；
-    chip 显示地址名+单数，多选切换；「全部」=清空勾选恢复全量。
+    chip 显示地址名+单数，高亮=选中(=包含)。⭐ **默认语义（用户定，2026-11-21 修正）**：默认**所有地址都选中/高亮**
+    (=全部画面)，只有用户「取消」某地址(点它变暗)或「单独只留」某几个才进入筛选；点「全部」一键恢复全选。
+    此前误做成"默认只有全部按钮亮、地址都暗着，点地址才选中"——勾的语义反了，已改。
   - 全量数据 `prepAddrFull`（loadPrep 成功后保存，不受筛选影响，作地址选项来源）；`prepAddrSelected` Set=勾选地址。
   - 勾选后 `applyAddrFilter()`：从 full.orders 按地址过滤出 order_ids → `fetch /api/prep/merged?ids=1,2,3`
     （**后端已支持多ID**，focus 单订单也在用）→ 用返回的合并明细重渲染 `renderMerged()`，不动简略表/订单列表。

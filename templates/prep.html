@@ -602,41 +602,57 @@ function renderPrepSignBar(){
   el.style.display = '';
 }
 // ===== 地址多选筛选（2026-11-20）=====
-// 同一天多个地址的订单要分给不同配送搭建师傅带走。合并明细可按地址拆分，
-// 勾选 1 个或多个地址 → 只合并这些地址的备餐明细；一个都不勾=全部地址。
+// 同一天多个地址的订单要分给不同配送搭建师傅带走。
+// ⭐ 默认语义（用户定）：默认**所有地址都选中(=全部)**，画面上每个地址都高亮；
+//    只有用户「取消」某些地址、或「单独只留」某几个时，才变成筛选。点「全部」一键恢复全选。
 function addrGroupOf(o){
   return (o && (o.addr_group || o.addr_main || o.address)) ? (o.addr_group || o.addr_main || o.address) : '未填地址';
+}
+function addrGroupsOf(orders){
+  const s = new Set();
+  (orders||[]).forEach(function(o){ s.add(addrGroupOf(o)); });
+  return Array.from(s);
+}
+// 是否处于"全部地址都选中"状态
+function addrAllSelected(){
+  const all = addrGroupsOf((prepAddrFull && prepAddrFull.orders) || []);
+  return all.length===0 || all.every(function(g){ return prepAddrSelected.has(g); });
 }
 function renderAddrBar(){
   const bar = document.getElementById('prepAddrBar');
   if(!bar) return;
-  const full = prepAddrFull;
-  const orders = (full && full.orders) || [];
-  // 仅合并视图显示；订单数<2 不显示（单地址没必要）
+  const orders = (prepAddrFull && prepAddrFull.orders) || [];
   if(currentMode !== 'merged' || orders.length < 2){ bar.style.display='none'; return; }
   const m = {};
   orders.forEach(function(o){ const g=addrGroupOf(o); m[g]=(m[g]||0)+1; });
   const groups = Object.keys(m).sort(function(a,b){ return m[b]-m[a]; });
-  if(groups.length < 2 && prepAddrSelected.size===0){ bar.style.display='none'; return; }
+  if(groups.length < 2 && addrAllSelected()){ bar.style.display='none'; return; }
+  const allOn = addrAllSelected();
   let html = '<span class="sign-lbl">📍地址</span>' +
-    '<button class="sign-chip '+(prepAddrSelected.size===0?'active':'')+'" onclick="toggleAddr(null,event)">全部</button>';
+    '<button class="sign-chip '+(allOn?'active':'')+'" onclick="toggleAddr(null,event)" title="恢复全部地址">全部</button>';
   groups.forEach(function(g){
-    const on = prepAddrSelected.has(g) ? ' active' : '';
-    html += '<button class="sign-chip'+on+'" title="勾选/取消 '+escHtml(g)+'" onclick="toggleAddr(this.dataset.addr,event)" data-addr="'+escHtml(g)+'">'+escHtml(g)+'<span class="cnt">'+m[g]+'</span></button>';
+    const on = prepAddrSelected.has(g) ? ' active' : '';   // 高亮=选中(=包含该地址)
+    html += '<button class="sign-chip'+on+'" title="点一下取消/选中 '+escHtml(g)+'" onclick="toggleAddr(this.dataset.addr,event)" data-addr="'+escHtml(g)+'">'+escHtml(g)+'<span class="cnt">'+m[g]+'</span></button>';
   });
   bar.innerHTML = html;
   bar.style.display = '';
 }
 function toggleAddr(g, ev){
   if(ev) ev.stopPropagation();
-  if(g===null || g===undefined || g===''){ prepAddrSelected.clear(); }
-  else { if(prepAddrSelected.has(g)) prepAddrSelected.delete(g); else prepAddrSelected.add(g); }
+  if(g===null || g===undefined || g===''){
+    // 点「全部」→ 全选所有地址
+    prepAddrSelected = new Set(addrGroupsOf((prepAddrFull && prepAddrFull.orders) || []));
+  } else {
+    // 点某个地址 → 切换选中（取消/重新包含）
+    if(prepAddrSelected.has(g)) prepAddrSelected.delete(g); else prepAddrSelected.add(g);
+  }
   applyAddrFilter();
 }
 function applyAddrFilter(){
-  // 全不选 / 无全量数据 → 恢复全量
-  if(prepAddrSelected.size===0 || !prepAddrFull){
-    prepData = prepAddrFull || prepData;
+  if(!prepAddrFull){ return; }
+  // 全部地址都选中 → 恢复全量（不做筛选）
+  if(addrAllSelected()){
+    prepData = prepAddrFull;
     if(prepData) prepData.__date = (document.getElementById('datePick')||{}).value || prepData.__date;
     renderAddrBar();
     if(typeof render==='function') render();
@@ -644,13 +660,13 @@ function applyAddrFilter(){
   }
   const orders = prepAddrFull.orders || [];
   const ids = orders.filter(function(o){ return prepAddrSelected.has(addrGroupOf(o)); }).map(function(o){ return o.id; });
-  if(!ids.length){ prepData = prepAddrFull; renderAddrBar(); if(typeof render==='function') render(); return; }
-  renderAddrBar();  // 先更新勾选态
+  renderAddrBar();  // 先更新选中态
+  if(!ids.length){ prepData = prepAddrFull; if(typeof render==='function') render(); return; }
   return fetchJSONRetry('/api/prep/merged?ids='+ids.join(',')).then(function(d2){
     if(!d2 || !d2.ok) return;
     prepData = d2.data;
     prepData.__addrFiltered = true;
-    if(typeof renderMerged==='function') renderMerged();  // 只重渲染合并明细，不动简略表/订单列表
+    if(typeof renderMerged==='function') renderMerged();  // 只重渲染合并明细
   });
 }
 
@@ -1139,7 +1155,7 @@ function loadPrep(){
     prepData = cached.data;
     prepData.__date = d;
     prepAddrFull = cached.data;   // 地址筛选全量源
-    prepAddrSelected.clear();
+    prepAddrSelected = new Set(addrGroupsOf(cached.data.orders));   // 默认全部地址选中
     render();
     renderDateChips();
     const mins = Math.max(1, Math.round((Date.now() - cached.t) / 60000));
@@ -1163,9 +1179,9 @@ function loadPrep(){
     prepStaleNote('');
     prepData = d2.data;
     prepData.__date = d;
-    // ⭐ 地址筛选：保存本次全量数据，重置地址勾选（换日期/归属后重新选）
+    // ⭐ 地址筛选：保存本次全量数据，默认全部地址选中（换日期/归属后重新选）
     prepAddrFull = d2.data;
-    prepAddrSelected.clear();
+    prepAddrSelected = new Set(addrGroupsOf(d2.data.orders));
     prepCacheSave(d, d2.data);
     osClearCache();     // 数据刷新了 -> "这一单的菜"也重新取，别显示旧的
     render();
