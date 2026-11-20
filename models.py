@@ -657,7 +657,7 @@ def init_db():
             if cur.rowcount:
                 cur.execute("UPDATE ingredients SET purchase_unit='份', purchase_factor=8 WHERE name='奶香小馒头'")
                 cur.execute("UPDATE ingredients SET purchase_unit='袋', purchase_factor=2 WHERE name='包浆豆腐'")
-                cur.execute("UPDATE ingredients SET name='饮料(2L)' WHERE name='1.25L可乐雪碧任选'")
+                cur.execute("UPDATE ingredients SET name='饮料一瓶' WHERE name='1.25L可乐雪碧任选'")
                 print("[迁移] 三样食材单位口径已修正（馒头按份/豆腐按袋/饮料2L）")
         except Exception as _e:
             print("[迁移] 三样食材单位口径修正跳过：", _e)
@@ -676,6 +676,20 @@ def init_db():
                 print("[迁移] 馒头单位口径已修正（第一行每个价、第二行每份8个）")
         except Exception as _e:
             print("[迁移] 馒头单位口径修正v2跳过：", _e)
+
+        # 一次性迁移 v3（2026-11-20）：饮料菜名定稿为「饮料一瓶」（用户明确：不是「饮料」也不是「饮料(2L)」）。
+        # 兼容三种旧名：原始「1.25L可乐雪碧任选」、我中途误改的「饮料」/「饮料(2L)」。新标记确保线上一定执行。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_drink_name_v3_20261120','1','一次性迁移v3：饮料菜名定稿为「饮料一瓶」')"
+            )
+            if cur.rowcount:
+                cur.execute("UPDATE ingredients SET name='饮料一瓶' "
+                            "WHERE name IN ('1.25L可乐雪碧任选','饮料','饮料(2L)')")
+                print("[迁移] 饮料菜名已定稿为「饮料一瓶」")
+        except Exception as _e:
+            print("[迁移] 饮料菜名修正v3跳过：", _e)
 
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
