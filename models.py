@@ -642,6 +642,26 @@ def init_db():
         except Exception as _e:
             print("[迁移] 装备默认寿命填充跳过：", _e)
 
+        # 一次性迁移（2026-11-20）：三样食材单位口径修正（用户定）。只改「显示/采购口径」，
+        # 不改 cost(每基础单位成本) → 每单食材成本总额完全不变。
+        #   · 奶香小馒头：基础单位仍是「个」(cost=0.27/个、套餐用量8个不变)，采购口径改「份」，
+        #     1份=8个(factor=8) → 财务页显示「¥2.16/份」(原来只能看到 0.27/个、没有按份价格)。
+        #   · 包浆豆腐：基础单位仍是「份」(cost=2.25/份不变)，采购口径改「袋」，1袋=2份(factor=2)
+        #      → 财务页显示「¥4.50/袋」(采购按袋、出餐半袋一份)。
+        #   · 1.25L可乐雪碧任选 → 改名「饮料」(2L/瓶)，单位/成本/套餐用量都不动。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_menu_units_20261120','1','一次性迁移：馒头按份(1份8个)、豆腐按袋(1袋2份)、可乐雪碧改名饮料(2L)')"
+            )
+            if cur.rowcount:
+                cur.execute("UPDATE ingredients SET purchase_unit='份', purchase_factor=8 WHERE name='奶香小馒头'")
+                cur.execute("UPDATE ingredients SET purchase_unit='袋', purchase_factor=2 WHERE name='包浆豆腐'")
+                cur.execute("UPDATE ingredients SET name='饮料(2L)' WHERE name='1.25L可乐雪碧任选'")
+                print("[迁移] 三样食材单位口径已修正（馒头按份/豆腐按袋/饮料2L）")
+        except Exception as _e:
+            print("[迁移] 三样食材单位口径修正跳过：", _e)
+
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
         #   expenses            —— 每笔支出一条

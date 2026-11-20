@@ -3768,7 +3768,7 @@ def export_menu_xlsx():
         ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
         ['sauce','川香经典蘸料'],['sauce','坚果五香蘸料'],['sauce','酸辣烤肉汁'],
         ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
-        ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
+        ['drink','应季水果'],['drink','饮料'],
         # 客户餐具固定顺序（与菜单页一致）：一次性油壶属包装，小料中的油属餐具
         ['utensil','三格底料盒'],['utensil','筷子'],['utensil','勺子'],['utensil','纸杯'],
         ['utensil','纸巾'],['utensil','围裙'],['utensil','油'],['utensil','垃圾袋'],['utensil','一次性桌布'],
@@ -3994,7 +3994,7 @@ def export_prep_matrix():
         ['side','海带丝'],['side','辣椒段'],['side','辣白菜'],['side','蒜片'],
         ['sauce','川香经典蘸料'],['sauce','坚果五香蘸料'],['sauce','酸辣烤肉汁'],
         ['sauce','川香'],['sauce','五香'],['sauce','酸辣'],
-        ['drink','应季水果'],['drink','可乐'],['drink','雪碧'],
+        ['drink','应季水果'],['drink','饮料'],
     ]
 
     def eff_cat(v, is_tool=False):

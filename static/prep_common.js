@@ -113,8 +113,8 @@
         var _q = function(n){ return (n && n > 0) ? n : 1; };
         var _tight = 'white-space:nowrap;vertical-align:middle;line-height:1;';
         var badge = inn
-          ? '<span class="swap-badge in" title="按备注换入 ' + _q(i.swap_qty) + ' 份" style="' + _tight + '">🔄换' + _q(i.swap_qty) + '份</span>'
-          : (out ? '<span class="swap-badge out" title="按备注换出 ' + _q(i.swap_out_qty) + ' 份" style="' + _tight + '">🔄出' + _q(i.swap_out_qty) + '份</span>' : '');
+          ? '<span class="swap-badge in" title="按备注换入 ' + _q(i.swap_qty) + ' 份" style="' + _tight + 'color:#389e0d">+' + _q(i.swap_qty) + '份</span>'
+          : (out ? '<span class="swap-badge out" title="按备注换出 ' + _q(i.swap_out_qty) + ' 份" style="' + _tight + 'color:#a8071a">-' + _q(i.swap_out_qty) + '份</span>' : '');
         var extraBadge = i.extra_added ? ' <span title="备注加菜（含赠送）追加 ' + _q(i.extra_qty) + ' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;' + _tight + '">➕加' + _q(i.extra_qty) + '份</span>' : '';
         var style = out ? 'text-decoration:line-through;opacity:.55' : '';
         var needStr = (i.need || 0) + unit;
