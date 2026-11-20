@@ -838,7 +838,8 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v15（2026-11-20）：饮料菜名定稿「饮料一瓶」，v14 缓存里还是旧名。
+// v16（2026-11-20）：饮料一瓶各套餐份数统一1份，v15 缓存里9-10人餐还是2瓶。
+// v15 起因：饮料菜名定稿「饮料一瓶」。
 // v14 起因：财务明细加库存字段。
 // v13 起因：食材改名「饮料(2L)」+换菜徽标改增减。
 // v12 起因：换出项保留在备餐表（划线+全0+原量）。
@@ -848,7 +849,7 @@ document.addEventListener('visibilitychange', ()=>{
 // v8 起因：换菜解析支持乘号「馒头×2」（421 梁祝先生）。⚠️ 缓存存接口算好的备餐数据，解析规则一变旧值盖新结果，必须换 key。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
 // v7 起因：工具 extra_added 加标；v6 起因：ut_mode/ut_inc 餐具增量；v5 起因：ut_specified；v4 起因：raw_changes/swap_qty；v3 起因：赠送菜解析；v2 起因：time_std。
-function prepCacheKey(d){ return 'prep_cache_v15_' + d; }
+function prepCacheKey(d){ return 'prep_cache_v16_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }

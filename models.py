@@ -691,6 +691,20 @@ def init_db():
         except Exception as _e:
             print("[迁移] 饮料菜名修正v3跳过：", _e)
 
+        # 一次性迁移 v4（2026-11-20）：基础菜单里「饮料一瓶」所有套餐份数统一为 1 份（用户定）。
+        # 此前 9-10人餐是2瓶（seed 里 5-6/7-8/9-10 都是2，线上库被人改过部分为1）——统一成每人餐1瓶。
+        # 只改 ingredient_id=35（饮料，主键稳定、不受改名的中间态影响），新标记确保线上一定执行。
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO settings (key,value,note) "
+                "VALUES ('mig_drink_qty_v4_20261120','1','一次性迁移v4：饮料一瓶所有套餐份数统一为1')"
+            )
+            if cur.rowcount:
+                cur.execute("UPDATE package_ingredients SET per_package=1 WHERE ingredient_id=35")
+                print("[迁移] 饮料一瓶各套餐份数已统一为1")
+        except Exception as _e:
+            print("[迁移] 饮料份数修正v4跳过：", _e)
+
         # 门店支出台账（2026-10-08 加）：散落各渠道的支出统一记这里，可文字识别导入，
         # 标记「是否计入成本」后联动财务页利润。结构对齐「资金用途明细表」。
         #   expenses            —— 每笔支出一条
