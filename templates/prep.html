@@ -838,13 +838,14 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v11（2026-11-20）：换入菜份数列改为反映实际份数（基础份数+换入份数），三列自洽。
+// v12（2026-11-20）：换出项保留在备餐表（划线+全0+原量），接口新增 base_need 且不再过滤换出项。
+// v11 起因：换入菜份数列改为反映实际份数（基础份数+换入份数），三列自洽。
 // v10 起因：单独「碗」=蘸碟/底料盒别名（碗筷仍走整套餐具）。
 // v9 起因：新增「碗筷」=三样餐具解析 + 工具set超默认标+N。
 // v8 起因：换菜解析支持乘号「馒头×2」（421 梁祝先生）。⚠️ 缓存存接口算好的备餐数据，解析规则一变旧值盖新结果，必须换 key。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
 // v7 起因：工具 extra_added 加标；v6 起因：ut_mode/ut_inc 餐具增量；v5 起因：ut_specified；v4 起因：raw_changes/swap_qty；v3 起因：赠送菜解析；v2 起因：time_std。
-function prepCacheKey(d){ return 'prep_cache_v11_' + d; }
+function prepCacheKey(d){ return 'prep_cache_v12_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1484,22 +1485,25 @@ function itemRow(it, type, checkedMap){
   const isSimple = ['packaging','utensil','tool'].includes(it._cat)
     || (it._cat==='drink' && /可乐|雪碧/.test(it.name||''));
   const isTool = type==='tool';
+  const isOut = !!it.swapped_out;  // ⭐ 整份换出：名字划线+份数/克数/需备量全0，方便核对是否换对
   let unit = it.unit||'';
   if(isTool && !unit){ unit = TOOL_UNIT[it.name] || '个'; }
   // ⚠️ 餐具/包装/饮料（按个数计）没有「份」的概念：旧版把套餐自带配量填进份数列，
   //    和总量并排出现两个都像数量的数字（6人餐纸杯 份数8 / 总量12个），会被误读成算错。
   //    现在这类行只留「需备量」一个数字。工具行仍按用户既定规则保留「份数=真实件数」。
-  const totPkg = (isSimple && !isTool) ? '—' : (isTool ? round(it.total||0) : round(it.total_portions||it.total_packages||0));
-  const perSize = isSimple ? '' : round(it.portion_size||0);
-  const total = round(it.total);
+  const totPkg = isOut ? 0 : ((isSimple && !isTool) ? '—' : (isTool ? round(it.total||0) : round(it.total_portions||it.total_packages||0)));
+  const perSize = isOut ? 0 : (isSimple ? '' : round(it.portion_size||0));
+  const total = isOut ? 0 : round(it.total);
   const totalStr = total + unit;
-  const shortTxt = it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足';
-  const shortCls = it.shortage>0 ? '' : 'ok';
+  const shortTxt = isOut ? '已换出' : (it.shortage>0 ? `缺 ${round(it.shortage)}${unit}` : '✓库存足');
+  const shortCls = isOut ? 'ok' : (it.shortage>0 ? '' : 'ok');
+  const outBadge = isOut ? ` <span title="按备注换出 ${it.swap_out_qty||1} 份（原${round(it.base_need||0)}${unit}）" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄出${it.swap_out_qty||1}份</span>` : '';
+  const nameStyle = isOut ? 'text-decoration:line-through;opacity:.55' : '';
   return `<div class="prep-row ${checked?'checked':''}">
     <input type="checkbox" ${checked?'checked':''} onchange="toggleItem('${type}',${it.id},${checked?0:1})">
-    <div class="pr-name">${it.name}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${isTool?'':(it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':'')}${isTool&&typeof toolExtraBadge==='function'?toolExtraBadge(it):''}${typeof utBadge==='function'?utBadge(it):''}</div>
+    <div class="pr-name" style="${nameStyle}">${it.name}${outBadge}${it.swapped_in?' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>':''}${isTool?'':(it.extra_added?' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>':'')}${isTool&&typeof toolExtraBadge==='function'?toolExtraBadge(it):''}${typeof utBadge==='function'?utBadge(it):''}</div>
     <div class="pr-ord">${totPkg}</div>
-    <div class="pr-per">${perSize||'—'}</div>
+    <div class="pr-per">${isOut?'0':(perSize||'—')}</div>
     <div class="pr-unit">${unit}</div>
     <div class="pr-total">${totalStr}</div>
     <div class="pr-short ${shortCls}">${shortTxt}</div>
@@ -1715,14 +1719,18 @@ function osRenderList(oid){
       return (b.need||0) - (a.need||0);
     });
     html += `<div class="os-cat">${CAT_LABEL[cat]||cat}</div>` + items.map(it=>{
-      const short = it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '';
-      const sw = it.swapped_in ? ' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>' : '';
+      const isOut = !!it.swapped_out;
+      const short = isOut ? '' : (it.shortage>0 ? ` <span class="short">缺${round(it.shortage)}</span>` : '');
+      const sw = isOut
+        ? ` <span title="按备注换出 ${it.swap_out_qty||1} 份（原${round(it.base_need||0)}）" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄出${it.swap_out_qty||1}份</span>`
+        : (it.swapped_in ? ' <span title="按备注换入 '+(it.swap_qty||1)+' 份" style="color:#c0392b;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">🔄换'+(it.swap_qty||1)+'份</span>' : '');
       const isToolRow = cat==='tool';
       const ex = isToolRow
         ? (typeof toolExtraBadge==='function'?toolExtraBadge(it):'')
         : (it.extra_added ? ' <span title="备注加菜（含赠送）追加 '+(it.extra_qty||1)+' 份" style="display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">➕加'+(it.extra_qty||1)+'份</span>' : '');
-      return `<div class="os-row"><span class="nm">${it.name}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
-             `<span class="qt">${osQty(it)}${short}</span></div>`;
+      const nmStyle = isOut ? 'text-decoration:line-through;opacity:.55' : '';
+      return `<div class="os-row"><span class="nm" style="${nmStyle}">${it.name}${sw}${ex}${typeof utBadge==='function'?utBadge(it):''}</span>` +
+             `<span class="qt">${isOut?'0':osQty(it)}${short}</span></div>`;
     }).join('');
   }
   el.innerHTML = html || '<div class="os-sum">这一单没有食材明细</div>';

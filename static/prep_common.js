@@ -103,10 +103,11 @@
         //    旧版把套餐自带配量(total_portions)填进「份数」列，与「总量」并排出现两个都像数量的数字
         //    （如 6人餐纸杯：份数8、总量12个），用户会以为算错。现在按个数计的行只留「需备量」一个数字。
         var isSimple = (cat === 'drink' && /可乐|雪碧/.test(i.name || '')) || (cat === 'packaging' || cat === 'utensil');
-        var tp = isSimple ? '—' : (i.total_portions || i.total_packages || i.order_qty || 1);
-        var ps = isSimple ? '—' : (i.portion_size || i.per_package || 0);
-        var unit = i.unit || '';
         var out = i.swapped_out, inn = i.swapped_in;
+        // ⭐ 整份换出的菜：份数与每份克数都显示 0（名字划线、需备量0），方便核对"这道已正确换掉"
+        var tp = out ? 0 : (isSimple ? '—' : (i.total_portions || i.total_packages || i.order_qty || 1));
+        var ps = out ? 0 : (isSimple ? '—' : (i.portion_size || i.per_package || 0));
+        var unit = i.unit || '';
         // ⭐ 2026-11-15：加菜/换菜徽标直接把「几份」写在图标旁边，不用悬停、不另起一行。
         //    紧凑内联样式（nowrap + line-height:1 + vertical-align:middle）保证不撑高行、不新增版面。
         var _q = function(n){ return (n && n > 0) ? n : 1; };
@@ -131,7 +132,7 @@
         rows += '<tr style="' + style + '">' +
           '<td style="text-align:left">' + escHtml(i.name) + ' ' + badge + extraBadge + utBadge(i) + sub + '</td>' +
           '<td style="text-align:center;font-weight:700">' + tp + '</td>' +
-          '<td style="text-align:center">' + (ps || '—') + '</td>' +
+          '<td style="text-align:center">' + (out ? 0 : (ps || '—')) + '</td>' +
           '<td style="text-align:center">' + unit + '</td>' +
           '<td style="text-align:center;font-weight:800;color:var(--primary)">' + needStr + '</td>' +
           stockCell +

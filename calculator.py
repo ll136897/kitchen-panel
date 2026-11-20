@@ -565,6 +565,11 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
             info = ing_demand[src_id]
             if info.get("total", 0) <= 0:
                 continue
+            # ⭐ 2026-11-20：换出前记下套餐原量 base_need，供备餐表保留换出项时显示「原X克，已换出」。
+            #    多条规则换同一菜时只记第一次（原量），别累加。
+            if not info.get("base_need"):
+                info["base_need"] = info["total"]
+                info["base_portions"] = info.get("total_portions", 0)
             if use_old:
                 removed_total += info["total"]
                 info["total"] = 0
@@ -770,8 +775,9 @@ def calc_order_requirements(order_id):
             if r:
                 stock = r["stock"] or 0
                 need = info["total"]
-                # 被换掉的菜用量为 0，不再出现在备餐表里
-                if need <= 0:
+                # ⭐ 2026-11-20：整份换出的菜**保留在备餐表**（need=0），渲染层划线+全0显示，
+                #    方便核对"这一样有没有正确换掉"。只有非换出且 need<=0 的才过滤（原口径）。
+                if need <= 0 and not info.get("swapped_out"):
                     continue
                 # 细分 meat 类 + 合并小料
                 cat = r["category"] or "other"
@@ -784,6 +790,9 @@ def calc_order_requirements(order_id):
                     "swap_qty": round(info.get("swap_qty", 0), 2),
                     "swapped_out": bool(info.get("swapped_out")),
                     "swap_out_qty": round(info.get("swap_out_qty", 0), 2),
+                    # ⭐ 换出项原量：备餐表显示「原X克/份，已换出」；整份换出时 need/份数/每份克数都是0
+                    "base_need": round(info.get("base_need", 0), 2),
+                    "base_portions": round(info.get("base_portions", 0), 2),
                     "extra_added": bool(info.get("extra_added")),
                     "extra_qty": round(info.get("extra_qty", 0), 2),
                     "ut_specified": info.get("ut_specified") or 0,
@@ -800,9 +809,11 @@ def calc_order_requirements(order_id):
                     # ⭐ 2026-11-20：换入菜的每份克数按「实际需备量 ÷ 实际份数」算，保证
                     #    份数 × 每份克数 = 需备量 三列自洽（per_package 是套餐旧单份，换入后失准）。
                     #    非换入菜仍用 per_package/portion_count（原口径不变）。
-                    "portion_size": (round(need / info["total_portions"], 2) if (info.get("swapped_in") and info.get("total_portions"))
+                    "portion_size": (0 if (info.get("swapped_out") and need <= 0) else
+                                     round(need / info["total_portions"], 2) if (info.get("swapped_in") and info.get("total_portions"))
                                      else round(info["per_package"] / max(1, info.get("portion_count", 1)), 2)),
-                    "total_portions": info.get("total_portions", info.get("portion_count", 1) * info["order_qty"]),
+                    "total_portions": (0 if (info.get("swapped_out") and need <= 0)
+                                       else info.get("total_portions", info.get("portion_count", 1) * info["order_qty"])),
                 })
 
         cur.execute("SELECT id, name, unit, stock, threshold FROM ingredients")
@@ -1653,6 +1664,10 @@ def calc_merged_prep(order_ids):
             if ing.get("swapped_out"):
                 ing_merge[key]["swapped_out"] = True
                 ing_merge[key]["swap_out_qty"] += ing.get("swap_out_qty") or 0
+                ing_merge[key]["swapped_out_order_ids"] = ing_merge[key].get("swapped_out_order_ids", []) + [o["id"]]
+                # 原量取各换出单的最大值（显示「原X，已换出」；多单换出量不同时取最大作代表）
+                if ing.get("base_need"):
+                    ing_merge[key]["base_need"] = max(ing_merge[key].get("base_need", 0), ing["base_need"])
             if ing.get("extra_added"):
                 ing_merge[key]["extra_added"] = True
                 ing_merge[key]["extra_qty"] += ing.get("extra_qty") or 0
@@ -1707,6 +1722,15 @@ def calc_merged_prep(order_ids):
         v["portion_size"] = round(v["per_package"] / max(1, v["portion_count"]), 2)
         v["order_count"] = len(v["order_ids"])
         v["shortage"] = round(max(0, v["total"] - v["stock"]), 2)
+        # ⭐ 2026-11-20：换出项收口——只有「合并后总量=0 且所有来源单都把它换出」才保留 swapped_out
+        #    （划线+全0，方便核对）；只要有一单还要这道菜（total>0）就不当换出显示，避免误划掉正常菜。
+        if v.get("swapped_out"):
+            _out_ids = set(v.get("swapped_out_order_ids") or [])
+            if v["total"] > 0 or len(_out_ids) < len(v["order_ids"]):
+                v["swapped_out"] = False
+                v["swap_out_qty"] = 0
+            else:
+                v["base_need"] = v.get("base_need", 0)  # 透传给渲染层显示「原X，已换出」
         # 客户报餐具数的标注：所有来源单都报同一个数 → 显示具体数字；混合情况只标「按客户数」，不误导
         _vals = set(x for x in v.get("ut_vals", []) if x)
         if _vals:
