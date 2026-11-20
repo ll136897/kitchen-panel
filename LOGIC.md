@@ -269,6 +269,27 @@
 
 - 并列套餐（如「10人餐 + 8人餐」）都要入库；曾丢第二个（历史补录见 `app._fix_missing_packages()`）。
 
+## 七点五、装备数量的唯一真相源与防复发（2026-11-20 用户要求全面梳理）
+
+- ⭐⭐ **铁律：任何算装备数量的地方，必须调 calculator 真相源，禁止自己按 package_tools 累加**。
+  真相源 = calculator.tool_qty_by_people（按人数的阶梯/取整规则，唯一口径）+ calc_order_tool_needs（整单，含备注覆盖）
+  + calc_merged_prep（多单合并）。天幕/蛋卷桌/椅子是**阶梯装备**：按「整单搭建人数」算**一次**，
+  多套餐单不能按套餐个数累加（#423=9-10人餐+2-3人餐，天幕是1顶不是2顶）；无搭建套餐时这些项完全不配。
+- **本次冲突（用户报「导出天幕16、备餐页15」）根因**：导出 Excel export_prep_matrix 自己读 package_tools 按
+   per_package×套数 累加（旧算法），2026-10-25 就因同类 bug 修过备餐页（注释明示8单9顶天幕），
+  但导出链路漏改 → 旧 bug 在导出复发。已改为导出工具总量统一用 calc_merged_prep 覆盖（override_total）。
+- **全面梳理清单（本次全代码库清查结果）**：
+  - 走真相源（一致）：备餐页 calc_merged_prep、订单详情、dashboard、库存占用 get_tool_reserved、
+    setup 导出、成本/利润、菜单展示。
+  - **本次修复**：① export_prep_matrix 工具总量改真相源；② preview_parse 录入预览的阶梯装备改按整单搭建人数调
+    tool_qty_by_people（半包单不配、多套餐不重复）。
+  - 有意独立口径（不改）：套餐配置 CRUD、勾选快照、租金折旧半成品。
+- **防复发机制（每次改装备规则必做）**：改 tool_qty_by_people 或装备配量后，① 全库逐单跑
+   preview_parse(raw_text) vs calc_order_requirements 对比天幕/蛋卷桌/椅子；② 近7天每个日期跑
+   export_prep_matrix Excel vs calc_merged_prep 对比全部工具总量；③ 两项都 0 不一致才允许部署。
+- **已知遗留（非本次、不在范围）**：#388 录入预览把套餐解析成4人、库里实际6人（parser 历史文本解析问题），
+  导致预览椅子6 vs 真相源8（备注+2椅）；属套餐人数解析，非装备数量算法。
+
 ## 八、换菜份数语义
 
 - ⭐ **换菜徽标写增减、不写「换N份」（2026-11-20 用户定）**：用户原话「只写增减2份，别写换2份，换谁知道进还是出？」。

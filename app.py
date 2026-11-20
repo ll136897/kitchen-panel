@@ -4011,6 +4011,29 @@ def export_prep_matrix():
                 return i
         return 999
 
+    # ⭐ 2026-11-20（天幕导出16 vs 备餐页15冲突）：工具总量一律以**真相源** calc_merged_prep 为准。
+    #    上面 tool 的 by_pkg 是按「每套餐 per_package×套数」累加的旧算法——天幕/蛋卷桌/椅子这类
+    #    **按整单人数阶梯配**的装备，在多套餐单（如 #423=9-10人餐+2-3人餐）会被重复计（1单算2顶）。
+    #    真相源 calc_order_tool_needs 是按整单搭建人数算一次（15顶），备餐页用的就是它。
+    #    这里把真相源总量写进 override_total 覆盖导出总量，避免导出与备餐页各算各的。
+    from calculator import calc_merged_prep as _cmp
+    _truth_list = _cmp(oids).get("tools") or []
+    _truth_tools = {t["name"]: t.get("total", 0) for t in _truth_list}
+    _truth_names = set(_truth_tools.keys())
+    _existing_tool_names = {d["name"] for d in tool.values()}
+    for _d in tool.values():
+        if _d["name"] in _truth_names:
+            _d["override_total"] = _truth_tools[_d["name"]]
+            # 阶梯装备（天幕/蛋卷桌/椅子）按整单人数算，不能按套餐拆列——清空套餐分列防误导
+            if _d["name"] in ("天幕", "蛋卷桌", "椅子"):
+                _d["by_pkg"] = {}
+    # 真相源有、但套餐配方里没有的工具（如备注额外加的装备）也要进导出，别漏
+    for _t in _truth_list:
+        if _t["name"] not in _existing_tool_names:
+            _tid = _t.get("id") or (max(tool.keys(), default=0) + 1)
+            tool[_tid] = {"id": _tid, "name": _t["name"], "cost": _t.get("cost", 0) or 0,
+                          "by_pkg": {}, "order_ids": set(), "override_total": _t.get("total", 0)}
+
     cats = {c: [] for c in EXPORT_CAT_ORDER}
     for d in ing.values():
         cats[eff_cat(d)].append(d)
@@ -4090,6 +4113,9 @@ def export_prep_matrix():
                 else:
                     pkg_cells.append("")
             if is_tool:
+                # 真相源覆盖（天幕等阶梯装备按整单人数算，不能用按套餐累加的旧值）
+                if it.get("override_total") is not None:
+                    tot_amt = float(it["override_total"]); tot_cnt = tot_amt
                 total_str = f"{round(tot_amt)}个"
                 cnt_str = round(tot_amt)
             else:

@@ -1057,6 +1057,13 @@ def preview_parse(raw_text):
 
     preview_ing = {}
     preview_tool = {}
+    # ⭐ 2026-11-20（导出/预览/备餐页数量冲突根治）：天幕/蛋卷桌/椅子是**按整单搭建人数阶梯配**，
+    #    不能在下面按套餐 per_package×quantity 累加（多套餐单会重复计，如 #423 天幕 1+1=2 而非 1）。
+    #    与真相源 calc_order_tool_needs 同口径：先合计搭建人数，再调 tool_qty_by_people 一次。
+    _setup_people = sum((pk.get("people") or 0) * (pk.get("quantity") or 1)
+                        for pk in matched if "搭建" in (pk.get("service_type") or ""))
+    _ladder_tools = {"天幕", "蛋卷桌", "椅子"}
+    _ladder_done = set()
     with get_db() as conn:
         cur = conn.cursor()
         for pk in matched:
@@ -1099,7 +1106,18 @@ def preview_parse(raw_text):
                 WHERE pt.package_id = ?
             """, (pk["package_id"],))
             for r in cur.fetchall():
-                amount = r["per_package"] * pk["quantity"]
+                # 阶梯装备按整单人数算一次（与 calc_order_tool_needs 同口径），不按套餐累加
+                if r["name"] in _ladder_tools:
+                    if r["name"] in _ladder_done:
+                        continue
+                    _ladder_done.add(r["name"])
+                    # ⚠️ 与真相源一致：无搭建套餐(setup_people<=0)时这几项**完全不配**，
+                    #    不能调 tool_qty_by_people(0)（蛋卷桌会返回 min1 → 半包单错配1张桌）。
+                    if _setup_people <= 0:
+                        continue  # 半包单不带这些装备，连 0 项都不列（与真相源口径一致）
+                    amount = tool_qty_by_people(r["name"], _setup_people)
+                else:
+                    amount = r["per_package"] * pk["quantity"]
                 if r["id"] not in preview_tool:
                     preview_tool[r["id"]] = {
                         "name": r["name"], "stock": r["stock"],
