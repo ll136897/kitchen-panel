@@ -838,11 +838,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // ===== 本地缓存：系统睡着时也能先看到上次的备餐清单 =====
-// v8（2026-11-20）：换菜解析支持乘号「馒头×2」，v7 缓存里这单备餐还是旧结果（馒头没扣、生菜只加1份）——
-// 421 梁祝先生引出。⚠️ 缓存存的是接口算好的备餐数据，解析规则一变旧值就盖住新结果，必须换 key。
+// v9（2026-11-20）：新增「碗筷」=三样餐具解析 + 工具set超默认标+N，v8 缓存里 422 单还是旧结果（10碗筷漏解析、8椅子无标识）。
+// v8 起因：换菜解析支持乘号「馒头×2」（421 梁祝先生）。⚠️ 缓存存接口算好的备餐数据，解析规则一变旧值盖新结果，必须换 key。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
 // v7 起因：工具 extra_added 加标；v6 起因：ut_mode/ut_inc 餐具增量；v5 起因：ut_specified；v4 起因：raw_changes/swap_qty；v3 起因：赠送菜解析；v2 起因：time_std。
-function prepCacheKey(d){ return 'prep_cache_v8_' + d; }
+function prepCacheKey(d){ return 'prep_cache_v9_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }

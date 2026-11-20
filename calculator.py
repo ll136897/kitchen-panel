@@ -142,11 +142,19 @@ def calc_order_tool_needs(order_id, only_setup=False):
             if tid not in tool_demand:
                 tool_demand[tid] = {"total": 0, "per_package": qty, "order_qty": pkg_qty_sum}
             if mode == "set":
+                # ⭐ 2026-11-20（422 张女士「8椅子」引出）：总数写法若**超过套餐默认配量**，
+                #   超出部分也是"额外加的"，同样标「+N」。6人餐默认6椅、备注8椅 → 标 +2。
+                #   等于或少于默认 → 不打标（客户只是确认/减少，不是加）。
+                #   注意 base 要在覆盖前取：覆盖前 total 已是套餐配量（按人数算的椅子等）。
+                _base = tool_demand[tid].get("total", 0)
                 tool_demand[tid]["total"] = qty
+                if qty > _base:
+                    tool_demand[tid]["extra_added"] = True
+                    tool_demand[tid]["extra_qty"] = qty - _base
             else:
                 tool_demand[tid]["total"] += qty
                 # ⭐ 2026-11-15：备注「+2把椅子/加2把椅子/多2个天幕」这种**真追加**（mode=add），
-                #   打标记让备餐表显示「➕加N」——不然数量从6变8却看不出原因（388 引出）。
+                #   打标记让备餐表显示「+N」——不然数量从6变8却看不出原因（388 引出）。
                 #   与餐具「按客户报数覆盖」（📋）区分：这是套餐配量上真加，复用加菜口径。
                 tool_demand[tid]["extra_added"] = True
                 tool_demand[tid]["extra_qty"] = tool_demand[tid].get("extra_qty", 0) + qty
@@ -660,11 +668,15 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
         #    默认 3 项（三格底料盒/筷子/纸杯）统一设为目标值；勺子/纸巾等仍由 ② 单独点名才加。
         _N = r"(\d+|[一二两三四五六七八九十]+)"
         # 兼容录单里的各种写法：4套餐具 / 14份餐具 / 4副餐具 / 6个餐具 / 11餐具 / 餐具11
-        _m_any = re.search(_N + r"\s*[套份副个]?\s*餐\s*具", note_now) or \
-                 re.search(r"餐\s*具\s*" + _N, note_now)
+        # ⭐ 2026-11-20（422 张女士「10碗筷」引出）：「碗筷」是「餐具」的同义词，
+        #    客户报碗筷数 = 默认按 三格底料盒(蘸碟)/纸杯/一次性筷子 三样备（就是 _EXTRA_DEFAULT），
+        #    与报餐具数同口径（覆盖套餐默认配量）。写法同样兼容 10碗筷 / 碗筷10 / 加10碗筷。
+        _UT = r"(?:餐\s*具|碗\s*筷)"
+        _m_any = re.search(_N + r"\s*[套份副个]?\s*" + _UT, note_now) or \
+                 re.search(_UT + r"\s*" + _N, note_now)
         if _m_any:
-            _inc = (re.search(r"(多拿|多加|多要|加)\s*" + _N + r"\s*[套份副个]?\s*餐\s*具", note_now)
-                    or re.search(r"餐\s*具\s*(?:多拿|多加|多要|加)\s*" + _N, note_now))
+            _inc = (re.search(r"(多拿|多加|多要|加)\s*" + _N + r"\s*[套份副个]?\s*" + _UT, note_now)
+                    or re.search(_UT + r"\s*(?:多拿|多加|多要|加)\s*" + _N, note_now))
             _n = _nfs(_inc.group(2) if _inc else _m_any.group(1)) or 0
             if _inc:
                 # 本单总人数：优先用已预取的套餐数据，取不到再按订单查一次
