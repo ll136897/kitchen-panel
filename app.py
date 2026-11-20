@@ -3899,7 +3899,7 @@ def export_prep_matrix():
         import io as _io
     except ImportError:
         return jsonify({"ok": False, "msg": "需要 openpyxl: pip install openpyxl"}), 500
-    from calculator import (_subcategorize_meat, PACKAGING_CATEGORY, UTENSIL_CATEGORY)
+    from calculator import (_subcategorize_meat, PACKAGING_CATEGORY, UTENSIL_CATEGORY, _tool_sort_index)
     date = request.args.get("date")
     cur = g.db.cursor()
     if not date:
@@ -4060,7 +4060,12 @@ def export_prep_matrix():
         if not items:
             continue
         is_tool = (cat == 'tool')
-        items.sort(key=lambda x: (ing_sort_idx(x["name"], cat), x["name"]))
+        # ⭐ 2026-11-20：工具装备按**烤肉菜单底层固定顺序**排（天幕/蛋卷桌/椅子/卡式炉/烤盘/燃气罐/夹子/剪刀），
+        #    与菜单、备餐页一致。此前工具也走食材的 ing_sort_idx → 落 999 后按名字排，与菜单顺序不一致。
+        if is_tool:
+            items.sort(key=lambda x: (_tool_sort_index(x["name"]), x["name"]))
+        else:
+            items.sort(key=lambda x: (ing_sort_idx(x["name"], cat), x["name"]))
         ws.append([f"{cat_labels.get(cat, cat)} · {len(items)}项"])
         ws.merge_cells(start_row=ws.max_row, start_column=1, end_row=ws.max_row, end_column=ncol)
         for cell in ws[ws.max_row]:
@@ -4161,7 +4166,7 @@ def export_setup_sheet():
     if not orders:
         return jsonify({"ok": False, "msg": f"{date} 没有需要搭建的订单（已自动排除不搭建单）"}), 400
 
-    from calculator import calc_order_tool_needs
+    from calculator import calc_order_tool_needs, _tool_sort_index
 
     # 本表只列"需要搭建"的单，不搭建单已在 SQL 中排除；付款情况等与搭建无关的信息不展示。
     def time_txt(v):
@@ -4213,8 +4218,10 @@ def export_setup_sheet():
         tian, zhuo, yi, ka = (_intish(tmatch("天幕")), _intish(tmatch("桌子", "蛋卷桌")),
                               _intish(tmatch("椅子")), _intish(tmatch("卡式炉")))
         fixed_keys = ("天幕", "桌子", "蛋卷桌", "椅子", "卡式炉")
-        other = "、".join(f"{nm}×{_intish(tot)}" for nm, tot in names.items()
-                          if not any(k in nm for k in fixed_keys))
+        # 「其他装备」也按菜单底层固定顺序排（烤盘/燃气罐/夹子/剪刀…），不靠 dict 插入顺序
+        _others = [(nm, tot) for nm, tot in names.items() if not any(k in nm for k in fixed_keys)]
+        _others.sort(key=lambda x: (_tool_sort_index(x[0]), x[0]))
+        other = "、".join(f"{nm}×{_intish(tot)}" for nm, tot in _others)
         for k, v in (("天幕", tian), ("桌子", zhuo), ("椅子", yi), ("卡式炉", ka)):
             if isinstance(v, (int, float)):
                 totals[k] += v
