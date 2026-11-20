@@ -600,6 +600,14 @@ def calc_order_ingredient_net(order_id, _order=None, _pkgs=None):
         ing_demand[to_id]["swapped_in"] = True
         # 换入份数：备餐表徽标要显示「换了几份」（多条换菜规则命中同一菜时累加）
         ing_demand[to_id]["swap_qty"] = ing_demand[to_id].get("swap_qty", 0) + to_qty
+        # ⭐ 2026-11-20（421 梁祝先生「馒头×2换生菜×2」引出）：换入后**份数列也要反映实际份数**。
+        #    旧版只给 total(克数)加、份数(total_portions)还停在套餐基础 → 生菜「份数2 / 需备800克」
+        #    自相矛盾（800克其实是4份）。这里 +to_qty 并重算每份克数，与 preview_parse 的录入预览
+        #    链路（1201-1203 行）口径一致。换出菜 need=0 会被过滤不显示，无需减份数。
+        ing_demand[to_id]["total_portions"] = ing_demand[to_id].get("total_portions", 0) + to_qty
+        _tp = ing_demand[to_id]["total_portions"]
+        if _tp > 0:
+            ing_demand[to_id]["portion_size"] = round(ing_demand[to_id]["total"] / _tp, 2)
 
     # ===== 半包（不搭建）默认餐具只留 5 项 + 备注「多加餐具」按默认 3 项计入（2026-11-13 用户定）=====
     # ① 半包默认只有「三格蘸碟(=三格底料盒)/塑料勺(勺子)/筷子/纸杯/纸巾」，不配 桌布/围裙/垃圾袋/油。
@@ -789,7 +797,11 @@ def calc_order_requirements(order_id):
                     "per_package": info["per_package"],
                     "order_qty": info["order_qty"],
                     "portion_count": info.get("portion_count", 1),
-                    "portion_size": round(info["per_package"] / max(1, info.get("portion_count", 1)), 2),
+                    # ⭐ 2026-11-20：换入菜的每份克数按「实际需备量 ÷ 实际份数」算，保证
+                    #    份数 × 每份克数 = 需备量 三列自洽（per_package 是套餐旧单份，换入后失准）。
+                    #    非换入菜仍用 per_package/portion_count（原口径不变）。
+                    "portion_size": (round(need / info["total_portions"], 2) if (info.get("swapped_in") and info.get("total_portions"))
+                                     else round(info["per_package"] / max(1, info.get("portion_count", 1)), 2)),
                     "total_portions": info.get("total_portions", info.get("portion_count", 1) * info["order_qty"]),
                 })
 
