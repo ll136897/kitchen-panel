@@ -4017,7 +4017,8 @@ def export_prep_matrix():
     #    真相源 calc_order_tool_needs 是按整单搭建人数算一次（15顶），备餐页用的就是它。
     #    这里把真相源总量写进 override_total 覆盖导出总量，避免导出与备餐页各算各的。
     from calculator import calc_merged_prep as _cmp
-    _truth_list = _cmp(oids).get("tools") or []
+    _merged = _cmp(oids)
+    _truth_list = _merged.get("tools") or []
     _truth_tools = {t["name"]: t.get("total", 0) for t in _truth_list}
     _truth_names = set(_truth_tools.keys())
     _existing_tool_names = {d["name"] for d in tool.values()}
@@ -4033,6 +4034,34 @@ def export_prep_matrix():
             _tid = _t.get("id") or (max(tool.keys(), default=0) + 1)
             tool[_tid] = {"id": _tid, "name": _t["name"], "cost": _t.get("cost", 0) or 0,
                           "by_pkg": {}, "order_ids": set(), "override_total": _t.get("total", 0)}
+
+    # ⭐ 2026-11-21（用户报 #440 李先生：备餐明细与导出菜单不同）：食材总量同样以真相源为准。
+    #    上面 ing 的 by_pkg 是按「套餐原始配方 per_package×套数」累加的——完全不看备注换菜/加菜。
+    #    #440 备注「土豆×2、杏鲍菇×2换包浆豆腐×1」，备餐页(真相源)已换出土豆杏鲍菇、换入豆腐，
+    #    但导出仍显示原始配方 → 两个菜单不一致。这里用 calc_merged_prep 的食材 total 覆盖导出总量。
+    _truth_ing = {}
+    for _cat, _items in (_merged.get("ingredients") or {}).items():
+        for _it in _items:
+            _truth_ing[_it["name"]] = _it
+    _existing_ing_names = {d["name"] for d in ing.values()}
+    for _d in ing.values():
+        _t = _truth_ing.get(_d["name"])
+        if _t is not None:
+            _d["override_total"] = _t.get("total", 0) or 0        # 总备料量(克/份)
+            _d["override_cnt"] = _t.get("total_portions", 0) or 0  # 份数
+            _d["override_spec"] = _t.get("portion_size", 0) or 0   # 每份规格
+            _d["order_ids"] = set(_t.get("order_ids") or _d["order_ids"])
+    # 真相源有、套餐原始配方里没有的食材(如备注换入的菜)也要进导出
+    for _nm, _t in _truth_ing.items():
+        if _nm not in _existing_ing_names:
+            _iid = _t.get("id") or (max(ing.keys(), default=0) + 1)
+            ing[_iid] = {"id": _iid, "name": _nm, "unit": _t.get("unit") or "",
+                         "category": _t.get("category") or "other", "cost": _t.get("cost", 0) or 0,
+                         "spec": _t.get("portion_size", 0) or 0, "by_pkg": {},
+                         "order_ids": set(_t.get("order_ids") or []),
+                         "override_total": _t.get("total", 0) or 0,
+                         "override_cnt": _t.get("total_portions", 0) or 0,
+                         "override_spec": _t.get("portion_size", 0) or 0}
 
     cats = {c: [] for c in EXPORT_CAT_ORDER}
     for d in ing.values():
@@ -4119,6 +4148,11 @@ def export_prep_matrix():
                 total_str = f"{round(tot_amt)}个"
                 cnt_str = round(tot_amt)
             else:
+                # ⭐ 食材总量以真相源为准（含备注换菜/加菜），不用按套餐原始配方累加的旧值
+                if it.get("override_total") is not None:
+                    tot_amt = float(it["override_total"])
+                    tot_cnt = float(it.get("override_cnt") or 0)
+                    spec = _num(it["override_spec"]) if it.get("override_spec") else ""
                 total_str = (f"{_num(tot_amt)}{unit}" if (tot_amt and unit)
                              else (f"{_num(tot_amt)}" if tot_amt else "-"))
                 cnt_str = round(tot_cnt)
