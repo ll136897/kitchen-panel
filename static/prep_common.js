@@ -192,8 +192,12 @@
     if (!n) return '';
     var exact = (i.ut_specified_exact === undefined) ? true : !!i.ut_specified_exact;
     if (!exact) return '📋按客户数';
-    if (i.ut_mode === 'inc' && Number(i.ut_inc) > 0) return '📋多拿' + Number(i.ut_inc) + '套';
-    return '📋报' + n + '份';
+    // ⭐ 2026-11-22（用户定，#445「5餐具」引出的歧义）：
+    //    增量「多拿N套餐具」→ 统一显示「+N」(与加料徽标同款，用户要的格式)；
+    //    总数「N份餐具」    → 中性标签「📋N份」，去掉「报」字——「报5份」让人误以为比默认多，
+    //      其实 3-4人餐默认就是5份、客户报5=没多，文案必须中性不带「多/报」暗示。
+    if (i.ut_mode === 'inc' && Number(i.ut_inc) > 0) return '+' + Number(i.ut_inc);
+    return '📋' + n + '份';
   }
   function utBadge(i) {
     var txt = utBadgeText(i);
@@ -201,7 +205,12 @@
     var tip = (i && i.ut_mode === 'inc')
       ? '备注写的是「多拿N套餐具」：三项统一按 人数+N 备（覆盖套餐原配量），徽标显示的是增量'
       : '备注报了餐具数：按客户确定的数量备，不再叠加商家兜底';
-    return ' <span title="' + tip + '" style="display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1">' + txt + '</span>';
+    // ⭐ 增量「+N」用橙底，与加料/工具徽标完全同款（符号统一）；总数「📋N份」保留蓝底
+    var isInc = (i && i.ut_mode === 'inc' && Number(i.ut_inc) > 0);
+    var sty = isInc
+      ? 'display:inline-block;background:#fff7e6;border:1px solid #ffd591;color:#d46b08;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1'
+      : 'display:inline-block;background:#eef4ff;border:1px solid #adc6ff;color:#1d4ed8;border-radius:5px;padding:0 4px;font-size:11px;font-weight:700;white-space:nowrap;vertical-align:middle;line-height:1';
+    return ' <span title="' + tip + '" style="' + sty + '">' + txt + '</span>';
   }
 
   window.toolExtraBadge = toolExtraBadge;

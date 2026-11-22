@@ -1385,9 +1385,9 @@ function renderBoard(orders){
     const served = !!o.served;              // 已出餐（原始录入弹窗里的「出餐」按钮切换）
     const who = (typeof prepOwnerSign==='function') ? prepOwnerSign(o.created_by_name) : '';
     // ⭐ 餐具徽标文案与备餐表共用 utBadgeText（口径只此一处）：
-    //    增量写法「多拿4套」→ 📋多拿4套；总数写法 → 📋报N份；函数缺失兜底旧文案
+    //    增量写法「多拿N套」→ +N；总数写法 → 📋N份（中性）；函数缺失兜底
     const utTag = o.ut_specified
-      ? ((typeof utBadgeText === 'function') ? utBadgeText(o) : ('📋报' + o.ut_specified + '份'))
+      ? ((typeof utBadgeText === 'function') ? utBadgeText(o) : ('📋' + o.ut_specified + '份'))
       : '';
     const tags = (o.has_swap?'🔄有增减':'') + (o.has_extra?' ➕加菜':'') + (utTag?' '+utTag:'');
     const tagHtml = tags.trim() ? `<span class="btag">${tags.trim()}</span>` : '';
