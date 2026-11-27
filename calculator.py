@@ -96,7 +96,18 @@ def calc_order_tool_needs(order_id, only_setup=False):
             for _tname, _tid2 in (("天幕", TM), ("蛋卷桌", TBL), ("椅子", CHAIR)):
                 if _tid2 is None:
                     continue
-                _n = tool_qty_by_people(_tname, setup_people)
+                if _tname == "蛋卷桌":
+                    # ⭐ 2026-11-27（460 锦城湖谢瑶「10人餐+6人餐应5桌，现4桌」）：
+                    #    桌子是「每桌坐4人、不同套餐各占各的桌」，与天幕(3桌一顶按整单罩)不同。
+                    #    按【套餐种类分组】：同套餐多份先合并人数(避免 4人餐×3 被算成4桌的老坑)，
+                    #    不同套餐各算 ceil(人数/4) 再相加。10人餐3桌+6人餐2桌=5；4个10人餐仍=10桌。
+                    _by_pkg = {}
+                    for _pk in setup_pkgs:
+                        _key = _pk.get("package_id")
+                        _by_pkg[_key] = _by_pkg.get(_key, 0) + (_pk.get("people") or 0) * (_pk.get("quantity") or 1)
+                    _n = sum(tool_qty_by_people("蛋卷桌", _p) for _p in _by_pkg.values())
+                else:
+                    _n = tool_qty_by_people(_tname, setup_people)
                 tool_demand[_tid2] = {"total": _n, "per_package": _n, "order_qty": setup_qty}
 
         # 其余工具（卡式炉/烤盘/燃气罐/夹子/剪刀等）：按套餐 package_tools 现有配置累加
@@ -1060,8 +1071,14 @@ def preview_parse(raw_text):
     # ⭐ 2026-11-20（导出/预览/备餐页数量冲突根治）：天幕/蛋卷桌/椅子是**按整单搭建人数阶梯配**，
     #    不能在下面按套餐 per_package×quantity 累加（多套餐单会重复计，如 #423 天幕 1+1=2 而非 1）。
     #    与真相源 calc_order_tool_needs 同口径：先合计搭建人数，再调 tool_qty_by_people 一次。
-    _setup_people = sum((pk.get("people") or 0) * (pk.get("quantity") or 1)
-                        for pk in matched if "搭建" in (pk.get("service_type") or ""))
+    _setup_pkgs = [pk for pk in matched if "搭建" in (pk.get("service_type") or "")]
+    _setup_people = sum((pk.get("people") or 0) * (pk.get("quantity") or 1) for pk in _setup_pkgs)
+    # ⭐ 2026-11-27：蛋卷桌按套餐种类分组算（同套餐多份合并、不同套餐各算各的），
+    #    与真相源 calc_order_tool_needs 同口径：10人餐3桌+6人餐2桌=5。天幕/椅子仍按整单总人数。
+    _setup_by_pkg = {}
+    for _pk in _setup_pkgs:
+        _k = _pk.get("package_id")
+        _setup_by_pkg[_k] = _setup_by_pkg.get(_k, 0) + (_pk.get("people") or 0) * (_pk.get("quantity") or 1)
     _ladder_tools = {"天幕", "蛋卷桌", "椅子"}
     _ladder_done = set()
     with get_db() as conn:
@@ -1115,7 +1132,10 @@ def preview_parse(raw_text):
                     #    不能调 tool_qty_by_people(0)（蛋卷桌会返回 min1 → 半包单错配1张桌）。
                     if _setup_people <= 0:
                         continue  # 半包单不带这些装备，连 0 项都不列（与真相源口径一致）
-                    amount = tool_qty_by_people(r["name"], _setup_people)
+                    if r["name"] == "蛋卷桌":
+                        amount = sum(tool_qty_by_people("蛋卷桌", _p) for _p in _setup_by_pkg.values())
+                    else:
+                        amount = tool_qty_by_people(r["name"], _setup_people)
                 else:
                     amount = r["per_package"] * pk["quantity"]
                 if r["id"] not in preview_tool:

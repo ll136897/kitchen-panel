@@ -930,7 +930,7 @@ document.addEventListener('visibilitychange', ()=>{
 //    部署后代码一变 → key 自动变 → 旧的 localStorage 数据自然失效，无需手动清缓存。
 //    这是「改了一处不改其他」（服务端规则改了、浏览器旧数据盖住新结果）的根治。
 var CODE_VER = {{ code_ver|default('0')|tojson }};
-function prepCacheKey(d){ return 'prep_cache_v17_' + CODE_VER + '_' + d; }
+function prepCacheKey(d){ return 'prep_cache_v18_' + CODE_VER + '_' + d; }  // v18=2026-11-27 +1桌子加号连续+蛋卷桌按套餐种类分组(10+6=5桌)
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
