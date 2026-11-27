@@ -550,6 +550,19 @@ def _parse_extra_tools(note):
     num_re = re.compile(r"(\d+|[一二两三四五六七八九十]+)")
     result = {}
     for seg in segments:
+        # ⭐ 2026-11-27（457 雪女士「不要天幕」仍配天幕）：段首否定词优先拦截。
+        #    旧版无数字分支的「(配|带|拿|加|备|要)」会把「不(要)天幕」命中成"要1顶"，
+        #    凭空加装备。现在「不要/不用/无需/取消/去掉/没有 X」→ X 设为 0(set)，跳过该段后续匹配。
+        neg = re.match(r"^(?:不要了|不要|不用|无需|取消|去掉|不配|不搭|没有|无)\s*(.+)$", seg)
+        if neg:
+            body = neg.group(1)
+            hit = False
+            for name, std in pairs:
+                if name and name in body:
+                    result[std] = {"qty": 0, "mode": "set"}
+                    hit = True
+            if hit:
+                continue
         events = []
         for m in num_re.finditer(seg):
             events.append((m.start(), 'num', _num_from_str(m.group(1)), m.end()))
@@ -801,6 +814,22 @@ def _parse_qty_prefix(name):
     return None, name.strip()
 
 
+def _expand_generic_dish(name):
+    """⭐ 2026-11-27（465 龚姐「禽类食材换…」）：笼统品类词展开为菜单里所有对应菜。
+    目前只支持「禽类/鸡肉类/家禽/鸡肉」→ 所有鸡肉类（与 calculator._subcategorize_meat 同口径：
+    名字含 鸡/掌中宝/脚筋/郡肝）。返回菜名列表；非笼统词返回 None。
+    ⚠️ 只展开"整段就是品类词"的情况，避免把"鸡尖"这类具体菜误展开。
+    """
+    key = str(name or "").strip()
+    if key not in ("禽类", "禽类食材", "鸡肉类", "鸡肉", "家禽", "所有禽类", "全部禽类", "鸡类"):
+        return None
+    with get_db() as conn:
+        rows = conn.execute("SELECT name FROM ingredients").fetchall()
+    poultry = [r["name"] for r in rows
+               if any(k in (r["name"] or "") for k in ("鸡", "掌中宝", "脚筋", "郡肝"))]
+    return poultry or None
+
+
 def _parse_dish_swaps(note):
     """从备注解析"换菜"需求：把某道菜换成另一道菜，并保留写的"份数"。
 
@@ -855,28 +884,54 @@ def _parse_dish_swaps(note):
             nm = _clean_swap_name(nm)
             if q is not None:
                 explicit = True
-            if nm:
+            # ⭐ 2026-11-27（465 龚姐「禽类食材换…」）：笼统品类词展开为菜单里所有对应菜
+            expanded = _expand_generic_dish(nm)
+            if expanded:
+                for x in expanded:
+                    froms.append([x, None])   # 整类换出=每道全换
+            elif nm:
                 froms.append([nm, q])
-        # 解析 to 及其份数
-        to_qty, to_name = _parse_qty_prefix(right)
-        to_name = _clean_swap_name(to_name)
-        if to_qty is not None:
-            explicit = True
-        if not froms or not to_name:
-            continue
-        to_qty = to_qty or 1
 
-        # 去重
-        key = (tuple((f[0], f[1]) for f in froms), to_name, to_qty)
-        if any((tuple((f[0], f[1]) for f in s["froms"]), s["to"], s["to_qty"]) == key for s in swaps):
+        # ⭐ 2026-11-27（465 龚姐）：多个换入「肥牛×2、梅花肉×1」——按顿号/和拆分。
+        #    每个 to 生成一条独立 swap（共用同一批 froms），calculator 现有"换出后 total<=0
+        #    就跳过"的逻辑天然防重复扣减，换入各自加自己的份数，无需改计算层。
+        # ⚠️ 括号内的顿号是"举例说明"不是并列换入（210「牛肉（牛肋条、牛骰子）」），
+        #    先把括号内容整体保护起来再拆，避免把它拆成两个换入误伤。
+        def _protect_paren(text):
+            holes = []
+            def _stash(m):
+                holes.append(m.group(0))
+                return "\x00%d\x00" % (len(holes)-1)
+            return re.sub(r"[（(][^）)]*[）)]", _stash, text), holes
+        right_prot, holes = _protect_paren(right)
+        tos = []
+        for rp in re.split(r"[、,，]|和", right_prot):
+            rp = rp.strip()
+            if not rp:
+                continue
+            for i, h in enumerate(holes):
+                rp = rp.replace("\x00%d\x00" % i, h)
+            q, nm = _parse_qty_prefix(rp)
+            nm = _clean_swap_name(nm)
+            if nm:
+                tos.append((q, nm))
+        if not froms or not tos:
             continue
-        swaps.append({
-            "from": "、".join(f[0] for f in froms),
-            "to": to_name,
-            "froms": froms,
-            "to_qty": to_qty,
-            "explicit": explicit,
-        })
+        for to_qty0, to_name in tos:
+            to_qty = to_qty0 or 1
+            if to_qty0 is not None:
+                explicit = True
+            # 去重
+            key = (tuple((f[0], f[1]) for f in froms), to_name, to_qty)
+            if any((tuple((f[0], f[1]) for f in s["froms"]), s["to"], s["to_qty"]) == key for s in swaps):
+                continue
+            swaps.append({
+                "from": "、".join(f[0] for f in froms),
+                "to": to_name,
+                "froms": froms,
+                "to_qty": to_qty,
+                "explicit": explicit,
+            })
     return swaps
 
 
