@@ -1050,6 +1050,11 @@ except Exception as _e:
 # 数据变更后自动备份到 GitHub（POST/PUT/DELETE 且非备份接口）
 @app.after_request
 def auto_backup(response):
+    # ⭐ 2026-11-27（用户报「改了一处不改其他」根因根治）：静态 JS/CSS 不缓存。
+    #    旧版浏览器强缓存 prep_common.js / style.css，服务端改了规则用户看到的还是旧 JS，
+    #    怎么修都"改一处不改其他"。加 no-cache 让每次加载都校验新鲜度，规则改完全员立即生效。
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate, max-age=0"
     if request.method in ("POST", "PUT", "DELETE") and "/api/backup" not in request.path:
         try:
             # mark_write：记下"有改动"，并预约一次备份（短时间内的多次写入合并成一次推送；
@@ -1756,7 +1761,18 @@ def analytics_page():
 
 @app.route("/prep")
 def prep_page():
-    return render_template("prep.html", cur_user=g.cur_user)
+    # ⭐ 2026-11-27：把代码版本标记注入页面，缓存 key 带上它 → 每次部署旧缓存自动失效，
+    #    根治「服务端改了规则、浏览器 localStorage 旧数据盖住新结果」的「改一处不改其他」。
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _tag = ""
+    for _fn in ("app.py", "parser.py", "calculator.py", "prep_common.js"):
+        try:
+            _p = _os.path.join(_here, "static" if _fn.endswith(".js") else "", _fn)
+            _tag = max(_tag, str(int(_os.path.getmtime(_p))))
+        except Exception:
+            pass
+    return render_template("prep.html", cur_user=g.cur_user, code_ver=_tag)
 
 
 @app.route("/menu")

@@ -926,7 +926,11 @@ document.addEventListener('visibilitychange', ()=>{
 // v8 起因：换菜解析支持乘号「馒头×2」（421 梁祝先生）。⚠️ 缓存存接口算好的备餐数据，解析规则一变旧值盖新结果，必须换 key。
 // ⚠️ 铁律：凡改了「影响备餐明细内容或显示」的字段/解析规则，都要同步换缓存 key，否则旧数据会盖住新结果。
 // v7 起因：工具 extra_added 加标；v6 起因：ut_mode/ut_inc 餐具增量；v5 起因：ut_specified；v4 起因：raw_changes/swap_qty；v3 起因：赠送菜解析；v2 起因：time_std。
-function prepCacheKey(d){ return 'prep_cache_v17_' + d; }  // v17=2026-11-27 禽类整类换出+多换入拆分+不要天幕(set0)
+// ⭐ 缓存 key 带 code_ver（后端注入的代码版本标记=app/parser/calculator/prep_common.js 的最大 mtime）。
+//    部署后代码一变 → key 自动变 → 旧的 localStorage 数据自然失效，无需手动清缓存。
+//    这是「改了一处不改其他」（服务端规则改了、浏览器旧数据盖住新结果）的根治。
+var CODE_VER = {{ code_ver|default('0')|tojson }};
+function prepCacheKey(d){ return 'prep_cache_v17_' + CODE_VER + '_' + d; }
 function prepCacheSave(d, data){
   try{ localStorage.setItem(prepCacheKey(d), JSON.stringify({t: Date.now(), data: data})); }catch(e){}
 }
@@ -1312,7 +1316,8 @@ function boardToggle(oid, flag, val, ev){
     if(prepData && prepData.orders){
       const o = prepData.orders.find(x=>x.id===oid);
       if(o) o[flag]=val;
-      try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+      // ⭐ 2026-11-27：地址筛选态(prepData 是局部数据)禁止写回全量缓存，否则下次打开只剩这批单/数量错乱
+      try{ if(!prepData.__addrFiltered) prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
       renderBoard(prepData.orders);
     }
   }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
@@ -1328,7 +1333,8 @@ function boardTogglePrep(oid, cur, ev){
     if(prepData && prepData.orders){
       const o = prepData.orders.find(x=>x.id===oid);
       if(o) o.status = next;
-      try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+      // ⭐ 2026-11-27：地址筛选态(prepData 是局部数据)禁止写回全量缓存，否则下次打开只剩这批单/数量错乱
+      try{ if(!prepData.__addrFiltered) prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
       renderBoard(prepData.orders);
     }
   }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });
@@ -1895,7 +1901,8 @@ function rawToggleServed(){
   .then(r=>r.json()).then(d=>{
     if(!d || !d.ok){ if(typeof showToast==='function') showToast((d&&d.msg)||'操作失败'); return; }
     o.served = next;
-    try{ prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
+    // ⭐ 2026-11-27：地址筛选态(prepData 是局部数据)禁止写回全量缓存，否则下次打开只剩这批单/数量错乱
+      try{ if(!prepData.__addrFiltered) prepCacheSave(document.getElementById('datePick').value, prepData); }catch(e){}
     if(currentMode==='board' && typeof renderBoard==='function') renderBoard(prepData.orders);
     renderRawServeBtn(o);
   }).catch(()=>{ if(typeof showToast==='function') showToast('网络异常，稍后再试'); });

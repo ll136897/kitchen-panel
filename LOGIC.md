@@ -302,6 +302,24 @@
 - **验证（11-21 两地址）**：锦城湖3单(天幕3/生菜1400g)、青龙湖二期12单(天幕12/生菜5200g)、
   两个都选=15单(天幕15/生菜6600) 数量精确相加；API `?ids=412,413,414` 返回3单天幕3 ✅。
 
+## 七点二、根治「改了一处不改其他」= 浏览器旧缓存（2026-11-27 用户报 江家艺苑天幕2 定）
+
+- ⭐⭐ **真相源全对但仍显示旧值 = 客户端缓存作祟，不是算法问题**。用户报"11-28江家艺苑2个天幕"，
+  但服务端全链路查死：真相源 calc_order_requirements(457)=0、merged?ids=457=0、搭建装备表天幕列空、
+  简略表不显示天幕、导出走真相源——**没有任何服务端链路算成2**。旧版浏览器缓存的 JS 里「不要天幕」还算1顶
+  （+原有1顶=2），所以用户看到2。**根因是浏览器强缓存了 /static/prep_common.js、style.css 和 localStorage 旧数据**。
+- **三层根治（已实现）**：
+  1. `app.py` after_request：所有 `/static/` 响应加 `Cache-Control: no-cache, must-revalidate, max-age=0`
+     + Flask 自带 ETag(含文件mtime+size) → 文件一改浏览器必拉新 JS，不会拿旧版规则。
+  2. `prep_page` 注入 `code_ver`（app.py/parser.py/calculator.py/prep_common.js 的最大 mtime），
+     `prepCacheKey` = `prep_cache_v17_<code_ver>_<date>` → 部署后代码一变，localStorage 旧数据自动失效。
+  3. 地址筛选态 `prepData.__addrFiltered=true` 时，boardToggle/boardTogglePrep/served 三处**禁止把局部数据写回全量缓存**
+     （否则下次打开只剩筛选那批单、数量错乱）。
+- **诊断口诀**：用户报"改了没生效/改一处不改其他"→ 先 `/api/version` 确认部署 → 若部署了且服务端对，就是客户端缓存，
+  按上面三层根治，别再反复改算法。
+- **排查证据法**：`git show HEAD:parser.py` 加载旧模块 + 全库逐单对比新旧解析（本次417单：换菜仅465变、装备仅3单不要天幕变），
+  确认"零误伤"后再交付。
+
 ## 七点三、换菜笼统品类词展开 + 多换入拆分 + 不要装备（2026-11-27 用户报 465/457 定）
 
 - ⭐ **笼统品类词整类换出（465 龚姐「禽类食材换安格斯肥牛×2、梅花肉×1」）**：
